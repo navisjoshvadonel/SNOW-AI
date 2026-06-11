@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { createAgent } from "./files claude/index.js";
 import dotenv from "dotenv";
 import { exec } from "child_process";
 import http from "http";
@@ -78,38 +78,53 @@ async function startServer() {
 
   app.use(express.json());
 
-  let aiClient: GoogleGenAI | null = null;
-  function getGeminiClient(): GoogleGenAI {
-    if (!aiClient) {
-      const key = process.env.GEMINI_API_KEY;
-      if (!key) throw new Error("GEMINI_API_KEY environment variable is required");
-      aiClient = new GoogleGenAI({
-        apiKey: key,
-        httpOptions: { headers: { "User-Agent": "aistudio-build" } },
-      });
+  // Helper to call local Ollama model
+  async function callOllama(prompt: string, systemInstruction: string): Promise<string> {
+    const model = process.env.OLLAMA_MODEL || "llama3";
+    const response = await fetch("http://127.0.0.1:11434/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: model,
+        messages: [
+          { role: "system", content: systemInstruction },
+          { role: "user", content: prompt }
+        ],
+        stream: false
+      })
+    });
+    if (!response.ok) {
+      throw new Error(`Ollama returned status ${response.status}`);
     }
-    return aiClient;
+    const data: any = await response.json();
+    return data.message.content;
   }
 
-  // Helper: call the AI with automatic retry on 503
-  async function callAI(contents: string, systemInstruction: string, retries = 2): Promise<any> {
-    const ai = getGeminiClient();
+  // Helper: call the AI with Claude agent-core
+  async function callAI(contents: string, systemInstruction: string): Promise<any> {
+    const key = process.env.ANTHROPIC_API_KEY;
+    if (!key) throw new Error("ANTHROPIC_API_KEY environment variable is required");
+
+    const agent = await createAgent({
+      model: "claude-sonnet-4-5",
+      systemPrompt: systemInstruction,
+      maxTurns: 5, // Limit turns to avoid infinite loops if it uses tools
+    });
+
+    const controller = new AbortController();
+    let responseText = "";
+
     try {
-      return await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents,
-        config: {
-          systemInstruction,
-          temperature: 0.7,
-          tools: [{ googleSearch: {} }],
-        },
-      });
-    } catch (err: any) {
-      if (retries > 0 && (err?.status === 503 || err?.status === 429)) {
-        console.warn(`Retrying AI call... (${retries} retries left)`);
-        await new Promise(r => setTimeout(r, 3000));
-        return callAI(contents, systemInstruction, retries - 1);
+      for await (const event of agent.submitMessage(contents, controller.signal)) {
+        if (event.type === "content_block_delta") {
+          responseText += event.delta;
+        } else if (event.type === "error") {
+          console.error("[SNOW BACKEND] Agent Error:", event.error.message);
+          throw new Error(event.error.message);
+        }
       }
+      return { text: responseText };
+    } catch (err: any) {
       throw err;
     }
   }
@@ -166,7 +181,7 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
       topVectors.forEach((d: any) => systemInstruction += `\n- ${d.text}\n`);
     }
 
-    const key = process.env.GEMINI_API_KEY;
+    const key = process.env.ANTHROPIC_API_KEY;
 
     async function processTelemetryAndMonitor(text: string) {
       const monitorMatch = text.match(/\[UI_MONITOR:\s*({[^}]+})\]/);
@@ -225,54 +240,40 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
       return ` [UI_MONITOR_DATA: {"locations": [{"name": "Snow OS Core (London)", "coords": [51.5074, -0.1278]}, {"name": "Node Alpha (Tokyo)", "coords": [35.6762, 139.6503]}, {"name": "Node Beta (New York)", "coords": [40.7128, -74.0060]}], "logs": ["Step 1: Parsing user prompt...", "Step 2: Performing contextual analysis...", "Step 3: Updating live dashboard map nodes...", "Step 4: System grid fully synchronized"], "radar_title": "[SNOW OS HUD MONITOR]", "orbital_data": {"title": "GEO-SYNC SAT-3", "alt": "35,786 KM", "lat": "0.0000 N", "lon": "0.0000 E"}, "density_title": "[CORE DENSITY]", "density_data": [25, 45, 60, 80, 95, 75, 85, 90, 70, 50, 40, 30]}]`;
     }
 
-    // Offline mock mode
-    if (!key || key === "") {
-      const p = prompt.toLowerCase();
-      let mockText = "I'm Snow, and I'm offline right now. ";
-      if (p.includes("weather") || p.includes("sunny")) {
-        mockText = "It's a gorgeous sunny day! The temperature is around 28 degrees. [WEATHER: SUNNY] [UI_WEATHER: {\"temp\": \"28°C\", \"condition\": \"Sunny\", \"location\": \"Your City\", \"humidity\": \"55%\", \"wind\": \"8 km/h\"}]";
-      } else if (p.includes("rain")) {
-        mockText = "Oh, it's quite rainy today. Don't forget your umbrella! [WEATHER: RAIN] [UI_WEATHER: {\"temp\": \"18°C\", \"condition\": \"Rainy\", \"location\": \"Your City\", \"humidity\": \"80%\", \"wind\": \"20 km/h\"}]";
-      } else if (p.includes("snow")) {
-        mockText = "It's snowing beautifully outside! [WEATHER: SNOW] [UI_WEATHER: {\"temp\": \"-2°C\", \"condition\": \"Snowing\", \"location\": \"Your City\", \"humidity\": \"90%\", \"wind\": \"5 km/h\"}]";
-      } else if (p.includes("news")) {
-        mockText = "Here's a top story for you today! [UI_NEWS: {\"headline\": \"AI assistants become smarter and more personal than ever\", \"source\": \"Tech Insider\", \"category\": \"Technology\"}]";
-      } else if (p.includes("joke")) {
-        mockText = "Why don't scientists trust atoms? Because they make up everything! [UI_JOKE: {\"punchline\": true}]";
-      } else if (p.includes("time")) {
-        mockText = "Let me check the time for you. [UI_TIME: {\"time\": \"09:45 AM\", \"timezone\": \"IST\", \"location\": \"Mumbai, India\", \"date\": \"Tuesday, June 10\"}]";
-      } else if (p.includes("monitor") || p.includes("dashboard") || p.includes("radar")) {
-        if (p.includes("hide") || p.includes("close") || p.includes("stop")) {
-          mockText = "Closing the world monitor dashboard. [UI_MONITOR: {\"action\": \"close\"}]";
-        } else {
-          mockText = "Launching the high-tech world monitor dashboard now. [UI_MONITOR: {\"action\": \"show\"}]";
-        }
-      } else {
-        mockText += "Ask me about the weather, news, jokes, or the time to see my animations in action!";
-      }
-
-      // Add telemetry mock data
-      mockText += getMockTelemetry(p);
-
-      // Process telemetry in the background/sync
-      await processTelemetryAndMonitor(mockText);
-
-      return res.json({ text: mockText, grounding: null, timestamp: new Date().toISOString() });
-    }
-
     try {
-      const response = await callAI(prompt, systemInstruction);
-      const responseText = response.text || "I didn't quite get that. Could you try again?";
-      const grounding = (response as any).candidates?.[0]?.groundingMetadata || null;
+      let responseText = "";
+      let grounding = null;
+
+      if (key && key !== "") {
+        const response = await callAI(prompt, systemInstruction);
+        responseText = response.text || "I didn't quite get that. Could you try again?";
+        grounding = (response as any).candidates?.[0]?.groundingMetadata || null;
+      } else {
+        try {
+          console.log("[SNOW BACKEND] Attempting local Ollama query...");
+          responseText = await callOllama(prompt, systemInstruction);
+          console.log("[SNOW BACKEND] Ollama query successful!");
+          
+          if (!responseText.includes("[UI_MONITOR_DATA:")) {
+            responseText += getMockTelemetry(prompt);
+          }
+        } catch (ollamaErr: any) {
+          console.warn("[SNOW BACKEND] Ollama failed or not running, falling back to mock mode:", ollamaErr.message || ollamaErr);
+          throw new Error("OLLAMA_OFFLINE");
+        }
+      }
 
       await processTelemetryAndMonitor(responseText);
-
       return res.json({ text: responseText, grounding, timestamp: new Date().toISOString() });
+
     } catch (err: any) {
-      console.warn("Gemini API call failed, falling back to local mock mode:", err.message || err);
-      
       const p = prompt.toLowerCase();
       let mockText = "I'm Snow, and I'm currently running in local offline mode. ";
+      
+      if (err.message !== "OLLAMA_OFFLINE") {
+        console.warn("[SNOW BACKEND] AI call failed, falling back to mock mode:", err.message || err);
+      }
+
       if (p.includes("weather") || p.includes("sunny")) {
         mockText = "It's a gorgeous sunny day! The temperature is around 28 degrees. [WEATHER: SUNNY] [UI_WEATHER: {\"temp\": \"28°C\", \"condition\": \"Sunny\", \"location\": \"Your City\", \"humidity\": \"55%\", \"wind\": \"8 km/h\"}]";
       } else if (p.includes("rain")) {
@@ -295,12 +296,8 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
         mockText += "Ask me about the weather, news, jokes, or the time to see my animations in action!";
       }
 
-      // Add telemetry mock data
       mockText += getMockTelemetry(p);
-
-      // Process telemetry in the background/sync
       await processTelemetryAndMonitor(mockText);
-
       return res.json({ text: mockText, grounding: null, timestamp: new Date().toISOString() });
     }
   });
