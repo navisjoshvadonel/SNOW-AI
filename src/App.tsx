@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Mic, Send, Volume2, VolumeX, CloudRain, Sun, Cloud, Snowflake, CloudLightning, MapPin, Newspaper, ExternalLink, Cpu, Radio, BookOpen, Clock, Globe, Copy, ThumbsUp, ThumbsDown, Trash2, Smile, Music, TrendingUp, Trophy, LayoutGrid, Activity, Heart, History } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-
+import { VoiceConfigurator } from "./components/VoiceConfigurator";
 type WeatherType = "default" | "sunny" | "rain" | "cloudy" | "snow" | "storm";
 
 interface ChatItem {
@@ -120,10 +120,13 @@ export default function App() {
   const [sportWidget, setSportWidget] = useState<SportData | null>(null);
   const [timeWidget, setTimeWidget] = useState<TimeData | null>(null);
   const [musicWidget, setMusicWidget] = useState<MusicData | null>(null);
-  const [monitorData, setMonitorData] = useState<any>(null);
 
+  const [selectedVoice, setSelectedVoice] = useState("Aoede");
+  const [voiceSpeed, setVoiceSpeed] = useState(1.05);
+  const [isBackendVoice, setIsBackendVoice] = useState(true);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatHistory, isLoading]);
 
@@ -136,15 +139,15 @@ export default function App() {
     }
   }, []);
 
-  // Strict Female Voice Selection
-  const speakText = (text: string) => {
-    if (!isSynthEnabled || !window.speechSynthesis) return;
+  const speakWithBrowserFallback = (text: string) => {
+    if (!window.speechSynthesis) {
+      setIsSpeaking(false);
+      return;
+    }
     try {
-      window.speechSynthesis.cancel();
-      const clean = text.replace(/\[WEATHER:[^\]]+\]/g, "").replace(/\[UI_[A-Z]+:[^\]]+\]/g, "").replace(/[*`#_]/g, "");
-      const utterance = new SpeechSynthesisUtterance(clean);
+      const utterance = new SpeechSynthesisUtterance(text);
       const voices = window.speechSynthesis.getVoices();
-      
+
       const getBestFemaleVoice = (voicesList: SpeechSynthesisVoice[]) => {
         const englishVoices = voicesList.filter(v => v.lang.toLowerCase().startsWith("en"));
         if (englishVoices.length === 0) return null;
@@ -181,16 +184,117 @@ export default function App() {
 
       const chosenVoice = getBestFemaleVoice(voices);
       if (chosenVoice) utterance.voice = chosenVoice;
-      
-      utterance.rate = 1.05;
+
+      utterance.rate = voiceSpeed;
       utterance.pitch = 1.15;
-      
+
       utterance.onstart = () => setIsSpeaking(true);
       utterance.onend = () => setIsSpeaking(false);
       utterance.onerror = () => setIsSpeaking(false);
-      
+
       window.speechSynthesis.speak(utterance);
-    } catch (e) { console.warn("Speech synthesis error:", e); setIsSpeaking(false); }
+    } catch (e) {
+      console.warn("Browser fallback speech synthesis error:", e);
+      setIsSpeaking(false);
+    }
+  };
+
+  // Strict Female Voice Selection using backend Gemini TTS and browser fallback
+  const speakText = async (text: string) => {
+    if (!isSynthEnabled) return;
+
+    // Stop any currently playing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+
+    setIsSpeaking(true);
+
+    const clean = text
+      .replace(/\[WEATHER:[^\]]+\]/g, "")
+      .replace(/\[UI_[A-Z]+:[^\]]+\]/g, "")
+      .replace(/[*`#_]/g, "")
+      .trim();
+
+    if (!isBackendVoice) {
+      speakWithBrowserFallback(clean);
+      return;
+    }
+
+    try {
+      const response = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: clean, voice: selectedVoice }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`TTS API returned status ${response.status}`);
+      }
+
+      const data = await response.json();
+      if (data.useBrowserFallback) {
+        console.warn("TTS API requested browser fallback:", data.warning);
+        speakWithBrowserFallback(clean);
+        return;
+      }
+
+      if (data.audio) {
+        // Convert base64 to Blob URL for maximum browser compatibility
+        const byteCharacters = atob(data.audio);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const audioBlob = new Blob([byteArray], { type: "audio/mp3" });
+        const audioBlobUrl = URL.createObjectURL(audioBlob);
+
+        const audio = new Audio(audioBlobUrl);
+        audioRef.current = audio;
+        audio.playbackRate = 1.05;
+
+        audio.onended = () => {
+          setIsSpeaking(false);
+          audioRef.current = null;
+          URL.revokeObjectURL(audioBlobUrl);
+        };
+
+        audio.onerror = (e) => {
+          console.error("Audio playback error:", e);
+          setIsSpeaking(false);
+          audioRef.current = null;
+          URL.revokeObjectURL(audioBlobUrl);
+          speakWithBrowserFallback(clean);
+        };
+
+        await audio.play();
+      } else {
+        throw new Error("No audio payload returned from TTS API.");
+      }
+    } catch (err) {
+      console.warn("Gemini TTS synthesis failed, falling back to browser speech:", err);
+      speakWithBrowserFallback(clean);
+    }
+  };
+
+  const handleToggleSynth = () => {
+    const nextVal = !isSynthEnabled;
+    setIsSynthEnabled(nextVal);
+    if (!nextVal) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      setIsSpeaking(false);
+    }
   };
 
   const startSpeechRecognition = () => {
@@ -220,26 +324,42 @@ export default function App() {
   const clearWidgets = () => {
     setWeatherWidget(null); setNewsWidget(null); setStockWidget(null);
     setSportWidget(null); setTimeWidget(null); setMusicWidget(null);
-    setMonitorData(null);
     setWeatherState("default");
     setShowConfetti(false);
   };
 
-  const handleToggleMonitor = async () => {
-    try {
-      await fetch("/api/snow/dashboard/toggle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "show" })
-      });
-    } catch (e) {
-      console.error("Failed to toggle monitor:", e);
+  const extractJsonFromTag = (text: string, tag: string): string | null => {
+    const tagIndex = text.indexOf(tag);
+    if (tagIndex === -1) return null;
+    const startBraceIndex = text.indexOf("{", tagIndex);
+    if (startBraceIndex === -1) return null;
+
+    let braceCount = 0;
+    for (let i = startBraceIndex; i < text.length; i++) {
+      if (text[i] === "{") braceCount++;
+      else if (text[i] === "}") {
+        braceCount--;
+        if (braceCount === 0) {
+          return text.substring(startBraceIndex, i + 1);
+        }
+      }
     }
+    return null;
   };
 
   const handleSendMessage = async (textToSend?: string) => {
     const rawText = textToSend || inputText;
     if (!rawText.trim() || isLoading) return;
+
+    // Stop any currently playing audio on new prompt
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
 
     if (recognitionRef.current && isListening) {
       recognitionRef.current.stop();
@@ -269,11 +389,11 @@ export default function App() {
       let widgetData: any = null;
       let widgetType: "weather" | "news" | "stock" | "sport" | "time" | "music" | null = null;
 
-      const parseWidget = (tagRegex: RegExp, setter: any, type: "weather" | "news" | "stock" | "sport" | "time" | "music") => {
-        const match = aiText.match(tagRegex);
-        if (match) {
+      const parseWidget = (tag: string, setter: any, type: "weather" | "news" | "stock" | "sport" | "time" | "music") => {
+        const jsonStr = extractJsonFromTag(aiText, tag);
+        if (jsonStr) {
           try {
-            const parsed = JSON.parse(match[1]);
+            const parsed = JSON.parse(jsonStr);
             setter(parsed);
             widgetData = parsed;
             widgetType = type;
@@ -286,33 +406,36 @@ export default function App() {
       const weatherMatch = aiText.match(/\[WEATHER:\s*([A-Z]+)\]/i);
       if (weatherMatch) setWeatherState(weatherMatch[1].toLowerCase() as WeatherType);
 
-      parseWidget(/\[UI_WEATHER:\s*({[^}]+})\]/, setWeatherWidget, "weather");
-      parseWidget(/\[UI_NEWS:\s*({[^}]+})\]/, setNewsWidget, "news");
-      parseWidget(/\[UI_STOCK:\s*({[^}]+})\]/, setStockWidget, "stock");
-      parseWidget(/\[UI_SPORT:\s*({[^}]+})\]/, setSportWidget, "sport");
-      parseWidget(/\[UI_TIME:\s*({[^}]+})\]/, setTimeWidget, "time");
-      parseWidget(/\[UI_MUSIC:\s*({[^}]+})\]/, setMusicWidget, "music");
-
-      const monitorDataMatch = aiText.match(/\[UI_MONITOR_DATA:\s*({[\s\S]*?})\s*\]/);
-      if (monitorDataMatch) {
-        try {
-          const parsed = JSON.parse(monitorDataMatch[1]);
-          setMonitorData(parsed);
-        } catch(e) {
-          console.error("Monitor data parse error", e);
-        }
-      }
+      parseWidget("[UI_WEATHER:", setWeatherWidget, "weather");
+      parseWidget("[UI_NEWS:", setNewsWidget, "news");
+      parseWidget("[UI_STOCK:", setStockWidget, "stock");
+      parseWidget("[UI_SPORT:", setSportWidget, "sport");
+      parseWidget("[UI_TIME:", setTimeWidget, "time");
+      parseWidget("[UI_MUSIC:", setMusicWidget, "music");
 
       if (aiText.includes("[UI_JOKE:")) {
         setShowConfetti(true);
         setTimeout(() => setShowConfetti(false), 3000);
       }
 
-      const cleanDisplay = aiText
+      let cleanDisplay = aiText;
+      const uiTags = ["[UI_WEATHER:", "[UI_NEWS:", "[UI_STOCK:", "[UI_SPORT:", "[UI_TIME:", "[UI_MUSIC:", "[UI_JOKE:"];
+      
+      uiTags.forEach(tag => {
+        const jsonStr = extractJsonFromTag(cleanDisplay, tag);
+        if (jsonStr) {
+          const tagIndex = cleanDisplay.indexOf(tag);
+          const closingBracketIndex = cleanDisplay.indexOf("]", tagIndex + tag.length + jsonStr.length - 1);
+          if (tagIndex !== -1 && closingBracketIndex !== -1) {
+            cleanDisplay = cleanDisplay.substring(0, tagIndex) + cleanDisplay.substring(closingBracketIndex + 1);
+          }
+        }
+      });
+
+      cleanDisplay = cleanDisplay
         .replace(/\[WEATHER:\s*[A-Z]+\]/gi, "")
-        .replace(/\[UI_MONITOR_DATA:\s*({[\s\S]*?})\s*\]/gi, "")
-        .replace(/\[UI_[A-Z]+:\s*({[^}]+})/gi, "")
         .trim();
+
       setResponseStats({ time: ((Date.now() - startTime) / 1000).toFixed(2) + "s", network: "Excellent", model: "Gemini 2.5" });
 
       setChatHistory((prev) => [
@@ -354,7 +477,7 @@ export default function App() {
 
   const quickPrompts = ["What's the weather in Tokyo?", "Tell me a joke!", "What is Apple's stock price?", "Latest technology news"];
 
-  const isContextActive = !!(weatherWidget || newsWidget || stockWidget || timeWidget || sportWidget || musicWidget || monitorData || groundingInfo?.webSearchQueries?.length);
+  const isContextActive = !!(weatherWidget || newsWidget || stockWidget || timeWidget || sportWidget || musicWidget || groundingInfo?.webSearchQueries?.length);
 
   return (
     <div className={`w-full h-screen flex flex-col transition-colors duration-1000 bg-weather-${weatherState} overflow-hidden font-sans text-white`}>
@@ -367,17 +490,9 @@ export default function App() {
           <span className="font-bold text-base tracking-[0.2em] uppercase text-white drop-shadow-[0_0_12px_rgba(255,255,255,0.9)]">SnowOS</span>
         </div>
         <div className="flex items-center gap-4">
-          <button 
-            onClick={handleToggleMonitor} 
-            className="p-2.5 rounded-xl glass-panel hover:bg-cyan-500/10 hover:border-cyan-500/30 transition cursor-pointer flex items-center gap-2 text-cyan-400 border border-cyan-500/20" 
-            title="Launch Snow's Brain"
-          >
-            <LayoutGrid className="w-4 h-4 text-cyan-400 drop-shadow-[0_0_8px_rgba(6,182,212,0.8)]" />
-            <span className="text-[10px] font-bold tracking-widest uppercase hidden md:inline">Snow's Brain</span>
-          </button>
 
           <button onClick={() => { setChatHistory([]); clearWidgets(); setInputText(""); }} className="p-2.5 rounded-xl glass-panel hover:bg-white/10 transition cursor-pointer" title="Clear Chat"><Trash2 className="w-4 h-4 text-white/60" /></button>
-          <button onClick={() => setIsSynthEnabled(!isSynthEnabled)} className="p-2.5 rounded-xl glass-panel hover:bg-white/10 transition cursor-pointer">
+          <button onClick={handleToggleSynth} className="p-2.5 rounded-xl glass-panel hover:bg-white/10 transition cursor-pointer">
             {isSynthEnabled ? <Volume2 className="w-4 h-4 text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.5)]" /> : <VolumeX className="w-4 h-4 text-white/40" />}
           </button>
         </div>
@@ -399,6 +514,15 @@ export default function App() {
             </div>
             <div className="flex justify-between py-2 border-b border-white/5"><span className="text-white/40">Connection:</span><span className="text-white/80 flex items-center gap-1.5"><Globe className="w-3.5 h-3.5" /> Connected</span></div>
           </div>
+
+          <VoiceConfigurator 
+            selectedVoice={selectedVoice}
+            onVoiceChange={setSelectedVoice}
+            voiceSpeed={voiceSpeed}
+            onVoiceSpeedChange={setVoiceSpeed}
+            isBackendVoice={isBackendVoice}
+            onBackendToggle={setIsBackendVoice}
+          />
 
           {/* Recent Prompts History */}
           <div className="flex flex-col gap-3 mt-2 border-t border-white/5 pt-4">
@@ -423,7 +547,7 @@ export default function App() {
         </motion.div>
 
         {/* Center Panel */}
-        <div className="col-span-6 flex flex-col justify-between overflow-hidden relative">
+        <div className="col-span-9 flex flex-col justify-between overflow-hidden relative">
           {/* Target Reticle / Grid Accents background */}
           <div className="absolute inset-0 pointer-events-none opacity-[0.03] bg-[linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] bg-[size:30px_30px] flex items-center justify-center z-0">
             <div className="w-96 h-96 border border-dashed border-cyan-500/25 rounded-full flex items-center justify-center relative">
@@ -569,129 +693,6 @@ export default function App() {
             </div>
           </div>
         </div>
-
-        {/* Right Panel with dynamic context graphics */}
-        <motion.div animate={{ opacity: isBooting ? 0.3 : 1 }} transition={{ duration: 0.5, delay: isBooting ? 0 : 0.3 }} className={`col-span-3 glass-panel rounded-3xl p-6 flex flex-col gap-6 overflow-y-auto transition-all duration-500 ${isContextActive ? 'border-pulse border border-cyan-400' : 'border border-cyan-500/15'}`}>
-          <div className="flex items-center gap-2 border-b border-white/5 pb-3"><Activity className="w-4 h-4 text-cyan-400" /><span className="text-xs uppercase font-bold tracking-widest text-cyan-400">Snow's Intel</span></div>
-          
-          {/* Dynamic Relevant Picture */}
-          <div className="rounded-2xl overflow-hidden border border-white/10 bg-black/40 h-44 relative group select-none flex-shrink-0">
-            <img 
-              src={getPanelImage()} 
-              alt="Context Visual" 
-              className="w-full h-full object-cover transition-all duration-700 group-hover:scale-105"
-            />
-            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-3">
-              <span className="text-[10px] font-bold tracking-wider text-white uppercase bg-black/50 px-2.5 py-1 rounded-full backdrop-blur-md border border-white/10">
-                Active Visual Context
-              </span>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-4">
-             {!isContextActive && (
-               <div className="text-center text-white/30 text-xs italic mt-4">
-                 No active modules. Ask Snow about the weather, news, or stocks!
-               </div>
-             )}
-
-             {weatherWidget && (
-               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-4 rounded-2xl border border-cyan-500/20 shadow-xl flex flex-col items-center gap-3 w-full">
-                 <div className="flex items-center gap-2 text-cyan-300 uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5 justify-center w-full"><MapPin className="w-3.5 h-3.5" /> {weatherWidget.location}</div>
-                 <div className="flex items-center gap-4 py-1">
-                   {weatherWidget.condition.toLowerCase().includes('snow') ? <Snowflake className="w-8 h-8 text-cyan-200" /> : <Sun className="w-8 h-8 text-yellow-300 animate-pulse" />}
-                   <div className="flex flex-col"><span className="text-2xl font-extrabold text-white">{weatherWidget.temp}</span><span className="text-[10px] text-white/60 capitalize">{weatherWidget.condition}</span></div>
-                 </div>
-               </motion.div>
-             )}
-
-             {newsWidget && (
-               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-4 rounded-2xl border border-cyan-500/20 shadow-xl flex flex-col gap-2 w-full">
-                 <div className="flex justify-between text-purple-400 uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5"><div className="flex gap-2"><Newspaper className="w-3.5 h-3.5" /> Headlines</div><span className="text-[9px] text-white/40">{newsWidget.source}</span></div>
-                 <div className="py-1 text-white/90 text-xs leading-relaxed">"{newsWidget.headline}"</div>
-               </motion.div>
-             )}
-
-             {stockWidget && (
-               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-4 rounded-2xl border border-cyan-500/20 shadow-xl flex flex-col items-center gap-2 w-full">
-                 <div className="flex items-center gap-2 text-emerald-400 uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5 w-full justify-center"><TrendingUp className="w-3.5 h-3.5" /> Market Data</div>
-                 <div className="flex items-baseline gap-3 mt-1"><span className="text-xl font-bold">{stockWidget.symbol}</span><span className="text-2xl font-bold">{stockWidget.price}</span></div>
-                 <div className={`text-xs font-semibold ${stockWidget.up ? 'text-green-400' : 'text-red-400'}`}>{stockWidget.change} Today</div>
-               </motion.div>
-             )}
-
-             {timeWidget && (
-               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-4 rounded-2xl border border-cyan-500/20 shadow-xl flex flex-col items-center gap-1.5 w-full">
-                 <div className="flex items-center gap-2 text-indigo-400 uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5 w-full justify-center"><Clock className="w-3.5 h-3.5" /> {timeWidget.location}</div>
-                 <div className="text-2xl font-mono font-bold text-white my-1">{timeWidget.time}</div>
-                 <div className="text-[10px] text-white/60">{timeWidget.date} ({timeWidget.timezone})</div>
-               </motion.div>
-             )}
-             
-             {sportWidget && (
-               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-4 rounded-2xl border border-cyan-500/20 shadow-xl flex flex-col items-center gap-2 w-full">
-                 <div className="flex items-center gap-2 text-orange-400 uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5 w-full justify-center"><Trophy className="w-3.5 h-3.5" /> {sportWidget.sport}</div>
-                 <div className="flex justify-between w-full items-center px-2">
-                   <div className="flex flex-col items-center"><span className="text-[10px] text-white/60">{sportWidget.team1}</span><span className="text-lg font-bold">{sportWidget.score1}</span></div>
-                   <span className="text-white/30 font-bold text-[10px]">VS</span>
-                   <div className="flex flex-col items-center"><span className="text-[10px] text-white/60">{sportWidget.team2}</span><span className="text-lg font-bold">{sportWidget.score2}</span></div>
-                 </div>
-               </motion.div>
-             )}
-
-             {musicWidget && (
-               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-4 rounded-2xl border border-cyan-500/20 shadow-xl flex flex-col items-center gap-2 w-full">
-                 <div className="flex items-center gap-2 text-pink-400 uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5 w-full justify-center"><Music className="w-3.5 h-3.5" /> Now Playing</div>
-                 <div className="text-sm font-bold text-white text-center mt-1">{musicWidget.title}</div>
-                 <div className="text-[10px] text-white/60">{musicWidget.artist} • {musicWidget.genre}</div>
-               </motion.div>
-             )}
-
-             {/* Dynamic Telemetry Data from UI_MONITOR_DATA */}
-             {monitorData && (
-               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col gap-4 w-full border-t border-white/5 pt-4">
-                 <div className="glass-panel p-4 rounded-2xl border border-cyan-500/10 flex flex-col gap-2">
-                   <span className="text-[10px] text-cyan-400 font-bold uppercase tracking-widest border-b border-white/5 pb-1">Target Scan</span>
-                   <span className="text-xs font-mono font-bold text-white">{monitorData.radar_title || "[SCANNING...]"}</span>
-                   {monitorData.orbital_data && (
-                     <div className="grid grid-cols-2 gap-1.5 text-[9px] font-mono text-white/60 mt-1">
-                       <div>Sys: <span className="text-white">{monitorData.orbital_data.title}</span></div>
-                       <div>Alt: <span className="text-white">{monitorData.orbital_data.alt}</span></div>
-                       <div>Lat: <span className="text-white">{monitorData.orbital_data.lat}</span></div>
-                       <div>Lon: <span className="text-white">{monitorData.orbital_data.lon}</span></div>
-                     </div>
-                   )}
-                 </div>
-
-                 {monitorData.logs && monitorData.logs.length > 0 && (
-                   <div className="glass-panel p-4 rounded-2xl border border-cyan-500/10 bg-black/40 font-mono text-[9px] text-emerald-400/90 flex flex-col gap-1.5 max-h-36 overflow-y-auto">
-                     <span className="text-[9px] text-white/40 uppercase font-bold tracking-wider mb-1">Diagnostic Logs</span>
-                     {monitorData.logs.map((log: string, idx: number) => (
-                       <div key={idx} className="flex gap-1.5 items-start">
-                         <span className="text-emerald-500/50">&gt;</span>
-                         <span className="leading-normal">{log}</span>
-                       </div>
-                     ))}
-                   </div>
-                 )}
-
-                 {monitorData.locations && monitorData.locations.length > 0 && (
-                   <div className="glass-panel p-4 rounded-2xl border border-cyan-500/10 flex flex-col gap-2">
-                     <span className="text-[9px] text-white/40 uppercase font-bold tracking-wider">Scanned Coordinates</span>
-                     <div className="flex flex-col gap-1.5">
-                       {monitorData.locations.map((loc: any, idx: number) => (
-                         <div key={idx} className="flex justify-between items-center text-[9px] font-mono">
-                           <span className="text-white/80 truncate max-w-[65%]" title={loc.name}>{loc.name}</span>
-                           <span className="text-cyan-400 text-[8px]">{loc.coords ? `[${loc.coords[0].toFixed(2)}, ${loc.coords[1].toFixed(2)}]` : "N/A"}</span>
-                         </div>
-                       ))}
-                     </div>
-                   </div>
-                 )}
-               </motion.div>
-             )}
-          </div>
-        </motion.div>
       </div>
     </div>
   );

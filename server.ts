@@ -5,76 +5,13 @@ import { createAgent } from "./files claude/index.js";
 import dotenv from "dotenv";
 import { exec } from "child_process";
 import http from "http";
+import { GoogleGenAI } from "@google/genai";
 
 dotenv.config();
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
-
-  // Helper to control the Python World Monitor dashboard
-  function controlDashboard(action: "show" | "hide" | "close"): Promise<void> {
-    return new Promise((resolve) => {
-      const postData = "";
-      const req = http.request(
-        {
-          hostname: "localhost",
-          port: 8085,
-          path: `/dashboard/${action}`,
-          method: "POST",
-          headers: {
-            "Content-Length": Buffer.byteLength(postData),
-          },
-        },
-        (res) => {
-          resolve();
-        }
-      );
-
-      req.on("error", (e) => {
-        // If connection refused (dashboard not running), start it!
-        if (action === "show") {
-          console.log("[SNOW BACKEND] Starting world_monitor.py process...");
-          exec("python3 world_monitor.py", { env: process.env }, (err) => {
-            if (err) {
-              console.error("[SNOW BACKEND] Failed to execute world_monitor.py:", err);
-            }
-          });
-        }
-        resolve();
-      });
-
-      req.write(postData);
-      req.end();
-    });
-  }
-
-  // Helper to send telemetry data updates to the Python World Monitor dashboard
-  function sendDashboardUpdate(data: any): Promise<boolean> {
-    return new Promise((resolve) => {
-      const postData = JSON.stringify(data);
-      const req = http.request(
-        {
-          hostname: "localhost",
-          port: 8085,
-          path: "/dashboard/update",
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Content-Length": Buffer.byteLength(postData),
-          },
-        },
-        (res) => {
-          resolve(res.statusCode === 200);
-        }
-      );
-      req.on("error", (e) => {
-        resolve(false);
-      });
-      req.write(postData);
-      req.end();
-    });
-  }
 
   app.use(express.json());
 
@@ -183,63 +120,6 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
 
     const key = process.env.ANTHROPIC_API_KEY;
 
-    async function processTelemetryAndMonitor(text: string) {
-      const monitorMatch = text.match(/\[UI_MONITOR:\s*({[^}]+})\]/);
-      let isShowing = false;
-      let explicitCloseOrHide = false;
-      if (monitorMatch) {
-        try {
-          const actionData = JSON.parse(monitorMatch[1]);
-          if (actionData.action) {
-            await controlDashboard(actionData.action);
-            if (actionData.action === "show") {
-              isShowing = true;
-            } else if (actionData.action === "hide" || actionData.action === "close") {
-              explicitCloseOrHide = true;
-            }
-          }
-        } catch (e) {
-          console.error("[SNOW BACKEND] Failed to parse or trigger UI_MONITOR action:", e);
-        }
-      }
-
-      const telemetryMatch = text.match(/\[UI_MONITOR_DATA:\s*({[\s\S]*})\s*\]/);
-      if (telemetryMatch) {
-        try {
-          const telemetryData = JSON.parse(telemetryMatch[1]);
-          
-          // Auto-show/open dashboard if telemetry data is present and no explicit hide/close action was given
-          if (!isShowing && !explicitCloseOrHide) {
-            console.log("[SNOW BACKEND] Auto-showing world monitor for telemetry...");
-            await controlDashboard("show");
-            isShowing = true;
-          }
-
-          if (isShowing) {
-            // Wait for PyQt5 process to spin up HTTP port 8085
-            setTimeout(async () => {
-              await sendDashboardUpdate(telemetryData);
-            }, 1800);
-          } else {
-            // Dashboard already running, update immediately
-            await sendDashboardUpdate(telemetryData);
-          }
-        } catch (e) {
-          console.error("[SNOW BACKEND] Failed to parse or send UI_MONITOR_DATA:", e);
-        }
-      }
-    }
-
-    function getMockTelemetry(p: string) {
-      if (p.includes("apple")) {
-        return ` [UI_STOCK: {"symbol": "AAPL", "price": "$290.55", "change": "-3.64%", "up": false}] [UI_MONITOR_DATA: {"locations": [{"name": "Cupertino HQ", "coords": [37.3318, -122.0311]}, {"name": "Shenzhen Assembly", "coords": [22.5431, 114.0579]}, {"name": "Tokyo Store", "coords": [35.6762, 139.6503]}], "logs": ["Step 1: Pinging Cupertino HQ... SUCCESS (12ms)", "Step 2: Checking Shenzhen line volume...", "Step 3: Compiling Apple Store stock level map...", "Step 4: Live volume tracking enabled"], "radar_title": "[AAPL HEATMAP]", "orbital_data": {"title": "AAPL SUP-CHAIN", "alt": "400 KM", "lat": "37.3318 N", "lon": "122.0311 W"}, "density_title": "[AAPL MARKET DENSITY]", "density_data": [30, 45, 60, 85, 95, 80, 75, 85, 90, 70, 50, 40]}]`;
-      }
-      if (p.includes("tokyo")) {
-        return ` [UI_WEATHER: {"temp": "22°C", "condition": "Cloudy", "location": "Tokyo", "humidity": "70%", "wind": "15 km/h"}] [UI_MONITOR_DATA: {"locations": [{"name": "Tokyo Core Node", "coords": [35.6762, 139.6503]}, {"name": "Yokohama Station", "coords": [35.4437, 139.638]}, {"name": "Chiba Data Link", "coords": [35.6074, 140.1063]}], "logs": ["Pinging Tokyo nodes... SUCCESS", "Evaluating metropolitan signal strength...", "Checking seismic telemetry... STABLE", "Weather satellite connection established"], "radar_title": "[TOKYO GRID WEATHER]", "orbital_data": {"title": "HIMAWARI-9", "alt": "35,786 KM", "lat": "35.6762 N", "lon": "139.6503 E"}, "density_title": "[TOKYO WEATHER INDEX]", "density_data": [50, 55, 60, 65, 70, 75, 80, 85, 80, 70, 60, 50]}]`;
-      }
-      return ` [UI_MONITOR_DATA: {"locations": [{"name": "Snow OS Core (London)", "coords": [51.5074, -0.1278]}, {"name": "Node Alpha (Tokyo)", "coords": [35.6762, 139.6503]}, {"name": "Node Beta (New York)", "coords": [40.7128, -74.0060]}], "logs": ["Step 1: Parsing user prompt...", "Step 2: Performing contextual analysis...", "Step 3: Updating live dashboard map nodes...", "Step 4: System grid fully synchronized"], "radar_title": "[SNOW OS HUD MONITOR]", "orbital_data": {"title": "GEO-SYNC SAT-3", "alt": "35,786 KM", "lat": "0.0000 N", "lon": "0.0000 E"}, "density_title": "[CORE DENSITY]", "density_data": [25, 45, 60, 80, 95, 75, 85, 90, 70, 50, 40, 30]}]`;
-    }
-
     try {
       let responseText = "";
       let grounding = null;
@@ -253,17 +133,12 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
           console.log("[SNOW BACKEND] Attempting local Ollama query...");
           responseText = await callOllama(prompt, systemInstruction);
           console.log("[SNOW BACKEND] Ollama query successful!");
-          
-          if (!responseText.includes("[UI_MONITOR_DATA:")) {
-            responseText += getMockTelemetry(prompt);
-          }
         } catch (ollamaErr: any) {
           console.warn("[SNOW BACKEND] Ollama failed or not running, falling back to mock mode:", ollamaErr.message || ollamaErr);
           throw new Error("OLLAMA_OFFLINE");
         }
       }
 
-      await processTelemetryAndMonitor(responseText);
       return res.json({ text: responseText, grounding, timestamp: new Date().toISOString() });
 
     } catch (err: any) {
@@ -286,32 +161,67 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
         mockText = "Why don't scientists trust atoms? Because they make up everything! [UI_JOKE: {\"punchline\": true}]";
       } else if (p.includes("time")) {
         mockText = "Let me check the time for you. [UI_TIME: {\"time\": \"09:45 AM\", \"timezone\": \"IST\", \"location\": \"Mumbai, India\", \"date\": \"Tuesday, June 10\"}]";
-      } else if (p.includes("monitor") || p.includes("dashboard") || p.includes("radar")) {
-        if (p.includes("hide") || p.includes("close") || p.includes("stop")) {
-          mockText = "Closing the world monitor dashboard. [UI_MONITOR: {\"action\": \"close\"}]";
-        } else {
-          mockText = "Launching the high-tech world monitor dashboard now. [UI_MONITOR: {\"action\": \"show\"}]";
-        }
       } else {
-        mockText += "Ask me about the weather, news, jokes, or the time to see my animations in action!";
+        mockText += " Ask me about the weather, news, jokes, or the time to see my animations in action!";
       }
 
-      mockText += getMockTelemetry(p);
-      await processTelemetryAndMonitor(mockText);
       return res.json({ text: mockText, grounding: null, timestamp: new Date().toISOString() });
     }
   });
 
-  app.post("/api/snow/dashboard/toggle", async (req, res) => {
+  // Post TTS endpoint to generate voice for Snow's replies
+  app.post("/api/tts", async (req, res) => {
+    const { text, voice = "Aoede" } = req.body;
+    if (!text) {
+      return res.status(400).json({ error: "Text is required" });
+    }
+
     try {
-      const { action } = req.body;
-      await controlDashboard(action || "show");
-      res.json({ status: "success" });
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error("GEMINI_API_KEY is not defined in environment.");
+      }
+      const ai = new GoogleGenAI({
+        apiKey: apiKey,
+        httpOptions: {
+          headers: {
+            'User-Agent': 'aistudio-build',
+          }
+        }
+      });
+
+      // Clean up text for speech synthesis (strip markdown symbols like *, #, etc. and tags)
+      const cleanStreamText = text
+        .replace(/[*#`_\-]/g, "")
+        .replace(/\[WEATHER:[^\]]+\]/g, "")
+        .replace(/\[UI_[A-Z]+:[^\]]+\]/g, "")
+        .substring(0, 400); // limit lengths to keep within speed bounds
+
+      const response = await ai.models.generateContent({
+        model: "gemini-3.1-flash-tts-preview",
+        contents: [{ parts: [{ text: cleanStreamText }] }],
+        config: {
+          responseModalities: ["AUDIO"],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: voice || "Aoede" },
+            },
+          },
+        },
+      });
+
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!base64Audio) {
+        return res.json({ useBrowserFallback: true, warning: "Fails to extract inline audio data stream." });
+      }
+
+      res.json({ audio: base64Audio });
     } catch (err: any) {
-      console.error("[SNOW BACKEND] Dashboard toggle error:", err);
-      res.status(500).json({ error: err.message || "Failed to toggle dashboard" });
+      console.warn("Gemini Voice Synthesis Unavailable - Switched client to local Browser Speech synthesis:", err.message || err);
+      res.json({ useBrowserFallback: true, warning: "Gemini Cloud Voice is rate-limited. Falling back on offline audio synthesis." });
     }
   });
+
 
   // Serve static files / Vite middleware
   if (process.env.NODE_ENV !== "production") {
