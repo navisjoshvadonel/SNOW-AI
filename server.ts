@@ -37,31 +37,25 @@ async function startServer() {
     return data.message.content;
   }
 
-  // Helper: call the AI with Claude agent-core
+  // Helper: call the AI with Google GenAI
   async function callAI(contents: string, systemInstruction: string): Promise<any> {
-    const key = process.env.ANTHROPIC_API_KEY;
-    if (!key) throw new Error("ANTHROPIC_API_KEY environment variable is required");
+    const key = process.env.GEMINI_API_KEY;
+    if (!key) throw new Error("GEMINI_API_KEY environment variable is required");
 
-    const agent = await createAgent({
-      model: "claude-sonnet-4-5",
-      systemPrompt: systemInstruction,
-      maxTurns: 5, // Limit turns to avoid infinite loops if it uses tools
-    });
-
-    const controller = new AbortController();
-    let responseText = "";
+    const ai = new GoogleGenAI({ apiKey: key });
 
     try {
-      for await (const event of agent.submitMessage(contents, controller.signal)) {
-        if (event.type === "content_block_delta") {
-          responseText += event.delta;
-        } else if (event.type === "error") {
-          console.error("[SNOW BACKEND] Agent Error:", event.error.message);
-          throw new Error(event.error.message);
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{ role: "user", parts: [{ text: contents }] }],
+        config: {
+          systemInstruction: systemInstruction,
+          tools: [{ googleSearch: {} }] // Enable Google Search grounding
         }
-      }
-      return { text: responseText };
+      });
+      return { text: response.text, candidates: response.candidates };
     } catch (err: any) {
+      console.error("[SNOW BACKEND] Gemini Error:", err.message);
       throw err;
     }
   }
@@ -100,13 +94,6 @@ ANIMATION TAGS — you MUST include these in your responses to trigger beautiful
 7. MUSIC or SONG questions — include:
    [UI_MUSIC: {"title": "Song Name", "artist": "Artist Name", "genre": "Pop"}]
 
-8. WORLD MONITOR or COMMAND CENTER dashboard queries (e.g. "show world monitor", "open dashboard", "hide world monitor", "close radar") — include:
-   [UI_MONITOR: {"action": "show"}] or [UI_MONITOR: {"action": "hide"}] or [UI_MONITOR: {"action": "close"}]
-
-9. WORLD MONITOR DYNAMIC DATA — For ALL queries (especially when they contain locations, stocks, company names, cities, tech concepts, or general topics), you MUST also include a custom JSON telemetry dataset for the world monitor dashboard. Append this tag at the very end of your response:
-   [UI_MONITOR_DATA: {"locations": [{"name": "Location Name", "coords": [latitude, longitude]}], "logs": ["Informational step log 1", "Informational step log 2", "Informational step log 3", "Informational step log 4", "Informational step log 5"], "radar_title": "[CUSTOM SCANNED TOPIC]", "orbital_data": {"title": "CUSTOM SWEEP TITLE", "alt": "Custom Altitude Value (e.g. 35,786 KM or 500m)", "lat": "custom latitude text", "lon": "custom longitude text"}, "density_title": "[CUSTOM SPECTRUM TITLE]", "density_data": [array of 12 numbers from 10 to 95 representing density heights]}]
-   Make sure coordinates are real and relevant (e.g. if the user asks about Apple, use Cupertino HQ, manufacturing hubs, retail hubs; if weather in Seattle, use weather stations/radar coordinate points in Seattle; if coding, use server/cloud locations like Frankfurt, Virginia, Singapore). Provide 5-6 informative progress logs. Include exactly 3-5 locations.
-
 IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the user — they only trigger visuals.`;
 
     if (memories?.length > 0) {
@@ -118,7 +105,7 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
       topVectors.forEach((d: any) => systemInstruction += `\n- ${d.text}\n`);
     }
 
-    const key = process.env.ANTHROPIC_API_KEY;
+    const key = process.env.GEMINI_API_KEY;
 
     try {
       let responseText = "";
