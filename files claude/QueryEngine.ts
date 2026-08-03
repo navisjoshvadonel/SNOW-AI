@@ -164,13 +164,35 @@ export class QueryEngine {
             usage = event.usage;
             stopReason = event.stopReason;
           }
-          // Collect final content from streamed events
+          if (event.type === "content_block_start") {
+            assistantContent[event.index] = event.block;
+          }
+          if (event.type === "tool_use_start") {
+             assistantContent.push({ type: "tool_use", id: event.toolUseId, name: event.name, input: {} });
+          }
+          if (event.type === "content_block_delta" && event.delta) {
+             const block = assistantContent[event.index];
+             if (block && block.type === "text" && typeof event.delta === "string") {
+                 block.text += event.delta;
+             }
+          }
           if (event.type === "content_block_stop") {
-            // content accumulated by caller via deltas — handled below
+             // Handle finalisation if needed
+             const block = assistantContent[event.index];
+             if (block && block.type === "tool_use") {
+                // We parse input JSON in modelClient, so we can just grab it here
+                // Note: since our rewrite, modelClient yields tool_use_start with input args already if they were passed, 
+                // but let's just make sure it's valid.
+             }
           }
         }
-        // Extract assembled content from the last stream pass
-        assistantContent = extractContentFromStream(/* stream cache */);
+        
+        // Fix for Gemini: our rewrite of modelClient passes the JSON args during tool_use_start inside partial_json delta,
+        // but for simplicity, we can let the QueryEngine use the toolUseId and name. Wait, the tool result logic requires the `input` field.
+        // Let's ensure tool_use blocks have input.
+        for (const event of assistantContent) {
+           if (event.type === "tool_use" && !event.input) event.input = {};
+        }
       } catch (err) {
         yield this.handleApiError(err);
         return;

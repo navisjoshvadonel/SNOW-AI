@@ -50,16 +50,29 @@ export async function* callModel(
 }
 
 async function* callModelOnce(params: ModelCallParams): AsyncGenerator<QueryEvent> {
-  const {
-    model = "gemini-2.5-flash",
-    system,
-    messages,
-    tools,
-    signal,
-  } = params;
-
+  let isOffline = false;
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("GEMINI_API_KEY environment variable is required");
+  if (!apiKey || apiKey === "") {
+    isOffline = true;
+  }
+
+  if (!isOffline) {
+    try {
+      yield* callGeminiOnce(params, apiKey!);
+      return;
+    } catch (err: any) {
+      console.warn(`[SNOW BACKEND] Gemini API failed (${err.message}). Falling back to Offline Mode (Ollama)...`);
+      isOffline = true;
+    }
+  }
+
+  if (isOffline) {
+    yield* callOllamaOnce(params);
+  }
+}
+
+async function* callGeminiOnce(params: ModelCallParams, apiKey: string): AsyncGenerator<QueryEvent> {
+  const { model = "gemini-2.5-flash", system, messages, tools, signal } = params;
   const ai = new GoogleGenAI({ apiKey });
 
   // Map messages to Gemini format
@@ -89,13 +102,11 @@ async function* callModelOnce(params: ModelCallParams): AsyncGenerator<QueryEven
     };
   });
 
-  // Map tools to Gemini format
   const functionDeclarations = tools.map(t => ({
     name: t.name,
     description: t.description,
     parameters: mapSchemaToGemini(t.input_schema)
   }));
-
   const toolConfig = functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined;
 
   const reqConfig: any = {
@@ -117,7 +128,6 @@ async function* callModelOnce(params: ModelCallParams): AsyncGenerator<QueryEven
 
   for await (const chunk of stream) {
     if (signal.aborted) throw new Error("Aborted by user");
-
     if (chunk.usageMetadata) {
       finalUsage.input_tokens = chunk.usageMetadata.promptTokenCount ?? 0;
       finalUsage.output_tokens = chunk.usageMetadata.candidatesTokenCount ?? 0;
@@ -134,31 +144,15 @@ async function* callModelOnce(params: ModelCallParams): AsyncGenerator<QueryEven
       if (candidate.content && candidate.content.parts) {
         for (const part of candidate.content.parts) {
           if (part.text) {
-            yield {
-              type: "content_block_start",
-              index: blockIndex,
-              block: { type: "text", text: "" }
-            };
-            yield {
-              type: "content_block_delta",
-              index: blockIndex,
-              delta: part.text
-            };
+            yield { type: "content_block_start", index: blockIndex, block: { type: "text", text: "" } };
+            yield { type: "content_block_delta", index: blockIndex, delta: part.text };
             yield { type: "content_block_stop", index: blockIndex };
             blockIndex++;
           }
           if (part.functionCall) {
             finalStopReason = "tool_use";
-            yield {
-              type: "tool_use_start",
-              toolUseId: part.functionCall.name,
-              name: part.functionCall.name
-            };
-            yield {
-              type: "content_block_delta",
-              index: blockIndex,
-              delta: { partial_json: JSON.stringify(part.functionCall.args) } as any
-            };
+            yield { type: "tool_use_start", toolUseId: part.functionCall.name, name: part.functionCall.name };
+            yield { type: "content_block_delta", index: blockIndex, delta: { partial_json: JSON.stringify(part.functionCall.args) } as any };
             yield { type: "content_block_stop", index: blockIndex };
             blockIndex++;
           }
@@ -167,9 +161,99 @@ async function* callModelOnce(params: ModelCallParams): AsyncGenerator<QueryEven
     }
   }
 
+  yield { type: "message_stop", usage: finalUsage, stopReason: finalStopReason };
+}
+
+async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEvent> {
+  const { system, messages, tools, signal } = params;
+  const ollamaModel = process.env.OLLAMA_MODEL || "llama3.1";
+
+  // Map messages to Ollama (OpenAI compatible) format
+  const ollamaMessages = [{ role: "system", content: system }];
+  
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      let text = "";
+      for (const b of msg.content) {
+        if ("text" in b) text += b.text + "\n";
+        if ("type" in b && b.type === "tool_result") {
+           ollamaMessages.push({ role: "tool", content: (b as any).content, name: (b as any).tool_use_id } as any);
+        }
+      }
+      if (text) ollamaMessages.push({ role: "user", content: text });
+    } else if (msg.role === "assistant") {
+      let text = "";
+      const tool_calls: any[] = [];
+      for (const b of msg.content) {
+        if ("text" in b) text += b.text + "\n";
+        if ("type" in b && b.type === "tool_use") {
+           tool_calls.push({
+             type: "function",
+             function: { name: (b as any).name, arguments: (b as any).input }
+           });
+        }
+      }
+      const astMsg: any = { role: "assistant", content: text };
+      if (tool_calls.length > 0) astMsg.tool_calls = tool_calls;
+      ollamaMessages.push(astMsg);
+    }
+  }
+
+  // Map tools
+  const ollamaTools = tools.map(t => ({
+    type: "function",
+    function: {
+      name: t.name,
+      description: t.description,
+      parameters: t.input_schema // Ollama/OpenAI natively supports standard JSON schema
+    }
+  }));
+
+  yield { type: "message_start", usage: { input_tokens: 0, output_tokens: 0 } };
+
+  const response = await fetch("http://127.0.0.1:11434/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    signal,
+    body: JSON.stringify({
+      model: ollamaModel,
+      messages: ollamaMessages,
+      tools: ollamaTools.length > 0 ? ollamaTools : undefined,
+      stream: false // Using non-streaming for simplicity in fallback, since tool calls in stream are complex to parse manually
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ollama API returned ${response.status}`);
+  }
+
+  const data: any = await response.json();
+  const msg = data.message;
+  let blockIndex = 0;
+  let finalStopReason: StopReason = "end_turn";
+
+  if (msg.content) {
+    yield { type: "content_block_start", index: blockIndex, block: { type: "text", text: "" } };
+    yield { type: "content_block_delta", index: blockIndex, delta: msg.content };
+    yield { type: "content_block_stop", index: blockIndex };
+    blockIndex++;
+  }
+
+  if (msg.tool_calls && msg.tool_calls.length > 0) {
+    finalStopReason = "tool_use";
+    for (const tc of msg.tool_calls) {
+      if (tc.function) {
+        yield { type: "tool_use_start", toolUseId: tc.function.name, name: tc.function.name };
+        yield { type: "content_block_delta", index: blockIndex, delta: { partial_json: JSON.stringify(tc.function.arguments) } as any };
+        yield { type: "content_block_stop", index: blockIndex };
+        blockIndex++;
+      }
+    }
+  }
+
   yield {
     type: "message_stop",
-    usage: finalUsage,
+    usage: { input_tokens: data.prompt_eval_count || 0, output_tokens: data.eval_count || 0 },
     stopReason: finalStopReason
   };
 }
