@@ -181,3 +181,15 @@ body {
   animation: border-pulse-glow 2.5s infinite ease-in-out;
 }
 
+/* ========== Agent Scanning & Shimmer Animations ========== */
+@keyframes shimmer {
+  0% { transform: translateX(-100%) skewX(-15deg); }
+  100% { transform: translateX(200%) skewX(-15deg); }
+}
+
+@keyframes scan {
+  0% { top: 0%; opacity: 0; }
+  10% { opacity: 1; }
+  90% { opacity: 1; }
+  100% { top: 100%; opacity: 0; }
+}

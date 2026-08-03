@@ -577,73 +577,101 @@ export default function App() {
           </div>
 
           <div className="flex-1 overflow-y-auto px-4 py-2 space-y-4 flex flex-col z-10 scrollbar-none pb-20 chat-fade-mask">
-            {chatHistory.map((msg) => (
+            {chatHistory.map((msg, idx) => (
               <div key={msg.id} className={`w-full flex flex-col gap-2 ${msg.sender === "user" ? "items-end" : "items-start"}`}>
                 <motion.div 
-                  initial={{ opacity: 0, y: 10 }} 
-                  animate={{ opacity: 1, y: 0 }} 
-                  className={`max-w-[75%] p-4 rounded-3xl text-sm leading-relaxed shadow-lg backdrop-blur-xl group ${msg.sender === "user" ? "bg-white/10 border border-white/20 text-white rounded-br-sm shadow-[0_0_20px_rgba(255,255,255,0.05)]" : "glass-panel text-white/90 rounded-bl-sm border border-cyan-500/10"}`}
+                  initial={{ opacity: 0, y: 20, scale: 0.95, filter: "blur(10px)" }} 
+                  animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }} 
+                  transition={{ duration: 0.5, ease: [0.19, 1, 0.22, 1], delay: idx === chatHistory.length - 1 ? 0 : 0 }}
+                  className={`max-w-[75%] p-4 rounded-3xl text-sm leading-relaxed shadow-2xl backdrop-blur-xl group relative overflow-hidden ${msg.sender === "user" ? "bg-gradient-to-br from-white/15 to-white/5 border border-white/20 text-white rounded-br-sm shadow-[0_0_30px_rgba(255,255,255,0.08)]" : "bg-gradient-to-br from-cyan-950/40 to-black/40 text-white/90 rounded-bl-sm border border-cyan-500/20 shadow-[0_0_30px_rgba(6,182,212,0.1)]"}`}
                 >
+                  {/* Subtle shine effect */}
+                  <div className="absolute inset-0 -translate-x-full bg-gradient-to-r from-transparent via-white/10 to-transparent group-hover:animate-[shimmer_1.5s_infinite]" />
+                  
                   {msg.sender === "snow" && msg !== chatHistory[0] ? <TypewriterText text={msg.text} /> : msg.text}
+                  
                   {msg.sender === "snow" && (
-                    <div className="flex gap-2 mt-2 pt-2 border-t border-white/5 opacity-0 group-hover:opacity-100 transition">
-                      <button onClick={() => navigator.clipboard.writeText(msg.text)} className="p-1.5 rounded-md hover:bg-white/10 text-white/40 hover:text-white"><Copy className="w-3.5 h-3.5" /></button>
-                      <button className="p-1.5 rounded-md hover:bg-white/10 text-white/40 hover:text-white"><ThumbsUp className="w-3.5 h-3.5" /></button>
-                      <button className="p-1.5 rounded-md hover:bg-white/10 text-white/40 hover:text-white"><ThumbsDown className="w-3.5 h-3.5" /></button>
+                    <div className="flex gap-2 mt-2 pt-2 border-t border-cyan-500/10 opacity-0 group-hover:opacity-100 transition duration-300">
+                      <button onClick={() => navigator.clipboard.writeText(msg.text)} className="p-1.5 rounded-md hover:bg-cyan-500/20 text-cyan-200/50 hover:text-cyan-300 transition-colors"><Copy className="w-3.5 h-3.5" /></button>
+                      <button className="p-1.5 rounded-md hover:bg-cyan-500/20 text-cyan-200/50 hover:text-cyan-300 transition-colors"><ThumbsUp className="w-3.5 h-3.5" /></button>
+                      <button className="p-1.5 rounded-md hover:bg-cyan-500/20 text-cyan-200/50 hover:text-cyan-300 transition-colors"><ThumbsDown className="w-3.5 h-3.5" /></button>
                     </div>
                   )}
                 </motion.div>
                 
                 {msg.widget && (
                   <motion.div 
-                    initial={{ opacity: 0, scale: 0.95 }} 
-                    animate={{ opacity: 1, scale: 1 }} 
+                    initial={{ opacity: 0, scale: 0.9, y: 20 }} 
+                    animate={{ opacity: 1, scale: 1, y: 0 }} 
+                    transition={{ type: "spring", stiffness: 260, damping: 20, delay: 0.1 }}
                     className="w-full max-w-[75%] mt-1"
                   >
                     {msg.widget.type === "weather" && (
-                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/20 shadow-xl flex flex-col items-center gap-3 w-full">
-                        <div className="flex items-center gap-2 text-white uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5 justify-center w-full"><MapPin className="w-3.5 h-3.5" /> {msg.widget.data.location}</div>
+                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/20 shadow-[0_0_40px_rgba(6,182,212,0.15)] flex flex-col items-center gap-3 w-full bg-black/40 backdrop-blur-2xl">
+                        <div className="flex items-center gap-2 text-cyan-300 uppercase tracking-widest text-[10px] font-bold border-b border-cyan-500/20 pb-1.5 justify-center w-full"><MapPin className="w-3.5 h-3.5" /> {msg.widget.data.location}</div>
                         <div className="flex items-center gap-4 py-1">
-                          {msg.widget.data.condition.toLowerCase().includes('snow') ? <div className="scale-75"><Snowflake3D /></div> : <Sun className="w-10 h-10 text-yellow-300 animate-pulse" />}
-                          <div className="flex flex-col"><span className="text-3xl font-extrabold text-white">{msg.widget.data.temp}</span><span className="text-xs text-white/60 capitalize">{msg.widget.data.condition}</span></div>
+                          {msg.widget.data.condition.toLowerCase().includes('snow') ? <div className="scale-75"><Snowflake3D /></div> : <Sun className="w-10 h-10 text-yellow-300 animate-[spin_10s_linear_infinite]" />}
+                          <div className="flex flex-col"><span className="text-3xl font-extrabold text-white drop-shadow-md">{msg.widget.data.temp}</span><span className="text-xs text-cyan-100/60 capitalize">{msg.widget.data.condition}</span></div>
                         </div>
                       </div>
                     )}
                     {msg.widget.type === "news" && (
-                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/20 shadow-xl flex flex-col gap-2 w-full">
-                        <div className="flex justify-between text-white uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5"><div className="flex gap-2"><Newspaper className="w-3.5 h-3.5" /> News</div><span className="text-[9px] text-white/40">{msg.widget.data.source}</span></div>
+                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/20 shadow-[0_0_40px_rgba(168,85,247,0.15)] flex flex-col gap-2 w-full bg-black/40 backdrop-blur-2xl">
+                        <div className="flex justify-between text-purple-300 uppercase tracking-widest text-[10px] font-bold border-b border-purple-500/20 pb-1.5"><div className="flex gap-2"><Newspaper className="w-3.5 h-3.5" /> News</div><span className="text-[9px] text-purple-200/40">{msg.widget.data.source}</span></div>
                         <div className="py-1 text-white text-sm leading-relaxed font-serif text-center">"{msg.widget.data.headline}"</div>
                       </div>
                     )}
                     {msg.widget.type === "stock" && (
-                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/20 shadow-xl flex flex-col items-center gap-2 w-full">
-                        <div className="flex items-center gap-2 text-white/60 uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5 w-full justify-center"><TrendingUp className="w-3.5 h-3.5" /> Market Data</div>
+                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/20 shadow-[0_0_40px_rgba(16,185,129,0.15)] flex flex-col items-center gap-2 w-full bg-black/40 backdrop-blur-2xl">
+                        <div className="flex items-center gap-2 text-emerald-300 uppercase tracking-widest text-[10px] font-bold border-b border-emerald-500/20 pb-1.5 w-full justify-center"><TrendingUp className="w-3.5 h-3.5" /> Market Data</div>
                         <div className="text-xl font-bold text-white mt-1 ticker-value">{msg.widget.data.symbol}</div>
-                        <div className="flex items-baseline gap-2"><span className="text-3xl font-bold">{msg.widget.data.price}</span><span className={`text-sm font-semibold ${msg.widget.data.up ? 'text-green-400' : 'text-red-400'}`}>{msg.widget.data.change}</span></div>
+                        <div className="flex items-baseline gap-2"><span className="text-3xl font-bold">{msg.widget.data.price}</span><span className={`text-sm font-semibold ${msg.widget.data.up ? 'text-emerald-400 drop-shadow-[0_0_8px_rgba(52,211,153,0.5)]' : 'text-rose-400 drop-shadow-[0_0_8px_rgba(251,113,133,0.5)]'}`}>{msg.widget.data.change}</span></div>
                       </div>
                     )}
                     {msg.widget.type === "time" && (
-                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/20 shadow-xl flex flex-col items-center gap-1.5 w-full">
-                        <div className="flex items-center gap-2 text-white uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5 w-full justify-center"><Clock className="w-3.5 h-3.5" /> {msg.widget.data.location} ({msg.widget.data.timezone})</div>
-                        <div className="text-4xl font-mono font-bold text-white tracking-wider my-2">{msg.widget.data.time}</div>
-                        <div className="text-xs text-white/60">{msg.widget.data.date}</div>
+                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/20 shadow-[0_0_40px_rgba(99,102,241,0.15)] flex flex-col items-center gap-1.5 w-full bg-black/40 backdrop-blur-2xl">
+                        <div className="flex items-center gap-2 text-indigo-300 uppercase tracking-widest text-[10px] font-bold border-b border-indigo-500/20 pb-1.5 w-full justify-center"><Clock className="w-3.5 h-3.5" /> {msg.widget.data.location} ({msg.widget.data.timezone})</div>
+                        <div className="text-4xl font-mono font-bold text-white tracking-wider my-2 drop-shadow-[0_0_12px_rgba(255,255,255,0.4)]">{msg.widget.data.time}</div>
+                        <div className="text-xs text-indigo-200/60">{msg.widget.data.date}</div>
                       </div>
                     )}
                     {msg.widget.type === "sport" && (
-                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/20 shadow-xl flex flex-col items-center gap-3 w-full">
-                        <div className="flex items-center gap-2 text-orange-400 uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5 w-full justify-center"><Trophy className="w-3.5 h-3.5" /> {msg.widget.data.sport}</div>
-                        <div className="flex justify-between w-full items-center px-4"><div className="flex flex-col items-center"><span className="text-sm font-bold">{msg.widget.data.team1}</span><span className="text-2xl font-black text-white">{msg.widget.data.score1}</span></div><span className="text-white/30 font-bold text-xs">VS</span><div className="flex flex-col items-center"><span className="text-sm font-bold">{msg.widget.data.team2}</span><span className="text-2xl font-black text-white">{msg.widget.data.score2}</span></div></div>
+                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/20 shadow-[0_0_40px_rgba(249,115,22,0.15)] flex flex-col items-center gap-3 w-full bg-black/40 backdrop-blur-2xl">
+                        <div className="flex items-center gap-2 text-orange-300 uppercase tracking-widest text-[10px] font-bold border-b border-orange-500/20 pb-1.5 w-full justify-center"><Trophy className="w-3.5 h-3.5" /> {msg.widget.data.sport}</div>
+                        <div className="flex justify-between w-full items-center px-4"><div className="flex flex-col items-center"><span className="text-sm font-bold text-orange-100">{msg.widget.data.team1}</span><span className="text-2xl font-black text-white">{msg.widget.data.score1}</span></div><span className="text-orange-500/40 font-bold text-xs">VS</span><div className="flex flex-col items-center"><span className="text-sm font-bold text-orange-100">{msg.widget.data.team2}</span><span className="text-2xl font-black text-white">{msg.widget.data.score2}</span></div></div>
                       </div>
                     )}
                   </motion.div>
                 )}
               </div>
             ))}
-            {isLoading && (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="self-start glass-panel text-white/80 p-4 rounded-3xl rounded-bl-sm flex items-center gap-2 border border-white/10 mr-auto">
-                <div className="w-2.5 h-2.5 bg-white/60 rounded-full animate-bounce" /><div className="w-2.5 h-2.5 bg-white/60 rounded-full animate-bounce delay-100" /><div className="w-2.5 h-2.5 bg-white/60 rounded-full animate-bounce delay-200" />
-              </motion.div>
-            )}
+            
+            <AnimatePresence>
+              {isLoading && (
+                <motion.div 
+                  initial={{ opacity: 0, x: -20, filter: "blur(10px)" }} 
+                  animate={{ opacity: 1, x: 0, filter: "blur(0px)" }} 
+                  exit={{ opacity: 0, scale: 0.9, filter: "blur(5px)" }}
+                  transition={{ duration: 0.4, ease: "easeOut" }}
+                  className="self-start relative group flex items-center gap-4 mt-2"
+                >
+                  <div className="absolute inset-0 bg-cyan-500/20 blur-xl rounded-full" />
+                  <div className="glass-panel text-cyan-300 p-4 px-6 rounded-3xl rounded-bl-sm flex items-center gap-4 border border-cyan-500/30 shadow-[0_0_30px_rgba(6,182,212,0.2)] bg-black/60 backdrop-blur-md relative overflow-hidden">
+                    {/* Scanning laser effect */}
+                    <div className="absolute top-0 bottom-0 w-1 bg-cyan-400/50 shadow-[0_0_10px_#22d3ee] animate-[scan_2s_ease-in-out_infinite]" />
+                    
+                    <Cpu className="w-5 h-5 animate-pulse text-cyan-400" />
+                    <span className="text-sm font-medium tracking-wide">Snow is exploring her neural networks...</span>
+                    
+                    <div className="flex gap-1 ml-2">
+                      <motion.div animate={{ height: [4, 16, 4] }} transition={{ repeat: Infinity, duration: 1, delay: 0 }} className="w-1 bg-cyan-400 rounded-full" />
+                      <motion.div animate={{ height: [4, 24, 4] }} transition={{ repeat: Infinity, duration: 1, delay: 0.2 }} className="w-1 bg-cyan-400 rounded-full" />
+                      <motion.div animate={{ height: [4, 12, 4] }} transition={{ repeat: Infinity, duration: 1, delay: 0.4 }} className="w-1 bg-cyan-400 rounded-full" />
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
             <div ref={chatEndRef} />
           </div>
 

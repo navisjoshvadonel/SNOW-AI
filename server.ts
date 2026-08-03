@@ -60,17 +60,19 @@ async function startServer() {
     }
   }
 
+  // Maintain a simple in-memory session cache for demonstration (in production, use a real DB)
+  const sessionCache = new Map<string, any>();
+
   app.post("/api/snow/chat", async (req, res) => {
-    const { prompt, memories, topVectors } = req.body;
+    const { prompt, sessionId = "default" } = req.body;
     if (!prompt) return res.status(400).json({ error: "Missing prompt in request" });
 
-    // System instructions for Snow
     let systemInstruction = `You are Snow, a warm, charming, and highly intelligent personal AI assistant. You are like a best friend who happens to know everything.
 Your personality: friendly, enthusiastic, caring, and a little bit playful. You never sound robotic or corporate.
 Keep responses natural and conversational since they will be spoken aloud. Avoid bullet points, markdown, and asterisks.
-You have access to real-time Google Search. Always search for current data when asked about news, weather, prices, sports, or anything time-sensitive.
+You have access to local tools and files. Use them when requested.
 
-ANIMATION TAGS — you MUST include these in your responses to trigger beautiful visual cards on the screen:
+ANIMATION TAGS — you MUST include these in your responses to trigger beautiful visual cards on the screen when answering related questions:
 
 1. WEATHER questions — include both of these:
    [WEATHER: SUNNY] or [WEATHER: RAIN] or [WEATHER: CLOUDY] or [WEATHER: SNOW] or [WEATHER: STORM]
@@ -96,45 +98,51 @@ ANIMATION TAGS — you MUST include these in your responses to trigger beautiful
 
 IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the user — they only trigger visuals.`;
 
-    if (memories?.length > 0) {
-      systemInstruction += `\n\nThings I know about you:\n`;
-      memories.forEach((m: any) => systemInstruction += `- ${m.source} ${m.rel} ${m.target}\n`);
-    }
-    if (topVectors?.length > 0) {
-      systemInstruction += `\n\nRecent context:\n`;
-      topVectors.forEach((d: any) => systemInstruction += `\n- ${d.text}\n`);
-    }
-
-    const key = process.env.GEMINI_API_KEY;
-
     try {
-      let responseText = "";
-      let grounding = null;
+      console.log("[SNOW BACKEND] Starting Agent for prompt:", prompt);
+      
+      // Initialize or retrieve agent engine for session
+      let engine = sessionCache.get(sessionId);
+      if (!engine) {
+        engine = await createAgent({
+          cwd: process.cwd(),
+          model: "gemini-2.5-flash",
+          systemPrompt: systemInstruction,
+          permissionMode: "bypassPermissions", // Allow tools to run locally
+        });
+        sessionCache.set(sessionId, engine);
+      }
 
-      if (key && key !== "") {
-        const response = await callAI(prompt, systemInstruction);
-        responseText = response.text || "I didn't quite get that. Could you try again?";
-        grounding = (response as any).candidates?.[0]?.groundingMetadata || null;
-      } else {
-        try {
-          console.log("[SNOW BACKEND] Attempting local Ollama query...");
-          responseText = await callOllama(prompt, systemInstruction);
-          console.log("[SNOW BACKEND] Ollama query successful!");
-        } catch (ollamaErr: any) {
-          console.warn("[SNOW BACKEND] Ollama failed or not running, falling back to mock mode:", ollamaErr.message || ollamaErr);
-          throw new Error("OLLAMA_OFFLINE");
+      const abortController = new AbortController();
+      let responseText = "";
+      let toolActivity = [];
+
+      for await (const event of engine.submitMessage(prompt, abortController.signal)) {
+        if (event.type === "content_block_delta" && event.delta) {
+          if (typeof event.delta === "string") {
+            responseText += event.delta;
+          }
+        }
+        if (event.type === "tool_use_start") {
+          console.log(`[SNOW BACKEND] Agent is using tool: ${event.name}`);
+          toolActivity.push(event.name);
         }
       }
 
-      return res.json({ text: responseText, grounding, timestamp: new Date().toISOString() });
+      if (!responseText.trim()) {
+        responseText = "I'm sorry, I encountered an issue while thinking. Could you try asking me again?";
+      }
+
+      return res.json({ 
+        text: responseText, 
+        toolActivity, 
+        timestamp: new Date().toISOString() 
+      });
 
     } catch (err: any) {
+      console.warn("[SNOW BACKEND] Agent failed, falling back to mock mode:", err.message || err);
       const p = prompt.toLowerCase();
-      let mockText = "I'm Snow, and I'm currently running in local offline mode. ";
-      
-      if (err.message !== "OLLAMA_OFFLINE") {
-        console.warn("[SNOW BACKEND] AI call failed, falling back to mock mode:", err.message || err);
-      }
+      let mockText = "I'm Snow, and I'm currently running in offline mode. ";
 
       if (p.includes("weather") || p.includes("sunny")) {
         mockText = "It's a gorgeous sunny day! The temperature is around 28 degrees. [WEATHER: SUNNY] [UI_WEATHER: {\"temp\": \"28°C\", \"condition\": \"Sunny\", \"location\": \"Your City\", \"humidity\": \"55%\", \"wind\": \"8 km/h\"}]";
@@ -142,17 +150,11 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
         mockText = "Oh, it's quite rainy today. Don't forget your umbrella! [WEATHER: RAIN] [UI_WEATHER: {\"temp\": \"18°C\", \"condition\": \"Rainy\", \"location\": \"Your City\", \"humidity\": \"80%\", \"wind\": \"20 km/h\"}]";
       } else if (p.includes("snow")) {
         mockText = "It's snowing beautifully outside! [WEATHER: SNOW] [UI_WEATHER: {\"temp\": \"-2°C\", \"condition\": \"Snowing\", \"location\": \"Your City\", \"humidity\": \"90%\", \"wind\": \"5 km/h\"}]";
-      } else if (p.includes("news")) {
-        mockText = "Here's a top story for you today! [UI_NEWS: {\"headline\": \"AI assistants become smarter and more personal than ever\", \"source\": \"Tech Insider\", \"category\": \"Technology\"}]";
-      } else if (p.includes("joke")) {
-        mockText = "Why don't scientists trust atoms? Because they make up everything! [UI_JOKE: {\"punchline\": true}]";
-      } else if (p.includes("time")) {
-        mockText = "Let me check the time for you. [UI_TIME: {\"time\": \"09:45 AM\", \"timezone\": \"IST\", \"location\": \"Mumbai, India\", \"date\": \"Tuesday, June 10\"}]";
       } else {
         mockText += " Ask me about the weather, news, jokes, or the time to see my animations in action!";
       }
 
-      return res.json({ text: mockText, grounding: null, timestamp: new Date().toISOString() });
+      return res.json({ text: mockText, timestamp: new Date().toISOString() });
     }
   });
 

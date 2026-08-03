@@ -1,17 +1,4 @@
-/**
- * AGENT CORE — engine/modelClient.ts
- *
- * Thin streaming wrapper around the Anthropic Messages API.
- * Inferred from: services/api/claude.ts, query.ts, utils/thinking.ts
- *
- * Design notes from blueprint analysis:
- *  - The blueprint uses prompt-caching betas aggressively (cache_control blocks)
- *  - Thinking tokens are gated by a ThinkingConfig + model capability check
- *  - Retry logic: rate-limit errors get exponential backoff; other 5xx get 1 retry
- *  - The client streams via EventSource/SSE, not WebSocket, for the main loop
- *  - Usage is returned on the final message_stop event
- */
-
+import { GoogleGenAI } from "@google/genai";
 import type {
   ContentBlock,
   Message,
@@ -31,27 +18,15 @@ export type ModelCallParams = {
   maxTokens?: number;
 };
 
-/** Map model name → cost per 1k tokens [input, output] in USD */
 export const COST_PER_1K: Record<string, [number, number]> = {
-  "claude-opus-4-5":     [0.015, 0.075],
-  "claude-sonnet-4-5":   [0.003, 0.015],
-  "claude-haiku-4-5":    [0.00025, 0.00125],
-  // Fallback for unknown models
-  default:               [0.003, 0.015],
+  "gemini-2.5-flash": [0.000075, 0.0003],
+  "gemini-2.5-pro": [0.00125, 0.005],
+  default: [0.000075, 0.0003],
 };
 
-const ANTHROPIC_API = "https://api.anthropic.com/v1/messages";
-
-/** Default max output tokens; budget-constrained runs use lower values. */
 const DEFAULT_MAX_TOKENS = 8192;
-
-/** Maximum retry attempts for retryable errors. */
 const MAX_RETRIES = 3;
-
-/** Base delay for exponential back-off (ms). */
 const RETRY_BASE_MS = 1000;
-
-// ─────────────────────────────────────────────────────────────────────────────
 
 export async function* callModel(
   params: ModelCallParams,
@@ -74,251 +49,181 @@ export async function* callModel(
   }
 }
 
-// ─── Single-attempt streaming call ───────────────────────────────────────────
-
 async function* callModelOnce(params: ModelCallParams): AsyncGenerator<QueryEvent> {
   const {
-    model,
+    model = "gemini-2.5-flash",
     system,
     messages,
     tools,
-    thinkingConfig,
     signal,
-    maxTokens = DEFAULT_MAX_TOKENS,
   } = params;
 
-  const body = buildRequestBody({
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) throw new Error("GEMINI_API_KEY environment variable is required");
+  const ai = new GoogleGenAI({ apiKey });
+
+  // Map messages to Gemini format
+  const contents = messages.map(msg => {
+    return {
+      role: msg.role === "assistant" ? "model" : "user",
+      parts: msg.content.map(block => {
+        if ("text" in block) return { text: block.text };
+        if ("type" in block && block.type === "tool_result") {
+          return {
+            functionResponse: {
+              name: (block as any).tool_use_id || "unknown",
+              response: { result: (block as any).content }
+            }
+          };
+        }
+        if ("type" in block && block.type === "tool_use") {
+          return {
+            functionCall: {
+              name: (block as any).name,
+              args: (block as any).input
+            }
+          };
+        }
+        return { text: "" };
+      })
+    };
+  });
+
+  // Map tools to Gemini format
+  const functionDeclarations = tools.map(t => ({
+    name: t.name,
+    description: t.description,
+    parameters: mapSchemaToGemini(t.input_schema)
+  }));
+
+  const toolConfig = functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined;
+
+  const reqConfig: any = {
+    systemInstruction: system,
+    tools: toolConfig,
+  };
+
+  yield { type: "message_start", usage: { input_tokens: 0, output_tokens: 0 } };
+
+  const stream = await ai.models.generateContentStream({
     model,
-    system,
-    messages,
-    tools,
-    thinkingConfig,
-    maxTokens,
+    contents,
+    config: reqConfig
   });
 
-  const resp = await fetch(ANTHROPIC_API, {
-    method: "POST",
-    headers: buildHeaders(),
-    body: JSON.stringify(body),
-    signal,
-  });
-
-  if (!resp.ok) {
-    const text = await resp.text().catch(() => "");
-    throw new ApiError(resp.status, text);
-  }
-
-  if (!resp.body) throw new ApiError(0, "Empty response body");
-
-  yield* parseSSEStream(resp.body);
-}
-
-// ─── SSE stream parser ────────────────────────────────────────────────────────
-
-async function* parseSSEStream(
-  body: ReadableStream<Uint8Array>,
-): AsyncGenerator<QueryEvent> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  // Accumulation state for content blocks
-  const contentBlocks: ContentBlock[] = [];
-  let currentBlockIndex = -1;
+  let blockIndex = 0;
   let finalUsage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
   let finalStopReason: StopReason = "end_turn";
 
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
+  for await (const chunk of stream) {
+    if (signal.aborted) throw new Error("Aborted by user");
 
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
+    if (chunk.usageMetadata) {
+      finalUsage.input_tokens = chunk.usageMetadata.promptTokenCount ?? 0;
+      finalUsage.output_tokens = chunk.usageMetadata.candidatesTokenCount ?? 0;
+    }
 
-      for (const line of lines) {
-        if (!line.startsWith("data: ")) continue;
-        const data = line.slice(6).trim();
-        if (data === "[DONE]") break;
+    if (chunk.candidates && chunk.candidates.length > 0) {
+      const candidate = chunk.candidates[0];
+      if (candidate.finishReason) {
+        if (candidate.finishReason === "STOP") finalStopReason = "end_turn";
+        else if (candidate.finishReason === "MAX_TOKENS") finalStopReason = "max_tokens";
+        else finalStopReason = "end_turn";
+      }
 
-        let event: AnthropicStreamEvent;
-        try {
-          event = JSON.parse(data) as AnthropicStreamEvent;
-        } catch {
-          continue;
-        }
-
-        // ── Dispatch stream events ───────────────────────────────────
-        switch (event.type) {
-          case "message_start":
-            finalUsage = event.message.usage ?? finalUsage;
+      if (candidate.content && candidate.content.parts) {
+        for (const part of candidate.content.parts) {
+          if (part.text) {
             yield {
-              type: "message_start",
-              usage: finalUsage,
+              type: "content_block_start",
+              index: blockIndex,
+              block: { type: "text", text: "" }
             };
-            break;
-
-          case "content_block_start": {
-            currentBlockIndex = event.index;
-            const block = event.content_block as ContentBlock;
-            contentBlocks[event.index] = block;
-            if (block.type === "tool_use") {
-              yield {
-                type: "tool_use_start",
-                toolUseId: block.id as any,
-                name: block.name,
-              };
-            } else {
-              yield {
-                type: "content_block_start",
-                index: event.index,
-                block,
-              };
-            }
-            break;
-          }
-
-          case "content_block_delta": {
-            const delta = event.delta;
-            // Accumulate text into the block
-            const block = contentBlocks[event.index];
-            if (block?.type === "text" && delta.type === "text_delta") {
-              block.text = (block.text ?? "") + delta.text;
-              yield {
-                type: "content_block_delta",
-                index: event.index,
-                delta: delta.text,
-              };
-            } else if (block?.type === "thinking" && delta.type === "thinking_delta") {
-              (block as any).thinking =
-                ((block as any).thinking ?? "") + delta.thinking;
-            } else if (block?.type === "tool_use" && delta.type === "input_json_delta") {
-              // Accumulate partial JSON for tool input
-              (block as any)._inputJson =
-                ((block as any)._inputJson ?? "") + delta.partial_json;
-            }
-            break;
-          }
-
-          case "content_block_stop": {
-            const block = contentBlocks[event.index];
-            // Finalise tool_use input JSON
-            if (block?.type === "tool_use") {
-              try {
-                (block as any).input = JSON.parse((block as any)._inputJson ?? "{}");
-              } catch {
-                (block as any).input = {};
-              }
-            }
-            yield { type: "content_block_stop", index: event.index };
-            break;
-          }
-
-          case "message_delta":
-            if (event.usage) {
-              finalUsage.output_tokens = event.usage.output_tokens ?? finalUsage.output_tokens;
-            }
-            if (event.delta?.stop_reason) {
-              finalStopReason = event.delta.stop_reason as StopReason;
-            }
-            break;
-
-          case "message_stop":
             yield {
-              type: "message_stop",
-              usage: finalUsage,
-              stopReason: finalStopReason,
+              type: "content_block_delta",
+              index: blockIndex,
+              delta: part.text
             };
-            break;
-
-          case "error":
-            throw new ApiError(event.error?.status ?? 0, event.error?.message ?? "Unknown error");
+            yield { type: "content_block_stop", index: blockIndex };
+            blockIndex++;
+          }
+          if (part.functionCall) {
+            finalStopReason = "tool_use";
+            yield {
+              type: "tool_use_start",
+              toolUseId: part.functionCall.name,
+              name: part.functionCall.name
+            };
+            yield {
+              type: "content_block_delta",
+              index: blockIndex,
+              delta: { partial_json: JSON.stringify(part.functionCall.args) } as any
+            };
+            yield { type: "content_block_stop", index: blockIndex };
+            blockIndex++;
+          }
         }
       }
     }
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-// ─── Request builder ──────────────────────────────────────────────────────────
-
-function buildRequestBody(params: {
-  model: string;
-  system: string;
-  messages: Message[];
-  tools: Array<{ name: string; description: string; input_schema: unknown }>;
-  thinkingConfig: ThinkingConfig;
-  maxTokens: number;
-}) {
-  const body: Record<string, unknown> = {
-    model: params.model,
-    max_tokens: params.maxTokens,
-    system: [
-      {
-        type: "text",
-        text: params.system,
-        // Cache the system prompt — it changes infrequently and is large
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    messages: params.messages.map(serializeMessage),
-    tools: params.tools,
-    stream: true,
-  };
-
-  // Thinking / extended thinking support
-  if (params.thinkingConfig.type === "enabled") {
-    body.thinking = {
-      type: "enabled",
-      budget_tokens: params.thinkingConfig.budgetTokens,
-    };
-    body.betas = ["interleaved-thinking-2025-05-14"];
-  } else if (params.thinkingConfig.type === "adaptive") {
-    body.thinking = { type: "auto" };
-    body.betas = ["interleaved-thinking-2025-05-14"];
   }
 
-  return body;
-}
-
-function buildHeaders(): Record<string, string> {
-  const apiKey = process.env["ANTHROPIC_API_KEY"] ?? "";
-  return {
-    "Content-Type": "application/json",
-    "x-api-key": apiKey,
-    "anthropic-version": "2023-06-01",
-    "anthropic-beta": "prompt-caching-2024-07-31",
+  yield {
+    type: "message_stop",
+    usage: finalUsage,
+    stopReason: finalStopReason
   };
 }
 
-function serializeMessage(msg: Message): unknown {
-  return {
-    role: msg.role === "system" ? "user" : msg.role,
-    content: msg.content,
+// Map JSON schema to Gemini Schema
+function mapSchemaToGemini(schema: any): any {
+  if (!schema) return undefined;
+  
+  const mapType = (type: string) => {
+    switch (type) {
+      case "string": return "STRING";
+      case "number": return "NUMBER";
+      case "integer": return "INTEGER";
+      case "boolean": return "BOOLEAN";
+      case "array": return "ARRAY";
+      case "object": return "OBJECT";
+      default: return "STRING";
+    }
   };
-}
 
-// ─── Cost calculation ─────────────────────────────────────────────────────────
+  const traverse = (s: any): any => {
+    if (!s || typeof s !== "object") return undefined;
+    const res: any = { type: mapType(s.type) };
+    if (s.description) res.description = s.description;
+    if (s.properties) {
+      res.properties = {};
+      for (const [k, v] of Object.entries(s.properties)) {
+        res.properties[k] = traverse(v);
+      }
+    }
+    if (s.items) {
+      res.items = traverse(s.items);
+    }
+    if (s.required) {
+      res.required = s.required;
+    }
+    if (s.enum) {
+      res.enum = s.enum;
+    }
+    return res;
+  };
+  
+  return traverse(schema);
+}
 
 export function costFromUsage(usage: TokenUsage, model: string): number {
-  const [inputRate, outputRate] =
-    COST_PER_1K[model] ?? COST_PER_1K["default"]!;
+  const [inputRate, outputRate] = COST_PER_1K[model] ?? COST_PER_1K["default"]!;
   const input  = (usage.input_tokens  / 1000) * inputRate;
   const output = (usage.output_tokens / 1000) * outputRate;
-  // Cache reads are cheaper (blueprint charges ~10% of normal input price)
-  const cacheRead = ((usage.cache_read_input_tokens ?? 0) / 1000) * inputRate * 0.1;
-  return input + output + cacheRead;
+  return input + output;
 }
 
-// ─── Error handling ───────────────────────────────────────────────────────────
-
 class ApiError extends Error {
-  constructor(
-    public status: number,
-    message: string,
-  ) {
+  constructor(public status: number, message: string) {
     super(message);
     this.name = "ApiError";
   }
@@ -334,27 +239,12 @@ function classifyApiError(err: unknown) {
   const msg = err instanceof Error ? err.message : String(err);
   const isAbort = msg.includes("abort") || msg.includes("AbortError");
   return {
-    code: isAbort
-      ? ("ABORT" as const)
-      : ("API_ERROR" as const),
+    code: isAbort ? ("ABORT" as const) : ("API_ERROR" as const),
     message: msg,
     retryable: false,
   };
 }
 
-// ─── Utilities ────────────────────────────────────────────────────────────────
-
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
-
-// ─── Anthropic stream event types (private) ───────────────────────────────────
-
-type AnthropicStreamEvent =
-  | { type: "message_start"; message: { usage?: TokenUsage } }
-  | { type: "content_block_start"; index: number; content_block: unknown }
-  | { type: "content_block_delta"; index: number; delta: { type: string; text?: string; thinking?: string; partial_json?: string } }
-  | { type: "content_block_stop"; index: number }
-  | { type: "message_delta"; delta?: { stop_reason?: string }; usage?: { output_tokens?: number } }
-  | { type: "message_stop" }
-  | { type: "error"; error?: { status?: number; message?: string } };
