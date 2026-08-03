@@ -9,7 +9,7 @@ interface ChatItem {
   sender: "user" | "snow";
   text: string;
   widget?: {
-    type: "weather" | "news" | "stock" | "sport" | "time" | "music";
+    type: "weather" | "news" | "stock" | "sport" | "time" | "music" | "system";
     data: any;
   };
 }
@@ -20,6 +20,7 @@ interface StockData { symbol: string; price: string; change: string; up: boolean
 interface SportData { team1: string; score1: string; team2: string; score2: string; sport: string; }
 interface TimeData { time: string; timezone: string; location: string; date: string; }
 interface MusicData { title: string; artist: string; genre: string; }
+interface SystemData { cpu: string; ram: string; temp: string; status: string; }
 
 interface GroundingMetadata {
   webSearchQueries?: string[];
@@ -120,6 +121,7 @@ export default function App() {
   const [sportWidget, setSportWidget] = useState<SportData | null>(null);
   const [timeWidget, setTimeWidget] = useState<TimeData | null>(null);
   const [musicWidget, setMusicWidget] = useState<MusicData | null>(null);
+  const [systemWidget, setSystemWidget] = useState<SystemData | null>(null);
 
   const [selectedVoice, setSelectedVoice] = useState("Aoede");
   const [voiceSpeed, setVoiceSpeed] = useState(1.05);
@@ -325,6 +327,7 @@ export default function App() {
   const clearWidgets = () => {
     setWeatherWidget(null); setNewsWidget(null); setStockWidget(null);
     setSportWidget(null); setTimeWidget(null); setMusicWidget(null);
+    setSystemWidget(null);
     setWeatherState("default");
     setShowConfetti(false);
   };
@@ -388,9 +391,9 @@ export default function App() {
       setGroundingInfo(data.grounding || null);
 
       let widgetData: any = null;
-      let widgetType: "weather" | "news" | "stock" | "sport" | "time" | "music" | null = null;
+      let widgetType: "weather" | "news" | "stock" | "sport" | "time" | "music" | "system" | null = null;
 
-      const parseWidget = (tag: string, setter: any, type: "weather" | "news" | "stock" | "sport" | "time" | "music") => {
+      const parseWidget = (tag: string, setter: any, type: "weather" | "news" | "stock" | "sport" | "time" | "music" | "system") => {
         const jsonStr = extractJsonFromTag(aiText, tag);
         if (jsonStr) {
           try {
@@ -413,6 +416,7 @@ export default function App() {
       parseWidget("[UI_SPORT:", setSportWidget, "sport");
       parseWidget("[UI_TIME:", setTimeWidget, "time");
       parseWidget("[UI_MUSIC:", setMusicWidget, "music");
+      parseWidget("[UI_SYSTEM:", setSystemWidget, "system");
 
       if (aiText.includes("[UI_JOKE:")) {
         setShowConfetti(true);
@@ -420,7 +424,7 @@ export default function App() {
       }
 
       let cleanDisplay = aiText;
-      const uiTags = ["[UI_WEATHER:", "[UI_NEWS:", "[UI_STOCK:", "[UI_SPORT:", "[UI_TIME:", "[UI_MUSIC:", "[UI_JOKE:"];
+      const uiTags = ["[UI_WEATHER:", "[UI_NEWS:", "[UI_STOCK:", "[UI_SPORT:", "[UI_TIME:", "[UI_MUSIC:", "[UI_JOKE:", "[UI_SYSTEM:"];
       
       uiTags.forEach(tag => {
         const jsonStr = extractJsonFromTag(cleanDisplay, tag);
@@ -641,6 +645,16 @@ export default function App() {
                         <div className="flex justify-between w-full items-center px-4"><div className="flex flex-col items-center"><span className="text-sm font-bold text-orange-100">{msg.widget.data.team1}</span><span className="text-2xl font-black text-white">{msg.widget.data.score1}</span></div><span className="text-orange-500/40 font-bold text-xs">VS</span><div className="flex flex-col items-center"><span className="text-sm font-bold text-orange-100">{msg.widget.data.team2}</span><span className="text-2xl font-black text-white">{msg.widget.data.score2}</span></div></div>
                       </div>
                     )}
+                    {msg.widget.type === "system" && (
+                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/20 shadow-[0_0_40px_rgba(34,211,238,0.15)] flex flex-col items-center gap-3 w-full bg-black/40 backdrop-blur-2xl">
+                        <div className="flex items-center gap-2 text-cyan-300 uppercase tracking-widest text-[10px] font-bold border-b border-cyan-500/20 pb-1.5 w-full justify-center"><Cpu className="w-3.5 h-3.5" /> System Telemetry</div>
+                        <div className="grid grid-cols-2 gap-4 w-full px-2">
+                          <div className="flex flex-col items-center"><span className="text-[10px] text-cyan-200/60">CPU</span><span className="text-xl font-bold text-white">{msg.widget.data.cpu}</span></div>
+                          <div className="flex flex-col items-center"><span className="text-[10px] text-cyan-200/60">RAM</span><span className="text-xl font-bold text-white">{msg.widget.data.ram}</span></div>
+                        </div>
+                        <div className="text-[10px] text-cyan-400 font-bold mt-1">Status: {msg.widget.data.status}</div>
+                      </div>
+                    )}
                   </motion.div>
                 )}
               </div>
@@ -796,6 +810,16 @@ export default function App() {
                  <div className="flex items-center gap-2 text-pink-400 uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5 w-full justify-center"><Music className="w-3.5 h-3.5" /> Now Playing</div>
                  <div className="text-sm font-bold text-white text-center mt-1">{musicWidget.title}</div>
                  <div className="text-[10px] text-white/60">{musicWidget.artist} • {musicWidget.genre}</div>
+               </motion.div>
+             )}
+
+             {systemWidget && (
+               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-4 rounded-2xl border border-cyan-500/20 shadow-xl flex flex-col items-center gap-2 w-full">
+                 <div className="flex items-center gap-2 text-cyan-400 uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5 w-full justify-center"><Cpu className="w-3.5 h-3.5" /> System Telemetry</div>
+                 <div className="flex justify-between w-full mt-2 px-2">
+                   <div className="flex flex-col"><span className="text-[10px] text-white/60">CPU</span><span className="text-lg font-bold">{systemWidget.cpu}</span></div>
+                   <div className="flex flex-col text-right"><span className="text-[10px] text-white/60">RAM</span><span className="text-lg font-bold">{systemWidget.ram}</span></div>
+                 </div>
                </motion.div>
              )}
 

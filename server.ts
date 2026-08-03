@@ -96,6 +96,9 @@ ANIMATION TAGS — you MUST include these in your responses to trigger beautiful
 7. MUSIC or SONG questions — include:
    [UI_MUSIC: {"title": "Song Name", "artist": "Artist Name", "genre": "Pop"}]
 
+8. SYSTEM or PC STATS questions — include:
+   [UI_SYSTEM: {"cpu": "45%", "ram": "12GB / 32GB", "temp": "65°C", "status": "Optimal"}]
+
 IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the user — they only trigger visuals.`;
 
     try {
@@ -140,21 +143,27 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
       });
 
     } catch (err: any) {
-      console.warn("[SNOW BACKEND] Agent failed, falling back to mock mode:", err.message || err);
-      const p = prompt.toLowerCase();
-      let mockText = "I'm Snow, and I'm currently running in offline mode. ";
+      console.warn("[SNOW BACKEND] Agent failed, falling back to local Ollama mode:", err.message || err);
+      try {
+        let ollamaText = await callOllama(prompt, systemInstruction);
+        return res.json({ text: ollamaText, timestamp: new Date().toISOString() });
+      } catch (ollamaErr: any) {
+        console.error("[SNOW BACKEND] Ollama fallback also failed:", ollamaErr.message || ollamaErr);
+        const p = prompt.toLowerCase();
+        let mockText = "I'm Snow, and I'm currently running in offline mock mode. (Ollama also failed) ";
 
-      if (p.includes("weather") || p.includes("sunny")) {
-        mockText = "It's a gorgeous sunny day! The temperature is around 28 degrees. [WEATHER: SUNNY] [UI_WEATHER: {\"temp\": \"28°C\", \"condition\": \"Sunny\", \"location\": \"Your City\", \"humidity\": \"55%\", \"wind\": \"8 km/h\"}]";
-      } else if (p.includes("rain")) {
-        mockText = "Oh, it's quite rainy today. Don't forget your umbrella! [WEATHER: RAIN] [UI_WEATHER: {\"temp\": \"18°C\", \"condition\": \"Rainy\", \"location\": \"Your City\", \"humidity\": \"80%\", \"wind\": \"20 km/h\"}]";
-      } else if (p.includes("snow")) {
-        mockText = "It's snowing beautifully outside! [WEATHER: SNOW] [UI_WEATHER: {\"temp\": \"-2°C\", \"condition\": \"Snowing\", \"location\": \"Your City\", \"humidity\": \"90%\", \"wind\": \"5 km/h\"}]";
-      } else {
-        mockText += " Ask me about the weather, news, jokes, or the time to see my animations in action!";
+        if (p.includes("weather") || p.includes("sunny")) {
+          mockText = "It's a gorgeous sunny day! The temperature is around 28 degrees. [WEATHER: SUNNY] [UI_WEATHER: {\"temp\": \"28°C\", \"condition\": \"Sunny\", \"location\": \"Your City\", \"humidity\": \"55%\", \"wind\": \"8 km/h\"}]";
+        } else if (p.includes("rain")) {
+          mockText = "Oh, it's quite rainy today. Don't forget your umbrella! [WEATHER: RAIN] [UI_WEATHER: {\"temp\": \"18°C\", \"condition\": \"Rainy\", \"location\": \"Your City\", \"humidity\": \"80%\", \"wind\": \"20 km/h\"}]";
+        } else if (p.includes("snow")) {
+          mockText = "It's snowing beautifully outside! [WEATHER: SNOW] [UI_WEATHER: {\"temp\": \"-2°C\", \"condition\": \"Snowing\", \"location\": \"Your City\", \"humidity\": \"90%\", \"wind\": \"5 km/h\"}]";
+        } else {
+          mockText += " Ask me about the weather, news, jokes, or the time to see my animations in action!";
+        }
+
+        return res.json({ text: mockText, timestamp: new Date().toISOString() });
       }
-
-      return res.json({ text: mockText, timestamp: new Date().toISOString() });
     }
   });
 

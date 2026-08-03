@@ -193,3 +193,53 @@ body {
   90% { opacity: 1; }
   100% { top: 100%; opacity: 0; }
 }
+
+/* ========== Holographic Pattern ========== */
+.hologram-bg {
+  background: 
+    linear-gradient(90deg, rgba(34, 211, 238, 0.03) 1px, transparent 1px) 0 0 / 20px 20px,
+    linear-gradient(rgba(34, 211, 238, 0.03) 1px, transparent 1px) 0 0 / 20px 20px;
+  background-size: 40px 40px;
+  animation: bg-pan 30s linear infinite;
+}
+
+@keyframes bg-pan {
+  0% { background-position: 0% 0%; }
+  100% { background-position: 100% 100%; }
+}
+
+/* ========== Cyber Glitch Text ========== */
+.glitch-text {
+  position: relative;
+  display: inline-block;
+}
+
+.glitch-text::before,
+.glitch-text::after {
+  content: attr(data-text);
+  position: absolute;
+  top: 0;
+  left: 0;
+  opacity: 0.8;
+}
+.glitch-text::before {
+  left: 2px;
+  text-shadow: -1px 0 rgba(255, 0, 0, 0.7);
+  clip: rect(24px, 550px, 90px, 0);
+  animation: glitch-anim 2s infinite linear alternate-reverse;
+}
+.glitch-text::after {
+  left: -2px;
+  text-shadow: -1px 0 rgba(0, 255, 255, 0.7);
+  clip: rect(85px, 550px, 140px, 0);
+  animation: glitch-anim 2.5s infinite linear alternate-reverse;
+}
+
+@keyframes glitch-anim {
+  0% { clip: rect(78px, 9999px, 83px, 0); }
+  20% { clip: rect(61px, 9999px, 73px, 0); }
+  40% { clip: rect(10px, 9999px, 20px, 0); }
+  60% { clip: rect(98px, 9999px, 10px, 0); }
+  80% { clip: rect(51px, 9999px, 60px, 0); }
+  100% { clip: rect(32px, 9999px, 8px, 0); }
+}

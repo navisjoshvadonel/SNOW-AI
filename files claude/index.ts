@@ -33,6 +33,7 @@ export {
   GlobTool,
   GrepTool,
   WebSearchTool,
+  SystemTelemetryTool,
   createDefaultToolRegistry,
 } from "./builtins.js";
 
