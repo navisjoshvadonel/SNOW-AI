@@ -12,6 +12,7 @@ interface ChatItem {
     type: "weather" | "news" | "stock" | "sport" | "time" | "music" | "system";
     data: any;
   };
+  toolActivity?: string[];
 }
 
 interface WeatherData { temp: string; condition: string; location: string; humidity?: string; wind?: string; }
@@ -147,7 +148,15 @@ export default function App() {
       return;
     }
     try {
-      const utterance = new SpeechSynthesisUtterance(text);
+      const sanitizedText = text
+        .replace(/https?:\/\/\S+/gi, "")
+        .replace(/[*#`_\-~]/g, "")
+        .replace(/\[WEATHER:[^\]]+\]/gi, "")
+        .replace(/\[UI_[A-Z]+:[^\]]+\]/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+      const utterance = new SpeechSynthesisUtterance(sanitizedText);
       const voices = window.speechSynthesis.getVoices();
 
       const getBestFemaleVoice = (voicesList: SpeechSynthesisVoice[]) => {
@@ -438,10 +447,12 @@ export default function App() {
       });
 
       cleanDisplay = cleanDisplay
+        .replace(/\[UI_[A-Z]+:[^\]]+\]/gi, "")
         .replace(/\[WEATHER:\s*[A-Z]+\]/gi, "")
+        .replace(/\s+/g, " ")
         .trim();
 
-      setResponseStats({ time: ((Date.now() - startTime) / 1000).toFixed(2) + "s", network: "Excellent", model: "Gemini 2.5" });
+      setResponseStats({ time: ((Date.now() - startTime) / 1000).toFixed(2) + "s", network: "Excellent", model: data.model || "Gemini 2.5" });
 
       setChatHistory((prev) => [
         ...prev,
@@ -449,7 +460,8 @@ export default function App() {
           id: `snow-${Date.now()}`,
           sender: "snow",
           text: cleanDisplay,
-          widget: widgetType ? { type: widgetType, data: widgetData } : undefined
+          widget: widgetType ? { type: widgetType, data: widgetData } : undefined,
+          toolActivity: data.toolActivity || []
         }
       ]);
       speakText(cleanDisplay);
@@ -594,6 +606,13 @@ export default function App() {
                   
                   {msg.sender === "snow" && msg !== chatHistory[0] ? <TypewriterText text={msg.text} /> : msg.text}
                   
+                  {msg.toolActivity && msg.toolActivity.length > 0 && (
+                    <div className="flex items-center gap-1.5 mt-2.5 text-[10px] text-cyan-300 font-mono bg-cyan-950/60 border border-cyan-500/30 px-2.5 py-1 rounded-full w-fit shadow-[0_0_12px_rgba(34,211,238,0.15)]">
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+                      <span>Executed Tool: <strong className="text-white font-bold">{msg.toolActivity.join(", ")}</strong></span>
+                    </div>
+                  )}
+
                   {msg.sender === "snow" && (
                     <div className="flex gap-2 mt-2 pt-2 border-t border-cyan-500/10 opacity-0 group-hover:opacity-100 transition duration-300">
                       <button onClick={() => navigator.clipboard.writeText(msg.text)} className="p-1.5 rounded-md hover:bg-cyan-500/20 text-cyan-200/50 hover:text-cyan-300 transition-colors"><Copy className="w-3.5 h-3.5" /></button>

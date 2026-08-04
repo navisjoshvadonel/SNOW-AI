@@ -6,6 +6,7 @@ import dotenv from "dotenv";
 import { exec } from "child_process";
 import http from "http";
 import { GoogleGenAI } from "@google/genai";
+import fs from "fs";
 
 dotenv.config();
 
@@ -109,11 +110,27 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
       // Initialize or retrieve agent engine for session
       let engine = sessionCache.get(sessionId);
       if (!engine) {
+        let mcpServers = [];
+        const mcpConfigPath = path.join(process.cwd(), "mcp_config.json");
+        if (fs.existsSync(mcpConfigPath)) {
+          try {
+            const configRaw = fs.readFileSync(mcpConfigPath, "utf8");
+            const configJson = JSON.parse(configRaw);
+            if (Array.isArray(configJson.mcpServers)) {
+              mcpServers = configJson.mcpServers;
+              console.log(`[SNOW BACKEND] Loaded ${mcpServers.length} MCP servers from mcp_config.json`);
+            }
+          } catch (mcpErr: any) {
+            console.warn("[SNOW BACKEND] Failed to parse mcp_config.json:", mcpErr.message);
+          }
+        }
+
         engine = await createAgent({
           cwd: process.cwd(),
           model: "gemini-2.5-flash",
           systemPrompt: systemInstruction,
           permissionMode: "bypassPermissions", // Allow tools to run locally
+          mcpServers: mcpServers,
         });
         sessionCache.set(sessionId, engine);
       }
@@ -141,6 +158,7 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
       return res.json({ 
         text: responseText, 
         toolActivity, 
+        model: "Gemini 2.5",
         timestamp: new Date().toISOString() 
       });
 
@@ -148,7 +166,7 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
       console.warn("[SNOW BACKEND] Agent failed, falling back to local Ollama mode:", err.message || err);
       try {
         let ollamaText = await callOllama(prompt, systemInstruction);
-        return res.json({ text: ollamaText, timestamp: new Date().toISOString() });
+        return res.json({ text: ollamaText, model: "Ollama (Local)", timestamp: new Date().toISOString() });
       } catch (ollamaErr: any) {
         console.error("[SNOW BACKEND] Ollama fallback also failed:", ollamaErr.message || ollamaErr);
         const p = prompt.toLowerCase();
@@ -164,7 +182,7 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
           mockText += " Ask me about the weather, news, jokes, or the time to see my animations in action!";
         }
 
-        return res.json({ text: mockText, timestamp: new Date().toISOString() });
+        return res.json({ text: mockText, model: "Offline Sandbox", timestamp: new Date().toISOString() });
       }
     }
   });
@@ -190,11 +208,14 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
         }
       });
 
-      // Clean up text for speech synthesis (strip markdown symbols like *, #, etc. and tags)
+      // Clean up text for speech synthesis (strip markdown, URLs, and UI tags)
       const cleanStreamText = text
-        .replace(/[*#`_\-]/g, "")
-        .replace(/\[WEATHER:[^\]]+\]/g, "")
-        .replace(/\[UI_[A-Z]+:[^\]]+\]/g, "")
+        .replace(/https?:\/\/\S+/gi, "")
+        .replace(/[*#`_\-~]/g, "")
+        .replace(/\[WEATHER:[^\]]+\]/gi, "")
+        .replace(/\[UI_[A-Z]+:[^\]]+\]/gi, "")
+        .replace(/\s+/g, " ")
+        .trim()
         .substring(0, 400); // limit lengths to keep within speed bounds
 
       const response = await ai.models.generateContent({
