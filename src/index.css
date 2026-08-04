@@ -243,3 +243,22 @@ body {
   80% { clip: rect(51px, 9999px, 60px, 0); }
   100% { clip: rect(32px, 9999px, 8px, 0); }
 }
+
+/* ========== Radar Sweep Animation ========== */
+@keyframes radar-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.radar-sweep {
+  background: conic-gradient(from 0deg, transparent 70%, rgba(34, 211, 238, 0.1) 80%, rgba(34, 211, 238, 0.6) 100%);
+  border-radius: 50%;
+  animation: radar-spin 4s linear infinite;
+}
+
+.tech-grid {
+  background-image: 
+    linear-gradient(rgba(34, 211, 238, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 211, 238, 0.05) 1px, transparent 1px);
+  background-size: 15px 15px;
+}

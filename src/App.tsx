@@ -646,13 +646,38 @@ export default function App() {
                       </div>
                     )}
                     {msg.widget.type === "system" && (
-                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/20 shadow-[0_0_40px_rgba(34,211,238,0.15)] flex flex-col items-center gap-3 w-full bg-black/40 backdrop-blur-2xl">
-                        <div className="flex items-center gap-2 text-cyan-300 uppercase tracking-widest text-[10px] font-bold border-b border-cyan-500/20 pb-1.5 w-full justify-center"><Cpu className="w-3.5 h-3.5" /> System Telemetry</div>
-                        <div className="grid grid-cols-2 gap-4 w-full px-2">
-                          <div className="flex flex-col items-center"><span className="text-[10px] text-cyan-200/60">CPU</span><span className="text-xl font-bold text-white">{msg.widget.data.cpu}</span></div>
-                          <div className="flex flex-col items-center"><span className="text-[10px] text-cyan-200/60">RAM</span><span className="text-xl font-bold text-white">{msg.widget.data.ram}</span></div>
+                      <div className="glass-panel p-5 rounded-3xl border border-cyan-500/40 shadow-[0_0_50px_rgba(34,211,238,0.2)] flex flex-col items-center gap-4 w-full bg-black/60 backdrop-blur-3xl relative overflow-hidden tech-grid">
+                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent opacity-50" />
+                        
+                        <div className="flex items-center gap-2 text-cyan-300 uppercase tracking-widest text-[11px] font-black border-b border-cyan-500/30 pb-2 w-full justify-center z-10 drop-shadow-[0_0_8px_rgba(34,211,238,0.8)]">
+                          <Cpu className="w-4 h-4 animate-pulse" /> System Core Diagnostics
                         </div>
-                        <div className="text-[10px] text-cyan-400 font-bold mt-1">Status: {msg.widget.data.status}</div>
+                        
+                        <div className="flex gap-6 w-full items-center justify-center z-10 mt-2">
+                          {/* Radar Circle */}
+                          <div className="relative w-16 h-16 rounded-full border border-cyan-500/30 flex items-center justify-center bg-black/50 shadow-[0_0_15px_rgba(34,211,238,0.1)_inset]">
+                            <div className="absolute inset-0 radar-sweep" />
+                            <div className="w-10 h-10 border border-dashed border-cyan-500/50 rounded-full animate-[spin_10s_linear_infinite_reverse]" />
+                            <div className="absolute text-cyan-300 font-bold text-[10px] drop-shadow-md bg-black/50 px-1 rounded">{msg.widget.data.temp}</div>
+                          </div>
+                          
+                          {/* Stats Grid */}
+                          <div className="flex flex-col gap-3 flex-1">
+                            <div className="flex justify-between items-end border-b border-cyan-500/10 pb-1">
+                              <span className="text-[9px] text-cyan-200/50 uppercase tracking-wider">CPU Load</span>
+                              <span className="text-xl font-bold text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.4)]">{msg.widget.data.cpu}</span>
+                            </div>
+                            <div className="flex justify-between items-end border-b border-cyan-500/10 pb-1">
+                              <span className="text-[9px] text-cyan-200/50 uppercase tracking-wider">RAM Alloc</span>
+                              <span className="text-sm font-bold text-white tracking-wide">{msg.widget.data.ram}</span>
+                            </div>
+                          </div>
+                        </div>
+                        
+                        <div className="w-full flex justify-between items-center bg-cyan-950/30 rounded-lg p-2 px-3 border border-cyan-500/20 z-10 mt-1">
+                          <span className="text-[9px] uppercase tracking-widest text-cyan-500 font-bold">Sys. Status</span>
+                          <span className="text-[10px] text-cyan-300 font-bold flex items-center gap-1.5"><div className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" /> {msg.widget.data.status}</span>
+                        </div>
                       </div>
                     )}
                   </motion.div>
@@ -814,11 +839,28 @@ export default function App() {
              )}
 
              {systemWidget && (
-               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="glass-panel p-4 rounded-2xl border border-cyan-500/20 shadow-xl flex flex-col items-center gap-2 w-full">
-                 <div className="flex items-center gap-2 text-cyan-400 uppercase tracking-widest text-[10px] font-bold border-b border-white/10 pb-1.5 w-full justify-center"><Cpu className="w-3.5 h-3.5" /> System Telemetry</div>
-                 <div className="flex justify-between w-full mt-2 px-2">
-                   <div className="flex flex-col"><span className="text-[10px] text-white/60">CPU</span><span className="text-lg font-bold">{systemWidget.cpu}</span></div>
-                   <div className="flex flex-col text-right"><span className="text-[10px] text-white/60">RAM</span><span className="text-lg font-bold">{systemWidget.ram}</span></div>
+               <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="glass-panel p-4 rounded-2xl border border-cyan-500/40 shadow-[0_0_30px_rgba(34,211,238,0.15)] flex flex-col gap-3 w-full relative overflow-hidden tech-grid">
+                 <div className="absolute -left-10 -top-10 w-32 h-32 bg-cyan-500/10 blur-2xl rounded-full" />
+                 <div className="flex items-center gap-2 text-cyan-300 uppercase tracking-widest text-[10px] font-black border-b border-cyan-500/20 pb-2 w-full justify-center z-10">
+                   <Cpu className="w-3.5 h-3.5 animate-pulse" /> System Core Diagnostics
+                 </div>
+                 
+                 <div className="flex items-center justify-between px-1 z-10">
+                   <div className="flex items-center gap-3">
+                     <div className="w-8 h-8 rounded-full border border-cyan-500/30 flex items-center justify-center relative bg-black/40">
+                       <div className="absolute inset-0 radar-sweep opacity-70" />
+                       <span className="text-[8px] font-bold text-white z-10">{systemWidget.temp}</span>
+                     </div>
+                     <div className="flex flex-col">
+                       <span className="text-[9px] text-cyan-200/50 uppercase tracking-widest">Load</span>
+                       <span className="text-lg font-bold text-white leading-tight">{systemWidget.cpu}</span>
+                     </div>
+                   </div>
+                   
+                   <div className="flex flex-col text-right">
+                     <span className="text-[9px] text-cyan-200/50 uppercase tracking-widest">Memory</span>
+                     <span className="text-xs font-bold text-white">{systemWidget.ram}</span>
+                   </div>
                  </div>
                </motion.div>
              )}
