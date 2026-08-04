@@ -96,8 +96,10 @@ ANIMATION TAGS — you MUST include these in your responses to trigger beautiful
 7. MUSIC or SONG questions — include:
    [UI_MUSIC: {"title": "Song Name", "artist": "Artist Name", "genre": "Pop"}]
 
-8. SYSTEM or PC STATS questions — include:
-   [UI_SYSTEM: {"cpu": "45%", "ram": "12GB / 32GB", "temp": "65°C", "status": "Optimal"}]
+8. SYSTEM or PC STATS questions:
+   YOU MUST call the SystemTelemetry tool first to fetch real data. DO NOT hallucinate.
+   Format the output exactly like this based on the tool's result:
+   [UI_SYSTEM: {"cpu": "45%", "ram": "12.5GB / 32.0GB", "temp": "65°C", "status": "Optimal"}]
 
 IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the user — they only trigger visuals.`;
 

@@ -463,26 +463,46 @@ export const WebSearchTool: ToolDefinition<WebSearchInput> = {
 
 export const SystemTelemetryTool: ToolDefinition<Record<string, never>> = {
   name: "SystemTelemetry",
-  description: "Get real-time system telemetry (CPU usage, RAM, etc). Takes no arguments.",
+  description: "Get real-time system telemetry (CPU usage, RAM, temperatures, battery/status). Takes no arguments.",
   inputSchema: {
     type: "object",
     properties: {},
   },
   async *execute(_input, _ctx) {
     yield { type: "progress", data: null, label: "Fetching System Telemetry" };
-    const os = await import("os");
-    const totalMem = (os.totalmem() / (1024 ** 3)).toFixed(1);
-    const freeMem = (os.freemem() / (1024 ** 3)).toFixed(1);
-    const usedMem = (Number(totalMem) - Number(freeMem)).toFixed(1);
-    return {
-      content: JSON.stringify({
-        cpu: `${Math.round(os.loadavg()[0] * 100 / os.cpus().length)}%`,
-        ram: `${usedMem}GB / ${totalMem}GB`,
-        temp: "Normal",
-        status: "Optimal"
-      }),
-      isError: false,
-    };
+    try {
+      const si = await import("systeminformation");
+      const [cpuLoad, mem, cpuTemp, battery] = await Promise.all([
+        si.currentLoad(),
+        si.mem(),
+        si.cpuTemperature(),
+        si.battery()
+      ]);
+
+      const totalMem = (mem.total / (1024 ** 3)).toFixed(1);
+      const usedMem = (mem.active / (1024 ** 3)).toFixed(1);
+      const cpu = `${Math.round(cpuLoad.currentLoad)}%`;
+      
+      let temp = "Normal";
+      if (cpuTemp && cpuTemp.main) {
+        temp = `${Math.round(cpuTemp.main)}°C`;
+      }
+      
+      let status = "Optimal";
+      if (battery && battery.hasBattery) {
+        status = battery.isCharging ? `Charging (${battery.percent}%)` : `Battery (${battery.percent}%)`;
+      }
+
+      return {
+        content: JSON.stringify({ cpu, ram: `${usedMem}GB / ${totalMem}GB`, temp, status }),
+        isError: false,
+      };
+    } catch (err: any) {
+      return {
+        content: `Error fetching telemetry: ${err.message}`,
+        isError: true,
+      };
+    }
   }
 };
 
