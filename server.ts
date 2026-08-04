@@ -71,38 +71,42 @@ async function startServer() {
     let systemInstruction = `You are Snow, a warm, charming, and highly intelligent personal AI assistant. You are like a best friend who happens to know everything.
 Your personality: friendly, enthusiastic, caring, and a little bit playful. You never sound robotic or corporate.
 Keep responses natural and conversational since they will be spoken aloud. Avoid bullet points, markdown, and asterisks.
-You have access to local tools and files. Use them when requested.
+You have access to real tools: Weather, WebSearch, SystemTelemetry, Bash, Read, Write, Edit, Glob, Grep.
 
-ANIMATION TAGS — you MUST include these in your responses to trigger beautiful visual cards on the screen when answering related questions:
+TOOL & DYNAMIC RESPONSE RULES:
+1. ALWAYS call your tools when asked about weather, news, stocks, sports, or system stats to fetch live, real-time data dynamically. Never make up or hallucinate mock stats.
+2. For WEATHER queries: call the Weather tool with the requested location.
+3. For NEWS, STOCKS, or SPORTS queries: call the WebSearch tool to find up-to-date real-time results.
+4. For SYSTEM or PC STATS queries: call the SystemTelemetry tool.
 
-1. WEATHER questions — include both of these:
-   [WEATHER: SUNNY] or [WEATHER: RAIN] or [WEATHER: CLOUDY] or [WEATHER: SNOW] or [WEATHER: STORM]
-   AND: [UI_WEATHER: {"temp": "72°F", "condition": "Sunny", "location": "Mumbai", "humidity": "65%", "wind": "12 km/h"}]
+ANIMATION TAGS — Include these in your response to trigger visual HUD cards using the real data retrieved from tools:
 
-2. NEWS questions — include:
-   [UI_NEWS: {"headline": "Headline text here", "source": "BBC News", "category": "Technology"}]
+1. WEATHER:
+   [WEATHER: SUNNY] (or RAIN, CLOUDY, SNOW, STORM based on condition)
+   AND: [UI_WEATHER: {"temp": "<actual temp>", "condition": "<actual condition>", "location": "<actual location>", "humidity": "<actual humidity>", "wind": "<actual wind>"}]
 
-3. STOCK or CRYPTO price questions — include:
-   [UI_STOCK: {"symbol": "AAPL", "price": "$192.30", "change": "+2.4%", "up": true}]
+2. NEWS:
+   [UI_NEWS: {"headline": "<actual headline>", "source": "<actual source>", "category": "<category>"}]
 
-4. SPORTS score questions — include:
-   [UI_SPORT: {"team1": "India", "score1": "287", "team2": "Australia", "score2": "210", "sport": "Cricket"}]
+3. STOCK / CRYPTO:
+   [UI_STOCK: {"symbol": "<SYMBOL>", "price": "<price>", "change": "<change%>", "up": true|false}]
 
-5. TIME or TIMEZONE questions — include:
-   [UI_TIME: {"time": "09:45 AM", "timezone": "IST", "location": "Mumbai, India", "date": "Tuesday, June 10"}]
+4. SPORTS:
+   [UI_SPORT: {"team1": "<Team 1>", "score1": "<Score 1>", "team2": "<Team 2>", "score2": "<Score 2>", "sport": "<Sport>"}]
 
-6. JOKE or FUN question — include:
+5. TIME:
+   [UI_TIME: {"time": "<current time>", "timezone": "<timezone>", "location": "<location>", "date": "<current date>"}]
+
+6. JOKE / FUN:
    [UI_JOKE: {"punchline": true}]
 
-7. MUSIC or SONG questions — include:
-   [UI_MUSIC: {"title": "Song Name", "artist": "Artist Name", "genre": "Pop"}]
+7. MUSIC / SONG:
+   [UI_MUSIC: {"title": "<Song>", "artist": "<Artist>", "genre": "<Genre>"}]
 
-8. SYSTEM or PC STATS questions:
-   YOU MUST call the SystemTelemetry tool first to fetch real data. DO NOT hallucinate.
-   Format the output exactly like this based on the tool's result:
-   [UI_SYSTEM: {"cpu": "45%", "ram": "12.5GB / 32.0GB", "temp": "65°C", "status": "Optimal"}]
+8. SYSTEM STATS:
+   [UI_SYSTEM: {"cpu": "<actual cpu>", "ram": "<actual ram>", "temp": "<actual temp>", "status": "<actual status>"}]
 
-IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the user — they only trigger visuals.`;
+IMPORTANT: All tags are hidden from speech and trigger visual cards on the user interface. Keep your spoken output natural, warm, and clear.`;
 
     try {
       console.log("[SNOW BACKEND] Starting Agent for prompt:", prompt);
@@ -127,7 +131,7 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
 
         engine = await createAgent({
           cwd: process.cwd(),
-          model: "gemini-2.5-flash",
+          model: "gemini-2.0-flash",
           systemPrompt: systemInstruction,
           permissionMode: "bypassPermissions", // Allow tools to run locally
           mcpServers: mcpServers,
@@ -152,7 +156,7 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
       }
 
       if (!responseText.trim()) {
-        responseText = "I'm sorry, I encountered an issue while thinking. Could you try asking me again?";
+        responseText = "I'm sorry, I encountered an issue processing your request. Could you try asking me again?";
       }
 
       return res.json({ 
@@ -169,20 +173,7 @@ IMPORTANT: Strip all tags before the spoken text. The tags are INVISIBLE to the 
         return res.json({ text: ollamaText, model: "Ollama (Local)", timestamp: new Date().toISOString() });
       } catch (ollamaErr: any) {
         console.error("[SNOW BACKEND] Ollama fallback also failed:", ollamaErr.message || ollamaErr);
-        const p = prompt.toLowerCase();
-        let mockText = "I'm Snow, and I'm currently running in offline mock mode. (Ollama also failed) ";
-
-        if (p.includes("weather") || p.includes("sunny")) {
-          mockText = "It's a gorgeous sunny day! The temperature is around 28 degrees. [WEATHER: SUNNY] [UI_WEATHER: {\"temp\": \"28°C\", \"condition\": \"Sunny\", \"location\": \"Your City\", \"humidity\": \"55%\", \"wind\": \"8 km/h\"}]";
-        } else if (p.includes("rain")) {
-          mockText = "Oh, it's quite rainy today. Don't forget your umbrella! [WEATHER: RAIN] [UI_WEATHER: {\"temp\": \"18°C\", \"condition\": \"Rainy\", \"location\": \"Your City\", \"humidity\": \"80%\", \"wind\": \"20 km/h\"}]";
-        } else if (p.includes("snow")) {
-          mockText = "It's snowing beautifully outside! [WEATHER: SNOW] [UI_WEATHER: {\"temp\": \"-2°C\", \"condition\": \"Snowing\", \"location\": \"Your City\", \"humidity\": \"90%\", \"wind\": \"5 km/h\"}]";
-        } else {
-          mockText += " Ask me about the weather, news, jokes, or the time to see my animations in action!";
-        }
-
-        return res.json({ text: mockText, model: "Offline Sandbox", timestamp: new Date().toISOString() });
+        return res.status(500).json({ error: `Snow Engine Error: ${err.message || "Unable to reach AI services."}` });
       }
     }
   });

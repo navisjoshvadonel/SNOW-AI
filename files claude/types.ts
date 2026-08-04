@@ -238,7 +238,7 @@ export type QueryEvent =
   | { type: "content_block_start"; index: number; block: ContentBlock }
   | { type: "content_block_delta"; index: number; delta: string }
   | { type: "content_block_stop"; index: number }
-  | { type: "tool_use_start"; toolUseId: ToolUseId; name: string }
+  | { type: "tool_use_start"; toolUseId: ToolUseId; name: string; input?: Record<string, unknown> }
   | { type: "tool_result"; toolUseId: ToolUseId; result: ToolResult }
   | { type: "message_stop"; usage: TokenUsage; stopReason: StopReason }
   | { type: "error"; error: AgentError };

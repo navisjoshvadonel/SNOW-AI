@@ -168,7 +168,7 @@ export class QueryEngine {
             assistantContent[event.index] = event.block;
           }
           if (event.type === "tool_use_start") {
-             assistantContent.push({ type: "tool_use", id: event.toolUseId, name: event.name, input: {} });
+             assistantContent.push({ type: "tool_use", id: event.toolUseId, name: event.name, input: event.input || {} });
           }
           if (event.type === "content_block_delta" && event.delta) {
              const block = assistantContent[event.index];
@@ -257,9 +257,10 @@ export class QueryEngine {
         toolResultContent.push({
           type: "tool_result",
           tool_use_id: toolUse.id,
+          name: toolUse.name,
           content: result.content,
           is_error: result.isError,
-        });
+        } as any);
       }
 
       // Inject tool results as a user message
@@ -329,7 +330,7 @@ export class QueryEngine {
   }
 
   private resolveModel(): string {
-    return this.config.userSpecifiedModel ?? "claude-sonnet-4-5";
+    return this.config.userSpecifiedModel ?? "gemini-2.0-flash";
   }
 
   private resolveThinkingConfig(): ThinkingConfig {

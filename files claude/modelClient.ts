@@ -6,6 +6,7 @@ import type {
   StopReason,
   ThinkingConfig,
   TokenUsage,
+  ToolUseId,
 } from "./types.js";
 
 export type ModelCallParams = {
@@ -57,13 +58,16 @@ async function* callModelOnce(params: ModelCallParams): AsyncGenerator<QueryEven
   }
 
   if (!isOffline) {
-    try {
-      yield* callGeminiOnce(params, apiKey!);
-      return;
-    } catch (err: any) {
-      console.warn(`[SNOW BACKEND] Gemini API failed (${err.message}). Falling back to Offline Mode (Ollama)...`);
-      isOffline = true;
+    const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite"];
+    for (const m of modelsToTry) {
+      try {
+        yield* callGeminiOnce({ ...params, model: m }, apiKey!);
+        return;
+      } catch (err: any) {
+        console.warn(`[SNOW BACKEND] Gemini model ${m} failed (${err.message}). Trying next fallback...`);
+      }
     }
+    isOffline = true;
   }
 
   if (isOffline) {
@@ -82,10 +86,16 @@ async function* callGeminiOnce(params: ModelCallParams, apiKey: string): AsyncGe
       parts: msg.content.map(block => {
         if ("text" in block) return { text: block.text };
         if ("type" in block && block.type === "tool_result") {
+          let responseObj: any;
+          try {
+            responseObj = typeof block.content === "string" && block.content.startsWith("{") ? JSON.parse(block.content) : { output: block.content };
+          } catch {
+            responseObj = { output: block.content };
+          }
           return {
             functionResponse: {
-              name: (block as any).tool_use_id || "unknown",
-              response: { result: (block as any).content }
+              name: (block as any).name || (block as any).tool_use_id || "unknown",
+              response: responseObj
             }
           };
         }
@@ -114,13 +124,15 @@ async function* callGeminiOnce(params: ModelCallParams, apiKey: string): AsyncGe
     tools: toolConfig,
   };
 
-  yield { type: "message_start", usage: { input_tokens: 0, output_tokens: 0 } };
+  console.log("[GEMINI BACKEND] Sending contents to Gemini:", JSON.stringify(contents, null, 2));
 
   const stream = await ai.models.generateContentStream({
     model,
     contents,
     config: reqConfig
   });
+
+  yield { type: "message_start", usage: { input_tokens: 0, output_tokens: 0 } };
 
   let blockIndex = 0;
   let finalUsage: TokenUsage = { input_tokens: 0, output_tokens: 0 };
@@ -151,8 +163,9 @@ async function* callGeminiOnce(params: ModelCallParams, apiKey: string): AsyncGe
           }
           if (part.functionCall) {
             finalStopReason = "tool_use";
-            yield { type: "tool_use_start", toolUseId: part.functionCall.name, name: part.functionCall.name };
-            yield { type: "content_block_delta", index: blockIndex, delta: { partial_json: JSON.stringify(part.functionCall.args) } as any };
+            const inputArgs = (part.functionCall.args as Record<string, unknown>) || {};
+            yield { type: "tool_use_start", toolUseId: part.functionCall.name as ToolUseId, name: part.functionCall.name, input: inputArgs };
+            yield { type: "content_block_delta", index: blockIndex, delta: { partial_json: JSON.stringify(inputArgs) } as any };
             yield { type: "content_block_stop", index: blockIndex };
             blockIndex++;
           }
@@ -177,7 +190,14 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
       for (const b of msg.content) {
         if ("text" in b) text += b.text + "\n";
         if ("type" in b && b.type === "tool_result") {
-           ollamaMessages.push({ role: "tool", content: (b as any).content, name: (b as any).tool_use_id } as any);
+          const toolContent = typeof b.content === "string" ? b.content : JSON.stringify(b.content);
+          ollamaMessages.push({
+            role: "tool",
+            content: toolContent,
+            tool_name: (b as any).name || (b as any).tool_use_id || "unknown",
+            name: (b as any).name || (b as any).tool_use_id || "unknown",
+            tool_call_id: (b as any).tool_use_id
+          } as any);
         }
       }
       if (text) ollamaMessages.push({ role: "user", content: text });
@@ -187,10 +207,11 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
       for (const b of msg.content) {
         if ("text" in b) text += b.text + "\n";
         if ("type" in b && b.type === "tool_use") {
-           tool_calls.push({
-             type: "function",
-             function: { name: (b as any).name, arguments: (b as any).input }
-           });
+          tool_calls.push({
+            id: (b as any).id || (b as any).name,
+            type: "function",
+            function: { name: (b as any).name, arguments: (b as any).input }
+          });
         }
       }
       const astMsg: any = { role: "assistant", content: text };
@@ -211,6 +232,8 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
 
   yield { type: "message_start", usage: { input_tokens: 0, output_tokens: 0 } };
 
+  console.log("[OLLAMA BACKEND] Sending messages to Ollama:", JSON.stringify(ollamaMessages, null, 2));
+
   const response = await fetch("http://127.0.0.1:11434/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -228,6 +251,8 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
   }
 
   const data: any = await response.json();
+  console.log("[OLLAMA BACKEND] Ollama Response:", JSON.stringify(data, null, 2));
+  
   const msg = data.message;
   let blockIndex = 0;
   let finalStopReason: StopReason = "end_turn";
@@ -243,7 +268,7 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
     finalStopReason = "tool_use";
     for (const tc of msg.tool_calls) {
       if (tc.function) {
-        yield { type: "tool_use_start", toolUseId: tc.function.name, name: tc.function.name };
+        yield { type: "tool_use_start", toolUseId: tc.function.name as ToolUseId, name: tc.function.name, input: tc.function.arguments };
         yield { type: "content_block_delta", index: blockIndex, delta: { partial_json: JSON.stringify(tc.function.arguments) } as any };
         yield { type: "content_block_stop", index: blockIndex };
         blockIndex++;

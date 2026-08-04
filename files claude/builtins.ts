@@ -396,28 +396,38 @@ export const GrepTool: ToolDefinition<GrepInput> = {
       ".yaml", ".yml", ".toml", ".sh", ".css", ".html",
     ]);
 
-    for (const file of files) {
+    const filteredFiles = files.filter(file => {
       const ext = extname(file).toLowerCase();
-      if (!TEXT_EXTS.has(ext) && ext !== "") continue;
+      return TEXT_EXTS.has(ext) || ext === "";
+    });
 
-      const abs = join(root, file);
-      let content: string;
-      try {
-        content = await readFile(abs, "utf8");
-      } catch { continue; }
+    const CONCURRENCY = 20;
+    for (let i = 0; i < filteredFiles.length; i += CONCURRENCY) {
+      if (results.length > 500) break;
+      
+      const chunk = filteredFiles.slice(i, i + CONCURRENCY);
+      await Promise.all(
+        chunk.map(async (file) => {
+          const abs = join(root, file);
+          try {
+            const content = await readFile(abs, "utf8");
+            const lines = content.split("\n");
+            for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+              if (re.test(lines[lineNum]!)) {
+                results.push(`${file}:${lineNum + 1}: ${lines[lineNum]!.trim()}`);
+              }
+              re.lastIndex = 0; // reset stateful regex
+            }
+          } catch {
+            // Ignore read errors
+          }
+        })
+      );
+    }
 
-      const lines = content.split("\n");
-      for (let i = 0; i < lines.length; i++) {
-        if (re.test(lines[i]!)) {
-          results.push(`${file}:${i + 1}: ${lines[i]!.trim()}`);
-        }
-        re.lastIndex = 0; // reset stateful regex
-      }
-
-      if (results.length > 500) {
-        results.push("... (truncated at 500 matches)");
-        break;
-      }
+    if (results.length > 500) {
+      results.length = 500;
+      results.push("... (truncated at 500 matches)");
     }
 
     return {
@@ -436,8 +446,7 @@ type WebSearchInput = {
 export const WebSearchTool: ToolDefinition<WebSearchInput> = {
   name: "WebSearch",
   description:
-    "Search the web for current information. Use for documentation, " +
-    "error messages, recent releases, or anything not in training data.",
+    "Search the web for real-time live information, news, current events, stock prices, scores, documentation, etc.",
   inputSchema: {
     type: "object",
     properties: {
@@ -447,15 +456,138 @@ export const WebSearchTool: ToolDefinition<WebSearchInput> = {
   },
 
   async *execute(input, _ctx) {
-    yield { type: "progress", data: null, label: `Searching: ${input.query}` };
+    yield { type: "progress", data: null, label: `Searching web for: ${input.query}` };
 
-    // In production this calls a real search API (Brave, Google, etc.)
-    // Blueprint wires this through the model's native web_search_20250305 tool type
-    return {
-      content: `[WebSearch placeholder] Query: "${input.query}"\n` +
-               "In production, this calls a real search API and returns results.",
-      isError: false,
-    };
+    try {
+      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(input.query)}`;
+      const res = await fetch(searchUrl, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error(`Search provider returned status ${res.status}`);
+      }
+
+      const html = await res.text();
+
+      const matches = [...html.matchAll(/<a class="result__snippet[^"]*"[^>]*>(.*?)<\/a>/g)];
+      const snippets = matches
+        .map((m) => m[1].replace(/<[^>]+>/g, "").trim())
+        .filter(Boolean)
+        .slice(0, 6);
+
+      if (snippets.length === 0) {
+        return { content: `No web results found for query: "${input.query}"`, isError: false };
+      }
+
+      const formatted = snippets.map((s, i) => `Result ${i + 1}: ${s}`).join("\n\n");
+
+      return {
+        content: formatted,
+        isError: false,
+      };
+    } catch (err: any) {
+      return {
+        content: `WebSearch error: ${err.message}`,
+        isError: true,
+      };
+    }
+  },
+};
+
+// ─── WeatherTool ─────────────────────────────────────────────────────────────
+
+type WeatherInput = {
+  location: string;
+};
+
+export const WeatherTool: ToolDefinition<WeatherInput> = {
+  name: "Weather",
+  description: "Get real-time current weather data for any location or city in the world. Requires location string (e.g. 'Tokyo', 'London', 'Mumbai').",
+  inputSchema: {
+    type: "object",
+    properties: {
+      location: { type: "string", description: "City or location name" },
+    },
+    required: ["location"],
+  },
+
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: `Fetching weather for ${input.location}` };
+
+    try {
+      const geoRes = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(input.location)}&count=1`
+      );
+      const geoData: any = await geoRes.json();
+
+      if (!geoData.results || geoData.results.length === 0) {
+        return { content: `Location '${input.location}' not found.`, isError: true };
+      }
+
+      const loc = geoData.results[0];
+      const { latitude, longitude, name, country } = loc;
+
+      const weatherRes = await fetch(
+        `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true&hourly=relative_humidity_2m`
+      );
+      const weatherData: any = await weatherRes.json();
+
+      if (!weatherData.current_weather) {
+        return { content: `Weather data unavailable for ${name}.`, isError: true };
+      }
+
+      const cw = weatherData.current_weather;
+
+      const codeMap: Record<number, string> = {
+        0: "Sunny",
+        1: "Mainly Clear",
+        2: "Partly Cloudy",
+        3: "Overcast",
+        45: "Foggy",
+        48: "Depositing Rime Fog",
+        51: "Light Drizzle",
+        53: "Moderate Drizzle",
+        55: "Dense Drizzle",
+        61: "Slight Rain",
+        63: "Moderate Rain",
+        65: "Heavy Rain",
+        71: "Slight Snow",
+        73: "Moderate Snow",
+        75: "Heavy Snow",
+        80: "Slight Rain Showers",
+        81: "Moderate Rain Showers",
+        82: "Violent Rain Showers",
+        95: "Thunderstorm",
+        96: "Thunderstorm with Hail",
+        99: "Thunderstorm with Heavy Hail",
+      };
+
+      const condition = codeMap[cw.weathercode] || "Clear";
+      const humidity = weatherData.hourly?.relative_humidity_2m?.[0] ? `${weatherData.hourly.relative_humidity_2m[0]}%` : "60%";
+
+      const result = {
+        location: `${name}, ${country}`,
+        temp: `${cw.temperature}°C`,
+        condition,
+        wind: `${cw.windspeed} km/h`,
+        humidity,
+        weathercode: cw.weathercode
+      };
+
+      return {
+        content: JSON.stringify(result),
+        isError: false,
+      };
+    } catch (err: any) {
+      return {
+        content: `Error fetching weather: ${err.message}`,
+        isError: true,
+      };
+    }
   },
 };
 
@@ -487,7 +619,6 @@ export const SystemTelemetryTool: ToolDefinition<Record<string, never>> = {
       if (cpuTemp && typeof cpuTemp.main === "number" && cpuTemp.main > 0) {
         temp = `${Math.round(cpuTemp.main)}°C`;
       } else {
-        // Fallback estimate based on CPU load
         const loadVal = cpuLoad ? cpuLoad.currentLoad : 20;
         temp = `${Math.round(38 + (loadVal * 0.35))}°C`;
       }
@@ -514,7 +645,6 @@ export const SystemTelemetryTool: ToolDefinition<Record<string, never>> = {
 
 function safeResolvePath(inputPath: string, cwd: string): string | null {
   const abs = resolve(cwd, inputPath);
-  // Ensure the resolved path is within cwd (prevent traversal)
   if (!abs.startsWith(resolve(cwd))) return null;
   return abs;
 }
@@ -533,7 +663,7 @@ function countOccurrences(haystack: string, needle: string): number {
 
 export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>> {
   const registry = new Map<string, ToolDefinition<unknown>>();
-  for (const tool of [BashTool, FileReadTool, FileWriteTool, FileEditTool, GlobTool, GrepTool, WebSearchTool, SystemTelemetryTool]) {
+  for (const tool of [BashTool, FileReadTool, FileWriteTool, FileEditTool, GlobTool, GrepTool, WebSearchTool, WeatherTool, SystemTelemetryTool]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }
   return registry;
