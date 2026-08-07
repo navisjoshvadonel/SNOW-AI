@@ -114,6 +114,9 @@ export default function App() {
   const [responseStats, setResponseStats] = useState({ time: "0.00s", network: "Excellent", model: "Gemini 2.5" });
 
   const [weatherState, setWeatherState] = useState<WeatherType>("default");
+
+  // Live system stats (polled every 10s)
+  const [liveStats, setLiveStats] = useState<SystemData | null>(null);
   
   // Widget states
   const [weatherWidget, setWeatherWidget] = useState<WeatherData | null>(null);
@@ -133,9 +136,25 @@ export default function App() {
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatHistory, isLoading]);
 
+  // Poll live system stats every 10 seconds
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const res = await fetch("/api/system");
+        if (res.ok) {
+          const data = await res.json();
+          setLiveStats(data);
+        }
+      } catch { /* ignore */ }
+    };
+    fetchStats();
+    const interval = setInterval(fetchStats, 10000);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     if (chatHistory.length === 0) {
-      setChatHistory([{ id: "welcome-1", sender: "snow", text: "Hello! I am Snow. Ready to assist you." }]);
+      setChatHistory([{ id: "welcome-1", sender: "snow", text: "Hey there! I'm Snow, your personal AI. I can check the weather, browse the web for news and stocks, read your system stats, and much more. What can I help you with?" }]);
     }
     if (window.speechSynthesis) {
       window.speechSynthesis.getVoices();
@@ -396,60 +415,52 @@ export default function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Network error");
       
-      let aiText = data.text;
+      const aiText = data.text;
       setGroundingInfo(data.grounding || null);
 
       let widgetData: any = null;
       let widgetType: "weather" | "news" | "stock" | "sport" | "time" | "music" | "system" | null = null;
 
-      const parseWidget = (tag: string, setter: any, type: "weather" | "news" | "stock" | "sport" | "time" | "music" | "system") => {
-        const jsonStr = extractJsonFromTag(aiText, tag);
-        if (jsonStr) {
-          try {
-            const parsed = JSON.parse(jsonStr);
-            setter(parsed);
-            widgetData = parsed;
-            widgetType = type;
-          } catch(e) {
-            console.error("Widget parse error", e);
-          }
-        }
+      // Robust parser: handles [TAG:{...}] AND [TAG: {...}] (with or without space)
+      const parseTagJson = (raw: string, tagName: string): any | null => {
+        const rx = new RegExp(`\\[${tagName}\\s*:?\\s*(\\{[\\s\\S]*?\\})\\s*\\]`, "i");
+        const m = raw.match(rx);
+        if (m?.[1]) { try { return JSON.parse(m[1]); } catch(e) { console.warn("Tag parse failed", tagName, e); } }
+        // brace-counting fallback
+        const jsonStr = extractJsonFromTag(raw, `[${tagName}:`);
+        if (jsonStr) { try { return JSON.parse(jsonStr); } catch {} }
+        return null;
       };
 
-      const weatherMatch = aiText.match(/\[WEATHER:\s*([A-Z]+)\]/i);
-      if (weatherMatch) setWeatherState(weatherMatch[1].toLowerCase() as WeatherType);
+      const tryWidget = (tagName: string, setter: (v: any) => void, type: typeof widgetType) => {
+        const parsed = parseTagJson(aiText, tagName);
+        if (parsed) { setter(parsed); widgetData = parsed; widgetType = type; }
+      };
 
-      parseWidget("[UI_WEATHER:", setWeatherWidget, "weather");
-      parseWidget("[UI_NEWS:", setNewsWidget, "news");
-      parseWidget("[UI_STOCK:", setStockWidget, "stock");
-      parseWidget("[UI_SPORT:", setSportWidget, "sport");
-      parseWidget("[UI_TIME:", setTimeWidget, "time");
-      parseWidget("[UI_MUSIC:", setMusicWidget, "music");
-      parseWidget("[UI_SYSTEM:", setSystemWidget, "system");
+      // Weather state tag [WEATHER:SUNNY] or [WEATHER: SUNNY]
+      const wxStateM = aiText.match(/\[WEATHER\s*:?\s*([A-Z]+)\]/i);
+      if (wxStateM) setWeatherState(wxStateM[1].toLowerCase() as WeatherType);
 
-      if (aiText.includes("[UI_JOKE:")) {
+      tryWidget("UI_WEATHER", setWeatherWidget, "weather");
+      tryWidget("UI_NEWS",    setNewsWidget,    "news");
+      tryWidget("UI_STOCK",   setStockWidget,   "stock");
+      tryWidget("UI_SPORT",   setSportWidget,   "sport");
+      tryWidget("UI_TIME",    setTimeWidget,    "time");
+      tryWidget("UI_MUSIC",   setMusicWidget,   "music");
+      tryWidget("UI_SYSTEM",  setSystemWidget,  "system");
+
+      if (/\[UI_JOKE/i.test(aiText)) {
         setShowConfetti(true);
         setTimeout(() => setShowConfetti(false), 3000);
       }
 
-      let cleanDisplay = aiText;
-      const uiTags = ["[UI_WEATHER:", "[UI_NEWS:", "[UI_STOCK:", "[UI_SPORT:", "[UI_TIME:", "[UI_MUSIC:", "[UI_JOKE:", "[UI_SYSTEM:"];
-      
-      uiTags.forEach(tag => {
-        const jsonStr = extractJsonFromTag(cleanDisplay, tag);
-        if (jsonStr) {
-          const tagIndex = cleanDisplay.indexOf(tag);
-          const closingBracketIndex = cleanDisplay.indexOf("]", tagIndex + tag.length + jsonStr.length - 1);
-          if (tagIndex !== -1 && closingBracketIndex !== -1) {
-            cleanDisplay = cleanDisplay.substring(0, tagIndex) + cleanDisplay.substring(closingBracketIndex + 1);
-          }
-        }
-      });
-
-      cleanDisplay = cleanDisplay
-        .replace(/\[UI_[A-Z]+:[^\]]+\]/gi, "")
-        .replace(/\[WEATHER:\s*[A-Z]+\]/gi, "")
-        .replace(/\s+/g, " ")
+      // Strip ALL tag artifacts from the human-readable display text
+      let cleanDisplay = aiText
+        .replace(/\[WEATHER\s*:?[^\]]*\]/gi, "")
+        .replace(/\[UI_[A-Z_]+\s*:?\s*\{[\s\S]*?\}\s*\]/gi, "")
+        .replace(/\{\s*"(?:temp|cpu|ram|headline|symbol|team1|time|title|punchline)[^}]*\}/gi, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .replace(/[ \t]{2,}/g, " ")
         .trim();
 
       setResponseStats({ time: ((Date.now() - startTime) / 1000).toFixed(2) + "s", network: "Excellent", model: data.model || "Gemini 2.5" });
@@ -475,20 +486,27 @@ export default function App() {
   };
 
   const getPanelImage = () => {
+    // Weather — condition-specific images
     if (weatherWidget) {
-      const cond = weatherWidget.condition.toLowerCase();
-      if (cond.includes("sun") || cond.includes("clear") || cond.includes("warm")) return "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=400&q=80";
-      if (cond.includes("rain") || cond.includes("shower") || cond.includes("drizzle") || cond.includes("wet")) return "https://images.unsplash.com/photo-1438029071396-1e831a7fa6d8?w=400&q=80";
-      if (cond.includes("snow") || cond.includes("freeze") || cond.includes("ice") || cond.includes("frost")) return "https://images.unsplash.com/photo-1491002052546-bf38f186af56?w=400&q=80";
-      if (cond.includes("cloud") || cond.includes("overcast") || cond.includes("mist") || cond.includes("fog")) return "https://images.unsplash.com/photo-1534088568595-a066f410bcda?w=400&q=80";
-      if (cond.includes("storm") || cond.includes("thunder") || cond.includes("lightning") || cond.includes("hurricane")) return "https://images.unsplash.com/photo-1561484930-998b6a7b22e8?w=400&q=80";
+      const cond = (weatherWidget.condition || "").toLowerCase();
+      if (cond.includes("sun") || cond.includes("clear") || cond.includes("mainly clear"))
+        return "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=600&q=80";
+      if (cond.includes("rain") || cond.includes("drizzle") || cond.includes("shower"))
+        return "https://images.unsplash.com/photo-1438029071396-1e831a7fa6d8?w=600&q=80";
+      if (cond.includes("snow") || cond.includes("blizzard") || cond.includes("frost"))
+        return "https://images.unsplash.com/photo-1491002052546-bf38f186af56?w=600&q=80";
+      if (cond.includes("storm") || cond.includes("thunder") || cond.includes("lightning"))
+        return "https://images.unsplash.com/photo-1561484930-998b6a7b22e8?w=600&q=80";
+      // clouds, overcast, fog, partly cloudy, haze, mist, foggy
+      return "https://images.unsplash.com/photo-1534088568595-a066f410bcda?w=600&q=80";
     }
-    if (newsWidget) return "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=400&q=80";
-    if (stockWidget) return "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=400&q=80";
-    if (timeWidget) return "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=400&q=80";
-    if (sportWidget) return "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=400&q=80";
-    if (musicWidget) return "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=400&q=80";
-    if (showConfetti) return "https://images.unsplash.com/photo-1513151233558-d860c5398176?w=400&q=80";
+    if (systemWidget) return "https://images.unsplash.com/photo-1518770660439-4636190af475?w=600&q=80"; // circuit board
+    if (newsWidget)   return "https://images.unsplash.com/photo-1504711434969-e33886168f5c?w=600&q=80"; // newspaper
+    if (stockWidget)  return "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=600&q=80"; // market chart
+    if (sportWidget)  return "https://images.unsplash.com/photo-1508098682722-e99c43a406b2?w=600&q=80"; // stadium
+    if (timeWidget)   return "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?w=600&q=80"; // clock
+    if (musicWidget)  return "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?w=600&q=80"; // concert
+    if (showConfetti) return "https://images.unsplash.com/photo-1513151233558-d860c5398176?w=600&q=80"; // party
     return "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&q=80";
   };
 
@@ -531,6 +549,27 @@ export default function App() {
             </div>
             <div className="flex justify-between py-2 border-b border-white/5"><span className="text-white/40">Connection:</span><span className="text-white/80 flex items-center gap-1.5"><Globe className="w-3.5 h-3.5" /> Connected</span></div>
           </div>
+
+          {/* Live System Stats */}
+          {liveStats && (
+            <div className="flex flex-col gap-2 p-3 rounded-2xl bg-cyan-950/30 border border-cyan-500/20">
+              <span className="text-[9px] text-cyan-400 uppercase font-bold tracking-widest flex items-center gap-1"><Cpu className="w-3 h-3" /> Live Sys Stats</span>
+              <div className="grid grid-cols-3 gap-1.5 text-center">
+                <div className="flex flex-col gap-0.5 bg-black/30 rounded-lg p-1.5">
+                  <span className="text-[8px] text-white/40 uppercase">CPU</span>
+                  <span className="text-xs font-bold text-cyan-300">{liveStats.cpu}</span>
+                </div>
+                <div className="flex flex-col gap-0.5 bg-black/30 rounded-lg p-1.5">
+                  <span className="text-[8px] text-white/40 uppercase">Temp</span>
+                  <span className="text-xs font-bold text-orange-300">{liveStats.temp}</span>
+                </div>
+                <div className="flex flex-col gap-0.5 bg-black/30 rounded-lg p-1.5 col-span-3">
+                  <span className="text-[8px] text-white/40 uppercase">RAM</span>
+                  <span className="text-xs font-bold text-emerald-300">{liveStats.ram}</span>
+                </div>
+              </div>
+            </div>
+          )}
 
           <VoiceConfigurator 
             selectedVoice={selectedVoice}

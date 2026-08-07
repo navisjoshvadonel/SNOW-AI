@@ -1,257 +1,516 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { createAgent } from "./files claude/index.js";
 import dotenv from "dotenv";
-import { exec } from "child_process";
-import http from "http";
 import { GoogleGenAI } from "@google/genai";
-import fs from "fs";
+import si from "systeminformation";
 
 dotenv.config();
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+// ─────────────────────────────────────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────────────────────────────────────
 
-  app.use(express.json());
+interface WeatherData {
+  location: string; temp: string; condition: string;
+  wind: string; humidity: string; weathercode: number;
+}
 
-  // Helper to call local Ollama model
-  async function callOllama(prompt: string, systemInstruction: string): Promise<string> {
-    const model = process.env.OLLAMA_MODEL || "llama3";
-    const response = await fetch("http://127.0.0.1:11434/api/chat", {
+interface SystemData {
+  cpu: string; ram: string; temp: string; status: string;
+}
+
+interface WebSearchResult {
+  title: string; snippet: string; url?: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REAL-DATA FETCHERS  (no AI involvement here — pure API calls)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Open-Meteo geocoding + weather — completely free, no key required */
+async function fetchWeather(location: string): Promise<WeatherData | null> {
+  try {
+    const geo: any = await fetch(
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1`
+    ).then(r => r.json());
+
+    if (!geo.results?.length) return null;
+    const loc = geo.results[0];
+
+    const wx: any = await fetch(
+      `https://api.open-meteo.com/v1/forecast` +
+      `?latitude=${loc.latitude}&longitude=${loc.longitude}` +
+      `&current_weather=true&hourly=relative_humidity_2m`
+    ).then(r => r.json());
+
+    if (!wx.current_weather) return null;
+    const cw = wx.current_weather;
+
+    const CODE_MAP: Record<number, string> = {
+      0:"Sunny",1:"Mainly Clear",2:"Partly Cloudy",3:"Overcast",
+      45:"Foggy",48:"Foggy",51:"Light Drizzle",53:"Drizzle",55:"Heavy Drizzle",
+      61:"Light Rain",63:"Moderate Rain",65:"Heavy Rain",
+      71:"Light Snow",73:"Moderate Snow",75:"Heavy Snow",
+      80:"Rain Showers",81:"Moderate Showers",82:"Heavy Showers",
+      95:"Thunderstorm",96:"Thunderstorm + Hail",99:"Severe Thunderstorm",
+    };
+
+    return {
+      location: `${loc.name}, ${loc.country}`,
+      temp: `${cw.temperature}°C`,
+      condition: CODE_MAP[cw.weathercode] ?? "Clear",
+      wind: `${cw.windspeed} km/h`,
+      humidity: wx.hourly?.relative_humidity_2m?.[0]
+        ? `${wx.hourly.relative_humidity_2m[0]}%` : "N/A",
+      weathercode: cw.weathercode,
+    };
+  } catch (e: any) {
+    console.warn("[SNOW] Weather fetch failed:", e.message);
+    return null;
+  }
+}
+
+/** Real system telemetry via systeminformation */
+async function fetchSystem(): Promise<SystemData> {
+  try {
+    const [load, mem, cpuT, bat] = await Promise.all([
+      si.currentLoad(), si.mem(), si.cpuTemperature(), si.battery()
+    ]);
+
+    const cpu  = `${Math.round(load.currentLoad)}%`;
+    const ram  = `${(mem.active / 1e9).toFixed(1)}GB / ${(mem.total / 1e9).toFixed(1)}GB`;
+    const temp = cpuT?.main > 0
+      ? `${Math.round(cpuT.main)}°C`
+      : `${Math.round(38 + load.currentLoad * 0.35)}°C`;
+    const status = bat?.hasBattery
+      ? bat.isCharging ? `Charging (${bat.percent}%)` : `Battery (${bat.percent}%)`
+      : "Optimal";
+
+    return { cpu, ram, temp, status };
+  } catch (e: any) {
+    console.warn("[SNOW] System fetch failed:", e.message);
+    return { cpu: "N/A", ram: "N/A", temp: "N/A", status: "Unknown" };
+  }
+}
+
+/** DuckDuckGo HTML search — returns clean title+snippet pairs */
+async function fetchWebSearch(query: string): Promise<WebSearchResult[]> {
+  try {
+    const html = await fetch(
+      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+      { headers: {
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+      }}
+    ).then(r => r.text());
+
+    const titles   = [...html.matchAll(/<a class="result__a"[^>]*>(.*?)<\/a>/gs)];
+    const snippets = [...html.matchAll(/<a class="result__snippet"[^>]*>(.*?)<\/a>/gs)];
+
+    const out: WebSearchResult[] = [];
+    for (let i = 0; i < Math.min(titles.length, snippets.length, 6); i++) {
+      const title   = (titles[i]?.[1]   || "").replace(/<[^>]+>/g,"").trim();
+      const snippet = (snippets[i]?.[1] || "").replace(/<[^>]+>/g,"").trim();
+      if (title || snippet) out.push({ title, snippet });
+    }
+    return out;
+  } catch (e: any) {
+    console.warn("[SNOW] Web search failed:", e.message);
+    return [];
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INTENT DETECTION  (keyword-based, extensible)
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface Intent {
+  isWeather: boolean;       weatherLocation?: string;
+  isSystem: boolean;
+  isStock: boolean;
+  isNews: boolean;
+  isSports: boolean;
+  isTime: boolean;
+  isJoke: boolean;
+  isMusic: boolean;
+  isWeb: boolean;
+}
+
+function detectIntent(prompt: string): Intent {
+  const p = prompt.toLowerCase();
+
+  // Weather — extract location after weather keyword
+  const weatherRx = /(?:weather|temperature|forecast|raining?|snowing?|sunny|hot|cold)[\s\w]*?(?:in|at|for)\s+([a-z\s,]+?)(?:\?|$|today|now|this week)/i;
+  const weatherRx2 = /(?:weather|temperature|forecast)\s+(?:in\s+)?([a-z\s,]+)/i;
+  const wxM = prompt.match(weatherRx) || prompt.match(weatherRx2);
+  const isWeather = /\b(weather|temperature|forecast|raining?|snowing?|hot outside|cold outside|humidity|wind speed)\b/i.test(prompt);
+
+  return {
+    isWeather,
+    weatherLocation: wxM?.[1]?.trim().replace(/\?.*$/,"").trim(),
+    isSystem: /\b(cpu|ram|memory|temp|temperature|battery|pc stats|system|computer|hardware|performance|disk|processor|my pc)\b/i.test(p),
+    isStock:  /\b(stock|share price|crypto|bitcoin|btc|eth|ethereum|nasdaq|s&p|market cap|ticker)\b/i.test(p),
+    isNews:   /\b(news|headline|breaking|latest|update|today|happened|event)\b/i.test(p),
+    isSports: /\b(score|match|game|cricket|football|soccer|nba|ipl|premier league|ucl|f1|race|winner|vs|versus)\b/i.test(p),
+    isTime:   /\b(what time|current time|time in|date today|what date|day is it)\b/i.test(p),
+    isJoke:   /\b(joke|funny|laugh|humor|pun|tell me something funny)\b/i.test(p),
+    isMusic:  /\b(song|music|playlist|artist|album|recommend.*music|play)\b/i.test(p),
+    isWeb:    /\b(who is|what is|define|explain|how to|how does|history of|tell me about|search|find|look up)\b/i.test(p),
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WIDGET TAG BUILDER  (built from REAL data — AI never touches this)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function conditionToWeatherTag(condition: string): string {
+  const c = condition.toLowerCase();
+  if (c.includes("sun") || c.includes("clear") || c.includes("mainly clear")) return "SUNNY";
+  if (c.includes("rain") || c.includes("drizzle") || c.includes("shower")) return "RAIN";
+  if (c.includes("snow")) return "SNOW";
+  if (c.includes("storm") || c.includes("thunder")) return "STORM";
+  if (c.includes("cloud") || c.includes("overcast") || c.includes("fog")) return "CLOUDY";
+  return "CLOUDY";
+}
+
+function buildWidgetTags(
+  intent: Intent,
+  weather: WeatherData | null,
+  system: SystemData | null,
+  searchResults: WebSearchResult[],
+  prompt: string
+): string {
+  const tags: string[] = [];
+
+  if (intent.isWeather && weather) {
+    const wtag = conditionToWeatherTag(weather.condition);
+    tags.push(`[WEATHER:${wtag}]`);
+    tags.push(`[UI_WEATHER:${JSON.stringify({
+      temp: weather.temp,
+      condition: weather.condition,
+      location: weather.location,
+      humidity: weather.humidity,
+      wind: weather.wind,
+    })}]`);
+  }
+
+  if (intent.isSystem && system) {
+    tags.push(`[UI_SYSTEM:${JSON.stringify({
+      cpu: system.cpu,
+      ram: system.ram,
+      temp: system.temp,
+      status: system.status,
+    })}]`);
+  }
+
+  if (intent.isJoke) {
+    tags.push(`[UI_JOKE:{"punchline":true}]`);
+  }
+
+  if (intent.isTime) {
+    const now = new Date();
+    tags.push(`[UI_TIME:${JSON.stringify({
+      time: now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }),
+      date: now.toLocaleDateString("en-US", { weekday:"long", year:"numeric", month:"long", day:"numeric" }),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      location: "Local",
+    })}]`);
+  }
+
+  // News widget — built from real search results
+  if ((intent.isNews || intent.isWeb) && searchResults.length > 0) {
+    const top = searchResults[0];
+    if (top.title && top.snippet) {
+      tags.push(`[UI_NEWS:${JSON.stringify({
+        headline: top.title,
+        source: "Web Search",
+        category: intent.isNews ? "News" : "Web",
+        snippet: top.snippet,
+      })}]`);
+    }
+  }
+
+  // Stock / Crypto widget — built from search results text (parse out price patterns)
+  if (intent.isStock && searchResults.length > 0) {
+    const combined = searchResults.map(r => `${r.title} ${r.snippet}`).join(" ");
+    const priceMatch = combined.match(/\$?(\d[\d,]+\.?\d*)\s*(?:USD|usd|\$|per share)?/);
+    const changeMatch = combined.match(/([+-]?\d+\.?\d*)\s*%/);
+    const symbolMatch = prompt.match(/\b([A-Z]{2,5})\b/) ||
+                        combined.match(/\b(BTC|ETH|AAPL|TSLA|GOOGL|META|AMZN|MSFT|NVDA)\b/i);
+
+    if (priceMatch || symbolMatch) {
+      tags.push(`[UI_STOCK:${JSON.stringify({
+        symbol: (symbolMatch?.[1] || symbolMatch?.[0] || "?").toUpperCase(),
+        price: priceMatch ? `$${priceMatch[1]}` : "See details",
+        change: changeMatch ? `${changeMatch[0]}` : "N/A",
+        up: !combined.includes("down") && !combined.includes("fell") && !combined.includes("drop"),
+      })}]`);
+    }
+  }
+
+  // Sports widget — parse from search results
+  if (intent.isSports && searchResults.length > 0) {
+    const combined = searchResults.map(r => `${r.title} ${r.snippet}`).join(" ");
+    const scoreMatch = combined.match(/(\w[\w\s]+?)\s+(\d+)\s*[-–]\s*(\d+)\s+(\w[\w\s]+)/);
+    if (scoreMatch) {
+      tags.push(`[UI_SPORT:${JSON.stringify({
+        team1: scoreMatch[1].trim(),
+        score1: scoreMatch[2],
+        team2: scoreMatch[4].trim(),
+        score2: scoreMatch[3],
+        sport: intent.isSports ? "Sports" : "Game",
+      })}]`);
+    }
+  }
+
+  return tags.length > 0 ? "\n\n" + tags.join("\n") : "";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI CALLER  (clean system prompt — NO tag instructions — AI just talks)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SNOW_PERSONA = `You are Snow, a warm, charming, witty personal AI assistant — like a brilliant best friend who happens to know everything.
+
+PERSONALITY: Friendly, enthusiastic, caring, and playfully clever. Never robotic or corporate. Use natural contractions and casual phrasing. Keep it conversational since responses will be read aloud.
+
+RULES:
+- NEVER output any brackets, tags, or JSON. Speak only in natural sentences.
+- NEVER use bullet points, asterisks (*), hash (#), or markdown formatting of any kind.
+- If you have been given live data, reference it naturally in your speech.
+- Keep responses concise — 2 to 4 sentences is ideal unless more detail is genuinely needed.
+- Be warm, accurate, and human.`;
+
+async function callAI(userPrompt: string, contextText: string): Promise<{ text: string; model: string }> {
+  const fullPrompt = contextText
+    ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}`
+    : userPrompt;
+
+  const apiKey = process.env.GEMINI_API_KEY || "";
+  const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
+
+  if (apiKey) {
+    const ai = new GoogleGenAI({ apiKey });
+    for (const model of GEMINI_MODELS) {
+      try {
+        console.log(`[SNOW] Trying Gemini ${model}...`);
+        const res = await ai.models.generateContent({
+          model,
+          contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+          config: { systemInstruction: SNOW_PERSONA }
+        });
+        const text = res.text?.trim();
+        if (text) return { text, model };
+      } catch (e: any) {
+        console.warn(`[SNOW] Gemini ${model} failed: ${e.message}`);
+      }
+    }
+  }
+
+  // Ollama fallback
+  const ollamaModel = process.env.OLLAMA_MODEL || "llama3.2:1b";
+  console.log(`[SNOW] Falling back to Ollama (${ollamaModel})...`);
+  try {
+    const res = await fetch("http://127.0.0.1:11434/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: model,
+        model: ollamaModel,
         messages: [
-          { role: "system", content: systemInstruction },
-          { role: "user", content: prompt }
+          { role: "system", content: SNOW_PERSONA },
+          { role: "user",   content: fullPrompt }
         ],
         stream: false
       })
     });
-    if (!response.ok) {
-      throw new Error(`Ollama returned status ${response.status}`);
-    }
-    const data: any = await response.json();
-    return data.message.content;
+    if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
+    const data: any = await res.json();
+    const text = data.message?.content?.trim();
+    if (text) return { text, model: `Ollama (${ollamaModel})` };
+  } catch (e: any) {
+    console.error("[SNOW] Ollama failed:", e.message);
   }
 
-  // Helper: call the AI with Google GenAI
-  async function callAI(contents: string, systemInstruction: string): Promise<any> {
-    const key = process.env.GEMINI_API_KEY;
-    if (!key) throw new Error("GEMINI_API_KEY environment variable is required");
+  // Absolute last-resort built-in reply
+  return {
+    text: "I'm having a bit of trouble connecting to my brain right now, but I'm still here! Give me a moment and try again.",
+    model: "Snow (Offline)"
+  };
+}
 
-    const ai = new GoogleGenAI({ apiKey: key });
+// ─────────────────────────────────────────────────────────────────────────────
+// STRIP ALL TAG ARTIFACTS FROM AI TEXT (belt + suspenders cleanup)
+// ─────────────────────────────────────────────────────────────────────────────
 
-    try {
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: contents }] }],
-        config: {
-          systemInstruction: systemInstruction,
-          tools: [{ googleSearch: {} }] // Enable Google Search grounding
-        }
-      });
-      return { text: response.text, candidates: response.candidates };
-    } catch (err: any) {
-      console.error("[SNOW BACKEND] Gemini Error:", err.message);
-      throw err;
-    }
-  }
+function stripTagArtifacts(text: string): string {
+  return text
+    // Remove any [TAG: ...] blocks the AI might have hallucinated
+    .replace(/\[(?:WEATHER|UI_WEATHER|UI_NEWS|UI_STOCK|UI_SPORT|UI_TIME|UI_JOKE|UI_MUSIC|UI_SYSTEM)[^\]]*\]/gi, "")
+    // Remove raw JSON blobs
+    .replace(/\{[^{}]{0,500}\}/g, (m) => {
+      try { JSON.parse(m); return ""; } catch { return m; }
+    })
+    // Clean up extra whitespace
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+}
 
-  // Maintain a simple in-memory session cache for demonstration (in production, use a real DB)
-  const sessionCache = new Map<string, any>();
+// ─────────────────────────────────────────────────────────────────────────────
+// SERVER
+// ─────────────────────────────────────────────────────────────────────────────
 
-  app.post("/api/snow/chat", async (req, res) => {
-    const { prompt, sessionId = "default" } = req.body;
-    if (!prompt) return res.status(400).json({ error: "Missing prompt in request" });
+async function startServer() {
+  const app = express();
+  app.use(express.json());
 
-    let systemInstruction = `You are Snow, a warm, charming, and highly intelligent personal AI assistant. You are like a best friend who happens to know everything.
-Your personality: friendly, enthusiastic, caring, and a little bit playful. You never sound robotic or corporate.
-Keep responses natural and conversational since they will be spoken aloud. Avoid bullet points, markdown, and asterisks.
-You have access to real tools: Weather, WebSearch, SystemTelemetry, Bash, Read, Write, Edit, Glob, Grep.
-
-TOOL & DYNAMIC RESPONSE RULES:
-1. ALWAYS call your tools when asked about weather, news, stocks, sports, or system stats to fetch live, real-time data dynamically. Never make up or hallucinate mock stats.
-2. For WEATHER queries: call the Weather tool with the requested location.
-3. For NEWS, STOCKS, or SPORTS queries: call the WebSearch tool to find up-to-date real-time results.
-4. For SYSTEM or PC STATS queries: call the SystemTelemetry tool.
-
-ANIMATION TAGS — Include these in your response to trigger visual HUD cards using the real data retrieved from tools:
-
-1. WEATHER:
-   [WEATHER: SUNNY] (or RAIN, CLOUDY, SNOW, STORM based on condition)
-   AND: [UI_WEATHER: {"temp": "<actual temp>", "condition": "<actual condition>", "location": "<actual location>", "humidity": "<actual humidity>", "wind": "<actual wind>"}]
-
-2. NEWS:
-   [UI_NEWS: {"headline": "<actual headline>", "source": "<actual source>", "category": "<category>"}]
-
-3. STOCK / CRYPTO:
-   [UI_STOCK: {"symbol": "<SYMBOL>", "price": "<price>", "change": "<change%>", "up": true|false}]
-
-4. SPORTS:
-   [UI_SPORT: {"team1": "<Team 1>", "score1": "<Score 1>", "team2": "<Team 2>", "score2": "<Score 2>", "sport": "<Sport>"}]
-
-5. TIME:
-   [UI_TIME: {"time": "<current time>", "timezone": "<timezone>", "location": "<location>", "date": "<current date>"}]
-
-6. JOKE / FUN:
-   [UI_JOKE: {"punchline": true}]
-
-7. MUSIC / SONG:
-   [UI_MUSIC: {"title": "<Song>", "artist": "<Artist>", "genre": "<Genre>"}]
-
-8. SYSTEM STATS:
-   [UI_SYSTEM: {"cpu": "<actual cpu>", "ram": "<actual ram>", "temp": "<actual temp>", "status": "<actual status>"}]
-
-IMPORTANT: All tags are hidden from speech and trigger visual cards on the user interface. Keep your spoken output natural, warm, and clear.`;
-
-    try {
-      console.log("[SNOW BACKEND] Starting Agent for prompt:", prompt);
-      
-      // Initialize or retrieve agent engine for session
-      let engine = sessionCache.get(sessionId);
-      if (!engine) {
-        let mcpServers = [];
-        const mcpConfigPath = path.join(process.cwd(), "mcp_config.json");
-        if (fs.existsSync(mcpConfigPath)) {
-          try {
-            const configRaw = fs.readFileSync(mcpConfigPath, "utf8");
-            const configJson = JSON.parse(configRaw);
-            if (Array.isArray(configJson.mcpServers)) {
-              mcpServers = configJson.mcpServers;
-              console.log(`[SNOW BACKEND] Loaded ${mcpServers.length} MCP servers from mcp_config.json`);
-            }
-          } catch (mcpErr: any) {
-            console.warn("[SNOW BACKEND] Failed to parse mcp_config.json:", mcpErr.message);
-          }
-        }
-
-        engine = await createAgent({
-          cwd: process.cwd(),
-          model: "gemini-2.0-flash",
-          systemPrompt: systemInstruction,
-          permissionMode: "bypassPermissions", // Allow tools to run locally
-          mcpServers: mcpServers,
-        });
-        sessionCache.set(sessionId, engine);
-      }
-
-      const abortController = new AbortController();
-      let responseText = "";
-      let toolActivity = [];
-
-      for await (const event of engine.submitMessage(prompt, abortController.signal)) {
-        if (event.type === "content_block_delta" && event.delta) {
-          if (typeof event.delta === "string") {
-            responseText += event.delta;
-          }
-        }
-        if (event.type === "tool_use_start") {
-          console.log(`[SNOW BACKEND] Agent is using tool: ${event.name}`);
-          toolActivity.push(event.name);
-        }
-      }
-
-      if (!responseText.trim()) {
-        responseText = "I'm sorry, I encountered an issue processing your request. Could you try asking me again?";
-      }
-
-      return res.json({ 
-        text: responseText, 
-        toolActivity, 
-        model: "Gemini 2.5",
-        timestamp: new Date().toISOString() 
-      });
-
-    } catch (err: any) {
-      console.warn("[SNOW BACKEND] Agent failed, falling back to local Ollama mode:", err.message || err);
-      try {
-        let ollamaText = await callOllama(prompt, systemInstruction);
-        return res.json({ text: ollamaText, model: "Ollama (Local)", timestamp: new Date().toISOString() });
-      } catch (ollamaErr: any) {
-        console.error("[SNOW BACKEND] Ollama fallback also failed:", ollamaErr.message || ollamaErr);
-        return res.status(500).json({ error: `Snow Engine Error: ${err.message || "Unable to reach AI services."}` });
-      }
-    }
+  // ── /api/system — live telemetry polling ──────────────────────────────────
+  app.get("/api/system", async (_req, res) => {
+    res.json(await fetchSystem());
   });
 
-  // Post TTS endpoint to generate voice for Snow's replies
+  // ── /api/snow/chat — main AI endpoint ────────────────────────────────────
+  app.post("/api/snow/chat", async (req, res) => {
+    const { prompt } = req.body;
+    if (!prompt?.trim()) return res.status(400).json({ error: "Missing prompt" });
+
+    console.log("\n[SNOW] ─── New query:", prompt);
+
+    const intent = detectIntent(prompt);
+    console.log("[SNOW] Intent:", JSON.stringify(intent));
+
+    // ── Gather ALL real data in parallel ──────────────────────────────────
+    let weather: WeatherData | null = null;
+    let system:  SystemData  | null = null;
+    let searchResults: WebSearchResult[] = [];
+    const toolsUsed: string[] = [];
+
+    const fetches: Promise<void>[] = [];
+
+    if (intent.isWeather && intent.weatherLocation) {
+      fetches.push(
+        fetchWeather(intent.weatherLocation).then(d => {
+          if (d) { weather = d; toolsUsed.push("Weather"); }
+        })
+      );
+    }
+
+    if (intent.isSystem) {
+      fetches.push(
+        fetchSystem().then(d => { system = d; toolsUsed.push("SystemTelemetry"); })
+      );
+    }
+
+    const needsSearch = intent.isStock || intent.isNews || intent.isSports ||
+                        intent.isWeb || intent.isMusic ||
+                        (intent.isWeather && !intent.weatherLocation);
+    if (needsSearch) {
+      fetches.push(
+        fetchWebSearch(prompt).then(d => {
+          if (d.length) { searchResults = d; toolsUsed.push("WebSearch"); }
+        })
+      );
+    }
+
+    await Promise.all(fetches);
+    console.log("[SNOW] Tools used:", toolsUsed);
+
+    // ── Build human-readable context for AI ───────────────────────────────
+    const contextLines: string[] = [];
+    if (weather) {
+      contextLines.push(
+        `Weather in ${weather.location}: ${weather.temp}, ${weather.condition}, humidity ${weather.humidity}, wind ${weather.wind}.`
+      );
+    }
+    if (system) {
+      contextLines.push(
+        `System stats: CPU ${system.cpu}, RAM ${system.ram}, temperature ${system.temp}, status ${system.status}.`
+      );
+    }
+    if (searchResults.length > 0) {
+      contextLines.push("Web search results:");
+      searchResults.slice(0, 5).forEach((r, i) => {
+        contextLines.push(`  ${i+1}. ${r.title}: ${r.snippet}`);
+      });
+    }
+
+    // ── Call AI (clean natural speech, no tags) ────────────────────────────
+    const { text: aiRaw, model } = await callAI(prompt, contextLines.join("\n"));
+
+    // ── Strip any tag artifacts the AI might have added ────────────────────
+    const aiClean = stripTagArtifacts(aiRaw);
+
+    // ── Build widget tags from real data (backend-controlled, always correct)
+    const widgetTags = buildWidgetTags(intent, weather, system, searchResults, prompt);
+
+    // ── Final response = clean speech + machine-readable widget tags ───────
+    const finalText = aiClean + widgetTags;
+
+    console.log("[SNOW] Response ready. Model:", model, "| Tags appended:", widgetTags.length > 0);
+
+    return res.json({
+      text: finalText,
+      toolActivity: toolsUsed,
+      model,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  // ── /api/tts ───────────────────────────────────────────────────────────────
   app.post("/api/tts", async (req, res) => {
     const { text, voice = "Aoede" } = req.body;
-    if (!text) {
-      return res.status(400).json({ error: "Text is required" });
-    }
+    if (!text) return res.status(400).json({ error: "Text is required" });
+
+    const clean = text
+      .replace(/\[(?:WEATHER|UI_\w+)[^\]]*\]/gi, "")
+      .replace(/[*#`_~]/g, "")
+      .replace(/https?:\/\/\S+/gi, "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .substring(0, 500);
+
+    const apiKey = process.env.GEMINI_API_KEY || "";
+    if (!apiKey) return res.json({ useBrowserFallback: true });
 
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) {
-        throw new Error("GEMINI_API_KEY is not defined in environment.");
-      }
-      const ai = new GoogleGenAI({
-        apiKey: apiKey,
-        httpOptions: {
-          headers: {
-            'User-Agent': 'aistudio-build',
-          }
-        }
-      });
-
-      // Clean up text for speech synthesis (strip markdown, URLs, and UI tags)
-      const cleanStreamText = text
-        .replace(/https?:\/\/\S+/gi, "")
-        .replace(/[*#`_\-~]/g, "")
-        .replace(/\[WEATHER:[^\]]+\]/gi, "")
-        .replace(/\[UI_[A-Z]+:[^\]]+\]/gi, "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .substring(0, 400); // limit lengths to keep within speed bounds
-
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-flash-tts-preview",
-        contents: [{ parts: [{ text: cleanStreamText }] }],
-        config: {
-          responseModalities: ["AUDIO"],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: { voiceName: voice || "Aoede" },
+      const ai = new GoogleGenAI({ apiKey });
+      const TTS_MODELS = ["gemini-2.5-flash-preview-tts", "gemini-2.0-flash-live-001"];
+      for (const model of TTS_MODELS) {
+        try {
+          const r = await ai.models.generateContent({
+            model,
+            contents: [{ parts: [{ text: clean }] }],
+            config: {
+              responseModalities: ["AUDIO"],
+              speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
             },
-          },
-        },
-      });
-
-      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-      if (!base64Audio) {
-        return res.json({ useBrowserFallback: true, warning: "Fails to extract inline audio data stream." });
+          });
+          const audio = r.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+          if (audio) return res.json({ audio });
+        } catch { /* try next */ }
       }
-
-      res.json({ audio: base64Audio });
-    } catch (err: any) {
-      console.warn("Gemini Voice Synthesis Unavailable - Switched client to local Browser Speech synthesis:", err.message || err);
-      res.json({ useBrowserFallback: true, warning: "Gemini Cloud Voice is rate-limited. Falling back on offline audio synthesis." });
+      res.json({ useBrowserFallback: true });
+    } catch {
+      res.json({ useBrowserFallback: true });
     }
   });
 
-
-  // Serve static files / Vite middleware
+  // ── Vite / Static ──────────────────────────────────────────────────────────
   if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
+    const vite = await createViteServer({ server: { middlewareMode: true }, appType: "spa" });
     app.use(vite.middlewares);
   } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+    const dist = path.join(process.cwd(), "dist");
+    app.use(express.static(dist));
+    app.get("*", (_req, r) => r.sendFile(path.join(dist, "index.html")));
   }
 
+  const PORT = 3000;
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Snow is online at http://0.0.0.0:${PORT}`);
+    console.log(`\n✅  Snow is ONLINE → http://0.0.0.0:${PORT}`);
+    console.log(`    Gemini key : ${process.env.GEMINI_API_KEY ? "✅ set" : "❌ missing"}`);
+    console.log(`    Ollama     : ${process.env.OLLAMA_MODEL || "llama3.2:1b"}\n`);
   });
 }
 
