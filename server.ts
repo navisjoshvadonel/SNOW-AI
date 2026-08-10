@@ -4,6 +4,20 @@ import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
 import si from "systeminformation";
+import {
+  loadMemories,
+  addMemory,
+  deleteMemory,
+  clearMemories,
+  loadVectorDocuments,
+  addVectorDocument,
+  deleteVectorDocument,
+  loadBrainState,
+  recordFeedback,
+  resolveIntent,
+  trainBrain,
+  ResolvedIntent
+} from "./brain";
 
 dotenv.config();
 
@@ -25,7 +39,7 @@ interface WebSearchResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REAL-DATA FETCHERS  (no AI involvement here — pure API calls)
+// REAL-DATA FETCHERS  (no hardcoded mock data — pure API calls)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Open-Meteo geocoding + weather — completely free, no key required */
@@ -122,45 +136,6 @@ async function fetchWebSearch(query: string): Promise<WebSearchResult[]> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// INTENT DETECTION  (keyword-based, extensible)
-// ─────────────────────────────────────────────────────────────────────────────
-
-interface Intent {
-  isWeather: boolean;       weatherLocation?: string;
-  isSystem: boolean;
-  isStock: boolean;
-  isNews: boolean;
-  isSports: boolean;
-  isTime: boolean;
-  isJoke: boolean;
-  isMusic: boolean;
-  isWeb: boolean;
-}
-
-function detectIntent(prompt: string): Intent {
-  const p = prompt.toLowerCase();
-
-  // Weather — extract location after weather keyword
-  const weatherRx = /(?:weather|temperature|forecast|raining?|snowing?|sunny|hot|cold)[\s\w]*?(?:in|at|for)\s+([a-z\s,]+?)(?:\?|$|today|now|this week)/i;
-  const weatherRx2 = /(?:weather|temperature|forecast)\s+(?:in\s+)?([a-z\s,]+)/i;
-  const wxM = prompt.match(weatherRx) || prompt.match(weatherRx2);
-  const isWeather = /\b(weather|temperature|forecast|raining?|snowing?|hot outside|cold outside|humidity|wind speed)\b/i.test(prompt);
-
-  return {
-    isWeather,
-    weatherLocation: wxM?.[1]?.trim().replace(/\?.*$/,"").trim(),
-    isSystem: /\b(cpu|ram|memory|temp|temperature|battery|pc stats|system|computer|hardware|performance|disk|processor|my pc)\b/i.test(p),
-    isStock:  /\b(stock|share price|crypto|bitcoin|btc|eth|ethereum|nasdaq|s&p|market cap|ticker)\b/i.test(p),
-    isNews:   /\b(news|headline|breaking|latest|update|today|happened|event)\b/i.test(p),
-    isSports: /\b(score|match|game|cricket|football|soccer|nba|ipl|premier league|ucl|f1|race|winner|vs|versus)\b/i.test(p),
-    isTime:   /\b(what time|current time|time in|date today|what date|day is it)\b/i.test(p),
-    isJoke:   /\b(joke|funny|laugh|humor|pun|tell me something funny)\b/i.test(p),
-    isMusic:  /\b(song|music|playlist|artist|album|recommend.*music|play)\b/i.test(p),
-    isWeb:    /\b(who is|what is|define|explain|how to|how does|history of|tell me about|search|find|look up)\b/i.test(p),
-  };
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // WIDGET TAG BUILDER  (built from REAL data — AI never touches this)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -175,7 +150,7 @@ function conditionToWeatherTag(condition: string): string {
 }
 
 function buildWidgetTags(
-  intent: Intent,
+  intent: ResolvedIntent,
   weather: WeatherData | null,
   system: SystemData | null,
   searchResults: WebSearchResult[],
@@ -231,7 +206,7 @@ function buildWidgetTags(
     }
   }
 
-  // Stock / Crypto widget — built from search results text (parse out price patterns)
+  // Stock / Crypto widget — built from search results text
   if (intent.isStock && searchResults.length > 0) {
     const combined = searchResults.map(r => `${r.title} ${r.snippet}`).join(" ");
     const priceMatch = combined.match(/\$?(\d[\d,]+\.?\d*)\s*(?:USD|usd|\$|per share)?/);
@@ -241,7 +216,7 @@ function buildWidgetTags(
 
     if (priceMatch || symbolMatch) {
       tags.push(`[UI_STOCK:${JSON.stringify({
-        symbol: (symbolMatch?.[1] || symbolMatch?.[0] || "?").toUpperCase(),
+        symbol: (symbolMatch?.[1] || symbolMatch?.[0] || intent.stockQuery || "?").toUpperCase(),
         price: priceMatch ? `$${priceMatch[1]}` : "See details",
         change: changeMatch ? `${changeMatch[0]}` : "N/A",
         up: !combined.includes("down") && !combined.includes("fell") && !combined.includes("drop"),
@@ -268,21 +243,51 @@ function buildWidgetTags(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AI CALLER  (clean system prompt — NO tag instructions — AI just talks)
+// AI CALLER WITH DYNAMIC MEMORY INJECTION (CONTINUOUS LEARNING INCLUDED)
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SNOW_PERSONA = `You are Snow, a warm, charming, witty personal AI assistant — like a brilliant best friend who happens to know everything.
+async function callAI(userPrompt: string, contextText: string): Promise<{ text: string; model: string }> {
+  // Load persistent memories & brain state directives dynamically
+  const memories = loadMemories();
+  const brainState = loadBrainState();
+  const vectorDocs = loadVectorDocuments();
+
+  let memoryContext = "\nSTORED USER KNOWLEDGE & MEMORIES:\n";
+  if (memories.length > 0) {
+    memories.forEach(m => {
+      memoryContext += `- [${m.source}] ${m.rel} ${m.target}\n`;
+    });
+  } else {
+    memoryContext += "- No stored facts yet.\n";
+  }
+
+  if (brainState.learnedDirectives.length > 0) {
+    memoryContext += "\nLEARNED ADAPTIVE DIRECTIVES:\n";
+    brainState.learnedDirectives.forEach(d => {
+      memoryContext += `- ${d}\n`;
+    });
+  }
+
+  if (vectorDocs.length > 0) {
+    memoryContext += "\nVECTOR MEMORY RAG SNIPPETS:\n";
+    vectorDocs.slice(-3).forEach(v => {
+      memoryContext += `- (${v.source}): ${v.text}\n`;
+    });
+  }
+
+  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), a warm, charming, hyper-intelligent personal AI assistant — like a brilliant best friend who happens to know everything.
 
 PERSONALITY: Friendly, enthusiastic, caring, and playfully clever. Never robotic or corporate. Use natural contractions and casual phrasing. Keep it conversational since responses will be read aloud.
 
+${memoryContext}
+
 RULES:
-- NEVER output any brackets, tags, or JSON. Speak only in natural sentences.
+- NEVER output any brackets, tags, or JSON in speech. Speak only in natural, clean sentences.
 - NEVER use bullet points, asterisks (*), hash (#), or markdown formatting of any kind.
-- If you have been given live data, reference it naturally in your speech.
-- Keep responses concise — 2 to 4 sentences is ideal unless more detail is genuinely needed.
+- If you have been given live data or stored memories, reference them naturally in your speech.
+- Keep responses concise — 2 to 4 sentences is ideal unless more detail is genuinely requested.
 - Be warm, accurate, and human.`;
 
-async function callAI(userPrompt: string, contextText: string): Promise<{ text: string; model: string }> {
   const fullPrompt = contextText
     ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}`
     : userPrompt;
@@ -340,25 +345,22 @@ async function callAI(userPrompt: string, contextText: string): Promise<{ text: 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// STRIP ALL TAG ARTIFACTS FROM AI TEXT (belt + suspenders cleanup)
+// STRIP ALL TAG ARTIFACTS FROM AI TEXT
 // ─────────────────────────────────────────────────────────────────────────────
 
 function stripTagArtifacts(text: string): string {
   return text
-    // Remove any [TAG: ...] blocks the AI might have hallucinated
     .replace(/\[(?:WEATHER|UI_WEATHER|UI_NEWS|UI_STOCK|UI_SPORT|UI_TIME|UI_JOKE|UI_MUSIC|UI_SYSTEM)[^\]]*\]/gi, "")
-    // Remove raw JSON blobs
     .replace(/\{[^{}]{0,500}\}/g, (m) => {
       try { JSON.parse(m); return ""; } catch { return m; }
     })
-    // Clean up extra whitespace
     .replace(/\n{3,}/g, "\n\n")
     .replace(/\s{2,}/g, " ")
     .trim();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SERVER
+// SERVER SETUP & ROUTES
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function startServer() {
@@ -377,10 +379,11 @@ async function startServer() {
 
     console.log("\n[SNOW] ─── New query:", prompt);
 
-    const intent = detectIntent(prompt);
-    console.log("[SNOW] Intent:", JSON.stringify(intent));
+    // Dynamic Intent & Slot resolution (No hardcoding)
+    const intent = await resolveIntent(prompt);
+    console.log("[SNOW] Dynamic Neural Intent:", JSON.stringify(intent));
 
-    // ── Gather ALL real data in parallel ──────────────────────────────────
+    // Gather live tool data in parallel
     let weather: WeatherData | null = null;
     let system:  SystemData  | null = null;
     let searchResults: WebSearchResult[] = [];
@@ -402,21 +405,28 @@ async function startServer() {
       );
     }
 
+    const searchQuery = intent.webQuery || intent.stockQuery || prompt;
     const needsSearch = intent.isStock || intent.isNews || intent.isSports ||
                         intent.isWeb || intent.isMusic ||
                         (intent.isWeather && !intent.weatherLocation);
     if (needsSearch) {
       fetches.push(
-        fetchWebSearch(prompt).then(d => {
+        fetchWebSearch(searchQuery).then(d => {
           if (d.length) { searchResults = d; toolsUsed.push("WebSearch"); }
         })
       );
     }
 
-    await Promise.all(fetches);
-    console.log("[SNOW] Tools used:", toolsUsed);
+    // Trigger brain self-training if explicitly requested
+    if (intent.isTrainRequest) {
+      trainBrain("User triggered active training session.");
+      toolsUsed.push("AutonomousTrainingEngine");
+    }
 
-    // ── Build human-readable context for AI ───────────────────────────────
+    await Promise.all(fetches);
+    console.log("[SNOW] Tools executed:", toolsUsed);
+
+    // Build context for AI
     const contextLines: string[] = [];
     if (weather) {
       contextLines.push(
@@ -435,29 +445,98 @@ async function startServer() {
       });
     }
 
-    // ── Call AI (clean natural speech, no tags) ────────────────────────────
+    // Call AI with clean dynamic prompt & memory RAG
     const { text: aiRaw, model } = await callAI(prompt, contextLines.join("\n"));
-
-    // ── Strip any tag artifacts the AI might have added ────────────────────
     const aiClean = stripTagArtifacts(aiRaw);
 
-    // ── Build widget tags from real data (backend-controlled, always correct)
+    // Build widget tags from real data
     const widgetTags = buildWidgetTags(intent, weather, system, searchResults, prompt);
-
-    // ── Final response = clean speech + machine-readable widget tags ───────
     const finalText = aiClean + widgetTags;
 
-    console.log("[SNOW] Response ready. Model:", model, "| Tags appended:", widgetTags.length > 0);
+    const brainState = loadBrainState();
 
     return res.json({
       text: finalText,
       toolActivity: toolsUsed,
       model,
+      brainLevel: brainState.level,
+      memoriesCount: loadMemories().length,
       timestamp: new Date().toISOString(),
     });
   });
 
-  // ── /api/tts ───────────────────────────────────────────────────────────────
+  // ── /api/snow/memory — Neo4j Knowledge Graph API ──────────────────────── Dynamic CRUD
+  app.get("/api/snow/memory", (_req, res) => {
+    res.json(loadMemories());
+  });
+
+  app.post("/api/snow/memory", (req, res) => {
+    const { source, rel, target } = req.body;
+    if (!source || !rel || !target) {
+      return res.status(400).json({ error: "source, rel, and target are required" });
+    }
+    const mem = addMemory(source, rel, target);
+    res.json({ success: true, memory: mem });
+  });
+
+  app.delete("/api/snow/memory/:id", (req, res) => {
+    const success = deleteMemory(req.params.id);
+    res.json({ success });
+  });
+
+  app.delete("/api/snow/memory", (_req, res) => {
+    clearMemories();
+    res.json({ success: true, message: "All memories cleared." });
+  });
+
+  // ── /api/snow/vectors — ChromaDB Vector Store API ────────────────────── Dynamic CRUD
+  app.get("/api/snow/vectors", (_req, res) => {
+    res.json(loadVectorDocuments());
+  });
+
+  app.post("/api/snow/vectors", (req, res) => {
+    const { source, text, category } = req.body;
+    if (!source || !text) {
+      return res.status(400).json({ error: "source and text are required" });
+    }
+    const doc = addVectorDocument(source, text, category || "code");
+    res.json({ success: true, document: doc });
+  });
+
+  app.delete("/api/snow/vectors/:id", (req, res) => {
+    deleteVectorDocument(req.params.id);
+    res.json({ success: true });
+  });
+
+  // ── /api/snow/feedback — Reinforcement Learning from User Thumbs ───────
+  app.post("/api/snow/feedback", (req, res) => {
+    const { prompt, response, feedback, notes } = req.body;
+    if (!prompt || !response || !feedback) {
+      return res.status(400).json({ error: "Missing required fields" });
+    }
+    recordFeedback(prompt, response, feedback, notes);
+    res.json({ success: true, brainState: loadBrainState() });
+  });
+
+  // ── /api/snow/train — Autonomous Training Trigger ───────────────────────
+  app.post("/api/snow/train", async (req, res) => {
+    const { instructions } = req.body;
+    const result = await trainBrain(instructions);
+    res.json({ success: true, ...result });
+  });
+
+  app.get("/api/snow/train/status", (_req, res) => {
+    const brainState = loadBrainState();
+    const memories = loadMemories();
+    const vectors = loadVectorDocuments();
+    res.json({
+      brainState,
+      memoriesCount: memories.length,
+      vectorsCount: vectors.length
+    });
+  });
+
+  // ── /api/tts — Text-To-Speech ──────────────────────────────────────────────
   app.post("/api/tts", async (req, res) => {
     const { text, voice = "Aoede" } = req.body;
     if (!text) return res.status(400).json({ error: "Text is required" });
@@ -508,9 +587,9 @@ async function startServer() {
 
   const PORT = 3000;
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`\n✅  Snow is ONLINE → http://0.0.0.0:${PORT}`);
-    console.log(`    Gemini key : ${process.env.GEMINI_API_KEY ? "✅ set" : "❌ missing"}`);
-    console.log(`    Ollama     : ${process.env.OLLAMA_MODEL || "llama3.2:1b"}\n`);
+    console.log(`\n✅  Snow OS Autonomous Learning Agent ONLINE → http://0.0.0.0:${PORT}`);
+    console.log(`    Gemini key   : ${process.env.GEMINI_API_KEY ? "✅ set" : "❌ missing"}`);
+    console.log(`    Brain Status : LV.${loadBrainState().level} (${loadMemories().length} Memories, ${loadVectorDocuments().length} Vectors)\n`);
   });
 }
 
