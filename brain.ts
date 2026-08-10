@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import Database from "better-sqlite3";
 import { GoogleGenAI } from "@google/genai";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -61,10 +62,11 @@ export interface ResolvedIntent {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PATHS & STORAGE
+// SQLITE PRODUCTION DATABASE ENGINE (WAL MODE FOR CONCURRENCY)
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DATA_DIR = path.join(process.cwd(), "data");
+const DB_FILE = path.join(DATA_DIR, "snow_brain.db");
 const MEMORY_FILE = path.join(DATA_DIR, "memories.json");
 const CHROMA_FILE = path.join(DATA_DIR, "chroma_vectors.json");
 const BRAIN_STATE_FILE = path.join(DATA_DIR, "brain_state.json");
@@ -74,6 +76,60 @@ function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
     fs.mkdirSync(DATA_DIR, { recursive: true });
   }
+}
+
+let dbInstance: Database.Database | null = null;
+
+function getDb(): Database.Database {
+  ensureDataDir();
+  if (!dbInstance) {
+    dbInstance = new Database(DB_FILE);
+    dbInstance.pragma("journal_mode = WAL");
+    dbInstance.pragma("synchronous = NORMAL");
+
+    dbInstance.exec(`
+      CREATE TABLE IF NOT EXISTS memories (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        rel TEXT NOT NULL,
+        target TEXT NOT NULL,
+        category TEXT,
+        timestamp TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS vector_documents (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        text TEXT NOT NULL,
+        category TEXT NOT NULL,
+        embedding TEXT NOT NULL,
+        timestamp TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS brain_state (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        level INTEGER NOT NULL,
+        xp INTEGER NOT NULL,
+        total_chats INTEGER NOT NULL,
+        positive_feedback INTEGER NOT NULL,
+        negative_feedback INTEGER NOT NULL,
+        last_trained TEXT NOT NULL,
+        learned_directives TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS feedback_entries (
+        id TEXT PRIMARY KEY,
+        prompt TEXT NOT NULL,
+        response TEXT NOT NULL,
+        feedback TEXT NOT NULL,
+        notes TEXT,
+        timestamp TEXT NOT NULL
+      );
+    `);
+
+    autoMigrateJsonToSqlite(dbInstance);
+  }
+  return dbInstance;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -106,30 +162,104 @@ const DEFAULT_BRAIN_STATE: BrainState = {
   ]
 };
 
+function autoMigrateJsonToSqlite(db: Database.Database) {
+  // 1. Memories
+  const memCount = (db.prepare("SELECT COUNT(*) as count FROM memories").get() as any).count;
+  if (memCount === 0) {
+    let memsToMigrate = DEFAULT_MEMORIES;
+    if (fs.existsSync(MEMORY_FILE)) {
+      try { memsToMigrate = JSON.parse(fs.readFileSync(MEMORY_FILE, "utf-8")); } catch {}
+    }
+    const insertMem = db.prepare("INSERT OR REPLACE INTO memories (id, source, rel, target, category, timestamp) VALUES (?, ?, ?, ?, ?, ?)");
+    const insertTx = db.transaction((items: MemoryNode[]) => {
+      for (const m of items) insertMem.run(m.id, m.source, m.rel, m.target, m.category || null, m.timestamp);
+    });
+    insertTx(memsToMigrate);
+  }
+
+  // 2. Vector Documents
+  const vecCount = (db.prepare("SELECT COUNT(*) as count FROM vector_documents").get() as any).count;
+  if (vecCount === 0) {
+    let vecsToMigrate = DEFAULT_VECTORS;
+    if (fs.existsSync(CHROMA_FILE)) {
+      try { vecsToMigrate = JSON.parse(fs.readFileSync(CHROMA_FILE, "utf-8")); } catch {}
+    }
+    const insertVec = db.prepare("INSERT OR REPLACE INTO vector_documents (id, source, text, category, embedding, timestamp) VALUES (?, ?, ?, ?, ?, ?)");
+    const insertVecTx = db.transaction((items: ChromaVectorDocument[]) => {
+      for (const v of items) insertVec.run(v.id, v.source, v.text, v.category, JSON.stringify(v.embedding), v.timestamp);
+    });
+    insertVecTx(vecsToMigrate);
+  }
+
+  // 3. Brain State
+  const stateCount = (db.prepare("SELECT COUNT(*) as count FROM brain_state").get() as any).count;
+  if (stateCount === 0) {
+    let stateToMigrate = DEFAULT_BRAIN_STATE;
+    if (fs.existsSync(BRAIN_STATE_FILE)) {
+      try { stateToMigrate = JSON.parse(fs.readFileSync(BRAIN_STATE_FILE, "utf-8")); } catch {}
+    }
+    db.prepare(`
+      INSERT OR REPLACE INTO brain_state 
+      (id, level, xp, total_chats, positive_feedback, negative_feedback, last_trained, learned_directives) 
+      VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      stateToMigrate.level,
+      stateToMigrate.xp,
+      stateToMigrate.totalChats,
+      stateToMigrate.positiveFeedback,
+      stateToMigrate.negativeFeedback,
+      stateToMigrate.lastTrained,
+      JSON.stringify(stateToMigrate.learnedDirectives)
+    );
+  }
+
+  // 4. Feedback
+  const fbCount = (db.prepare("SELECT COUNT(*) as count FROM feedback_entries").get() as any).count;
+  if (fbCount === 0 && fs.existsSync(FEEDBACK_FILE)) {
+    try {
+      const fbToMigrate: FeedbackEntry[] = JSON.parse(fs.readFileSync(FEEDBACK_FILE, "utf-8"));
+      const insertFb = db.prepare("INSERT OR REPLACE INTO feedback_entries (id, prompt, response, feedback, notes, timestamp) VALUES (?, ?, ?, ?, ?, ?)");
+      const insertFbTx = db.transaction((items: FeedbackEntry[]) => {
+        for (const f of items) insertFb.run(f.id, f.prompt, f.response, f.feedback, f.notes || null, f.timestamp);
+      });
+      insertFbTx(fbToMigrate);
+    } catch {}
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-// MEMORY STORE MANAGERS
+// MEMORY STORE MANAGERS (SQLITE + GRAPH TRAVERSAL)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function loadMemories(): MemoryNode[] {
-  ensureDataDir();
-  if (!fs.existsSync(MEMORY_FILE)) {
-    saveMemories(DEFAULT_MEMORIES);
-    return DEFAULT_MEMORIES;
-  }
-  try {
-    return JSON.parse(fs.readFileSync(MEMORY_FILE, "utf-8"));
-  } catch {
-    return DEFAULT_MEMORIES;
-  }
+  const db = getDb();
+  const rows: any[] = db.prepare("SELECT * FROM memories ORDER BY timestamp ASC").all();
+  return rows.map(r => ({
+    id: r.id,
+    source: r.source,
+    rel: r.rel,
+    target: r.target,
+    category: r.category || undefined,
+    timestamp: r.timestamp
+  }));
 }
 
 export function saveMemories(mems: MemoryNode[]) {
-  ensureDataDir();
-  fs.writeFileSync(MEMORY_FILE, JSON.stringify(mems, null, 2));
+  const db = getDb();
+  const deleteStmt = db.prepare("DELETE FROM memories");
+  const insertStmt = db.prepare("INSERT INTO memories (id, source, rel, target, category, timestamp) VALUES (?, ?, ?, ?, ?, ?)");
+  
+  const tx = db.transaction((items: MemoryNode[]) => {
+    deleteStmt.run();
+    for (const m of items) {
+      insertStmt.run(m.id, m.source, m.rel, m.target, m.category || null, m.timestamp);
+    }
+  });
+  tx(mems);
 }
 
 export function addMemory(source: string, rel: string, target: string): MemoryNode {
-  const mems = loadMemories();
+  const db = getDb();
   const newMem: MemoryNode = {
     id: `mem-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     source: source.trim(),
@@ -137,26 +267,44 @@ export function addMemory(source: string, rel: string, target: string): MemoryNo
     target: target.trim(),
     timestamp: new Date().toISOString()
   };
-  mems.push(newMem);
-  saveMemories(mems);
+
+  db.prepare("INSERT INTO memories (id, source, rel, target, category, timestamp) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(newMem.id, newMem.source, newMem.rel, newMem.target, null, newMem.timestamp);
 
   // Sync to Chroma Vectors
   addVectorDocument(`mem_${newMem.id}`, `${source} ${rel} ${target}`, "history");
   return newMem;
 }
 
+/** Fast Knowledge Graph Traversal Query across entity relationships */
+export function findGraphRelationships(query: string): MemoryNode[] {
+  const db = getDb();
+  const pattern = `%${query.toLowerCase().trim()}%`;
+  const rows: any[] = db.prepare(`
+    SELECT * FROM memories 
+    WHERE LOWER(source) LIKE ? OR LOWER(rel) LIKE ? OR LOWER(target) LIKE ?
+    ORDER BY timestamp DESC
+  `).all(pattern, pattern, pattern);
+
+  return rows.map(r => ({
+    id: r.id,
+    source: r.source,
+    rel: r.rel,
+    target: r.target,
+    category: r.category || undefined,
+    timestamp: r.timestamp
+  }));
+}
+
 export function deleteMemory(id: string): boolean {
-  const mems = loadMemories();
-  const filtered = mems.filter(m => m.id !== id);
-  if (filtered.length !== mems.length) {
-    saveMemories(filtered);
-    return true;
-  }
-  return false;
+  const db = getDb();
+  const res = db.prepare("DELETE FROM memories WHERE id = ?").run(id);
+  return res.changes > 0;
 }
 
 export function clearMemories() {
-  saveMemories([]);
+  const db = getDb();
+  db.prepare("DELETE FROM memories").run();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -166,7 +314,6 @@ export function clearMemories() {
 /** Calculate cosine similarity between two vector arrays */
 export function cosineSimilarity(vecA: number[], vecB: number[]): number {
   if (!vecA || !vecB || vecA.length === 0 || vecB.length === 0) return 0;
-  // If lengths differ (e.g. legacy 3D vs 768D), compare overlapping dimensions
   const minLen = Math.min(vecA.length, vecB.length);
   let dotProduct = 0;
   let normA = 0;
@@ -194,7 +341,6 @@ function generateOfflineVector(text: string): number[] {
     }
     vector[Math.abs(hash)] += 1;
   }
-  // Normalize vector
   const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
   return norm > 0 ? vector.map(v => Number((v / norm).toFixed(4))) : vector;
 }
@@ -221,25 +367,34 @@ export async function computeEmbedding(text: string): Promise<number[]> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CHROMA VECTOR STORE MANAGERS
+// CHROMA VECTOR STORE MANAGERS (SQLITE ENGINE)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function loadVectorDocuments(): ChromaVectorDocument[] {
-  ensureDataDir();
-  if (!fs.existsSync(CHROMA_FILE)) {
-    saveVectorDocuments(DEFAULT_VECTORS);
-    return DEFAULT_VECTORS;
-  }
-  try {
-    return JSON.parse(fs.readFileSync(CHROMA_FILE, "utf-8"));
-  } catch {
-    return DEFAULT_VECTORS;
-  }
+  const db = getDb();
+  const rows: any[] = db.prepare("SELECT * FROM vector_documents ORDER BY timestamp ASC").all();
+  return rows.map(r => ({
+    id: r.id,
+    source: r.source,
+    text: r.text,
+    category: r.category as any,
+    embedding: JSON.parse(r.embedding),
+    timestamp: r.timestamp
+  }));
 }
 
 export function saveVectorDocuments(docs: ChromaVectorDocument[]) {
-  ensureDataDir();
-  fs.writeFileSync(CHROMA_FILE, JSON.stringify(docs, null, 2));
+  const db = getDb();
+  const deleteStmt = db.prepare("DELETE FROM vector_documents");
+  const insertStmt = db.prepare("INSERT INTO vector_documents (id, source, text, category, embedding, timestamp) VALUES (?, ?, ?, ?, ?, ?)");
+  
+  const tx = db.transaction((items: ChromaVectorDocument[]) => {
+    deleteStmt.run();
+    for (const v of items) {
+      insertStmt.run(v.id, v.source, v.text, v.category, JSON.stringify(v.embedding), v.timestamp);
+    }
+  });
+  tx(docs);
 }
 
 export async function addVectorDocument(
@@ -247,7 +402,7 @@ export async function addVectorDocument(
   text: string,
   category: "code" | "history" | "guideline"
 ): Promise<ChromaVectorDocument> {
-  const docs = loadVectorDocuments();
+  const db = getDb();
   const embedding = await computeEmbedding(text);
   const newDoc: ChromaVectorDocument = {
     id: `vec-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -257,14 +412,16 @@ export async function addVectorDocument(
     embedding,
     timestamp: new Date().toISOString()
   };
-  docs.push(newDoc);
-  saveVectorDocuments(docs);
+
+  db.prepare("INSERT INTO vector_documents (id, source, text, category, embedding, timestamp) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(newDoc.id, newDoc.source, newDoc.text, newDoc.category, JSON.stringify(newDoc.embedding), newDoc.timestamp);
+
   return newDoc;
 }
 
 export function deleteVectorDocument(id: string) {
-  const docs = loadVectorDocuments();
-  saveVectorDocuments(docs.filter(d => d.id !== id));
+  const db = getDb();
+  db.prepare("DELETE FROM vector_documents WHERE id = ?").run(id);
 }
 
 /** Search vector documents using Cosine Similarity ranking */
@@ -281,59 +438,70 @@ export async function searchVectorDocuments(
     score: cosineSimilarity(queryEmbedding, doc.embedding || [])
   }));
 
-  // Sort descending by similarity score
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, topK);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BRAIN STATE & FEEDBACK MANAGERS
+// BRAIN STATE & FEEDBACK MANAGERS (SQLITE ENGINE)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function loadBrainState(): BrainState {
-  ensureDataDir();
-  if (!fs.existsSync(BRAIN_STATE_FILE)) {
+  const db = getDb();
+  const row: any = db.prepare("SELECT * FROM brain_state WHERE id = 1").get();
+  if (!row) {
     saveBrainState(DEFAULT_BRAIN_STATE);
     return DEFAULT_BRAIN_STATE;
   }
-  try {
-    return JSON.parse(fs.readFileSync(BRAIN_STATE_FILE, "utf-8"));
-  } catch {
-    return DEFAULT_BRAIN_STATE;
-  }
+  return {
+    level: row.level,
+    xp: row.xp,
+    totalChats: row.total_chats,
+    positiveFeedback: row.positive_feedback,
+    negativeFeedback: row.negative_feedback,
+    lastTrained: row.last_trained,
+    learnedDirectives: JSON.parse(row.learned_directives)
+  };
 }
 
 export function saveBrainState(state: BrainState) {
-  ensureDataDir();
-  fs.writeFileSync(BRAIN_STATE_FILE, JSON.stringify(state, null, 2));
+  const db = getDb();
+  db.prepare(`
+    INSERT OR REPLACE INTO brain_state 
+    (id, level, xp, total_chats, positive_feedback, negative_feedback, last_trained, learned_directives)
+    VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    state.level,
+    state.xp,
+    state.totalChats,
+    state.positiveFeedback,
+    state.negativeFeedback,
+    state.lastTrained,
+    JSON.stringify(state.learnedDirectives)
+  );
 }
 
 export function loadFeedback(): FeedbackEntry[] {
-  ensureDataDir();
-  if (!fs.existsSync(FEEDBACK_FILE)) {
-    return [];
-  }
-  try {
-    return JSON.parse(fs.readFileSync(FEEDBACK_FILE, "utf-8"));
-  } catch {
-    return [];
-  }
+  const db = getDb();
+  const rows: any[] = db.prepare("SELECT * FROM feedback_entries ORDER BY timestamp ASC").all();
+  return rows.map(r => ({
+    id: r.id,
+    prompt: r.prompt,
+    response: r.response,
+    feedback: r.feedback as any,
+    notes: r.notes || undefined,
+    timestamp: r.timestamp
+  }));
 }
 
 export function recordFeedback(prompt: string, response: string, feedback: "thumbs_up" | "thumbs_down", notes?: string) {
-  ensureDataDir();
-  const entries = loadFeedback();
-  entries.push({
-    id: `fb-${Date.now()}`,
-    prompt,
-    response,
-    feedback,
-    timestamp: new Date().toISOString(),
-    notes
-  });
-  fs.writeFileSync(FEEDBACK_FILE, JSON.stringify(entries, null, 2));
+  const db = getDb();
+  const id = `fb-${Date.now()}`;
+  const timestamp = new Date().toISOString();
 
-  // Update Brain State XP & Level
+  db.prepare("INSERT INTO feedback_entries (id, prompt, response, feedback, notes, timestamp) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id, prompt, response, feedback, notes || null, timestamp);
+
   const state = loadBrainState();
   if (feedback === "thumbs_up") {
     state.positiveFeedback += 1;
@@ -344,7 +512,6 @@ export function recordFeedback(prompt: string, response: string, feedback: "thum
   }
   state.totalChats += 1;
 
-  // Level up calculation (every 200 XP = +1 Level)
   const newLevel = Math.floor(state.xp / 200) + 1;
   if (newLevel > state.level) {
     state.level = newLevel;

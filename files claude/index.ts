@@ -36,6 +36,8 @@ export {
   WeatherTool,
   SystemTelemetryTool,
   MemoryStoreTool,
+  AppLauncherTool,
+  MediaControlTool,
   createDefaultToolRegistry,
 } from "./builtins.js";
 

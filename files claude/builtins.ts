@@ -686,6 +686,130 @@ export const MemoryStoreTool: ToolDefinition<MemoryStoreInput> = {
   },
 };
 
+// ─── AppLauncherTool ──────────────────────────────────────────────────────────
+
+type AppLauncherInput = {
+  app_name: string;
+  target?: string;
+};
+
+export const AppLauncherTool: ToolDefinition<AppLauncherInput> = {
+  name: "AppLauncher",
+  description:
+    "Open or launch desktop applications on Linux (e.g. browser, terminal, code, calculator, text editor) or open a URL/file.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      app_name: { type: "string", description: "Name of application (e.g. browser, chrome, firefox, terminal, code, calculator, gedit, vlc)" },
+      target: { type: "string", description: "Optional URL, file path, or argument to pass to app" }
+    },
+    required: ["app_name"]
+  },
+  validate(input) {
+    if (!input.app_name?.trim()) {
+      return { valid: false, message: "app_name cannot be empty", code: 400 };
+    }
+    return { valid: true };
+  },
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: `Launching application: ${input.app_name}` };
+    const app = input.app_name.toLowerCase().trim();
+    let command = "";
+
+    if (["browser", "chrome", "google-chrome"].includes(app)) {
+      command = input.target ? `xdg-open "${input.target}"` : `google-chrome || firefox || xdg-open "https://google.com"`;
+    } else if (["firefox"].includes(app)) {
+      command = input.target ? `firefox "${input.target}"` : `firefox`;
+    } else if (["terminal", "gnome-terminal", "bash", "console"].includes(app)) {
+      command = `gnome-terminal || x-terminal-emulator || xterm`;
+    } else if (["code", "vscode", "editor"].includes(app)) {
+      command = input.target ? `code "${input.target}"` : `code`;
+    } else if (["calculator", "calc"].includes(app)) {
+      command = `gnome-calculator || kcalc || xcalc`;
+    } else if (["text", "gedit"].includes(app)) {
+      command = input.target ? `gedit "${input.target}"` : `gedit`;
+    } else {
+      command = input.target ? `${app} "${input.target}"` : `${app}`;
+    }
+
+    try {
+      const { exec } = await import("child_process");
+      exec(command, { env: { ...process.env } });
+      return {
+        content: `Application '${input.app_name}' launched successfully with command: ${command}`,
+        isError: false
+      };
+    } catch (err: any) {
+      return {
+        content: `Failed to launch application '${input.app_name}': ${err.message}`,
+        isError: true
+      };
+    }
+  }
+};
+
+// ─── MediaControlTool ─────────────────────────────────────────────────────────
+
+type MediaControlInput = {
+  action: "volume_up" | "volume_down" | "mute" | "set_volume" | "play_pause" | "next" | "previous";
+  level?: number;
+};
+
+export const MediaControlTool: ToolDefinition<MediaControlInput> = {
+  name: "MediaControl",
+  description:
+    "Control system audio volume and media playback on Linux (volume_up, volume_down, mute, set_volume, play_pause, next, previous).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["volume_up", "volume_down", "mute", "set_volume", "play_pause", "next", "previous"],
+        description: "Media or audio action to perform"
+      },
+      level: { type: "number", description: "Volume level percentage (0-100) when action is set_volume" }
+    },
+    required: ["action"]
+  },
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: `Media action: ${input.action}` };
+    const { exec } = await import("child_process");
+    const { promisify } = await import("util");
+    const execAsync = promisify(exec);
+
+    try {
+      let cmd = "";
+      if (input.action === "volume_up") {
+        cmd = "amixer sset Master 5%+";
+      } else if (input.action === "volume_down") {
+        cmd = "amixer sset Master 5%-";
+      } else if (input.action === "mute") {
+        cmd = "amixer sset Master toggle";
+      } else if (input.action === "set_volume") {
+        const val = Math.min(100, Math.max(0, input.level ?? 50));
+        cmd = `amixer sset Master ${val}%`;
+      } else if (input.action === "play_pause") {
+        cmd = "playerctl play-pause 2>/dev/null || xdotool key XF86AudioPlay 2>/dev/null || true";
+      } else if (input.action === "next") {
+        cmd = "playerctl next 2>/dev/null || xdotool key XF86AudioNext 2>/dev/null || true";
+      } else if (input.action === "previous") {
+        cmd = "playerctl previous 2>/dev/null || xdotool key XF86AudioPrev 2>/dev/null || true";
+      }
+
+      const { stdout } = await execAsync(cmd);
+      return {
+        content: `Media control action '${input.action}' executed successfully. ${stdout.trim() ? '(' + stdout.trim().split('\n')[0] + ')' : ''}`,
+        isError: false
+      };
+    } catch (err: any) {
+      return {
+        content: `Media control action '${input.action}' failed: ${err.message}`,
+        isError: true
+      };
+    }
+  }
+};
+
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 function safeResolvePath(inputPath: string, cwd: string): string | null {
@@ -711,7 +835,7 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
   for (const tool of [
     BashTool, FileReadTool, FileWriteTool, FileEditTool,
     GlobTool, GrepTool, WebSearchTool, WeatherTool,
-    SystemTelemetryTool, MemoryStoreTool
+    SystemTelemetryTool, MemoryStoreTool, AppLauncherTool, MediaControlTool
   ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }
