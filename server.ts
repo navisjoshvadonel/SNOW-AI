@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import { createServer as createViteServer } from "vite";
 import dotenv from "dotenv";
 import { GoogleGenAI } from "@google/genai";
@@ -12,12 +13,15 @@ import {
   loadVectorDocuments,
   addVectorDocument,
   deleteVectorDocument,
+  searchVectorDocuments,
   loadBrainState,
   recordFeedback,
   resolveIntent,
   trainBrain,
   ResolvedIntent
 } from "./brain";
+import { connectMcpServers } from "./files claude/McpClient.ts";
+import { createAgent, Message } from "./files claude/index.ts";
 
 dotenv.config();
 
@@ -135,6 +139,86 @@ async function fetchWebSearch(query: string): Promise<WebSearchResult[]> {
   }
 }
 
+interface FinancialData {
+  symbol: string;
+  price: string;
+  change: string;
+  up: boolean;
+  source: string;
+}
+
+/** Structured Financial & Crypto API (CoinGecko + Yahoo Finance quote) */
+async function fetchFinancialData(query: string): Promise<FinancialData | null> {
+  const q = query.toLowerCase().trim();
+
+  // Common Crypto mapping to CoinGecko IDs
+  const CRYPTO_MAP: Record<string, string> = {
+    btc: "bitcoin", bitcoin: "bitcoin",
+    eth: "ethereum", ethereum: "ethereum",
+    sol: "solana", solana: "solana",
+    doge: "dogecoin", dogecoin: "dogecoin",
+    ada: "cardano", cardano: "cardano",
+    xrp: "ripple", ripple: "ripple",
+    dot: "polkadot", polkadot: "polkadot",
+    avax: "avalanche-2", avalanche: "avalanche-2"
+  };
+
+  const matchedKey = Object.keys(CRYPTO_MAP).find(k => q.includes(k));
+  if (matchedKey) {
+    const cryptoId = CRYPTO_MAP[matchedKey];
+    try {
+      const res: any = await fetch(
+        `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoId}&vs_currencies=usd&include_24hr_change=true`
+      ).then(r => r.json());
+
+      if (res[cryptoId]) {
+        const p = res[cryptoId].usd;
+        const c = res[cryptoId].usd_24h_change ?? 0;
+        return {
+          symbol: cryptoId.toUpperCase(),
+          price: `$${p.toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
+          change: `${c >= 0 ? "+" : ""}${c.toFixed(2)}%`,
+          up: c >= 0,
+          source: "CoinGecko API"
+        };
+      }
+    } catch (e: any) {
+      console.warn("[SNOW] CoinGecko API fetch failed:", e.message);
+    }
+  }
+
+  // Stock ticker extraction
+  const stockMatch = query.match(/\b([A-Z]{2,5})\b/i);
+  const ticker = stockMatch ? stockMatch[1].toUpperCase() : null;
+
+  if (ticker && ticker !== "USD" && ticker !== "FOR" && ticker !== "THE") {
+    try {
+      const res: any = await fetch(
+        `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d`,
+        { headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36" } }
+      ).then(r => r.json());
+
+      const meta = res?.chart?.result?.[0]?.meta;
+      if (meta && meta.regularMarketPrice) {
+        const price = meta.regularMarketPrice;
+        const prevClose = meta.chartPreviousClose || meta.previousClose || price;
+        const changePct = ((price - prevClose) / prevClose) * 100;
+        return {
+          symbol: ticker,
+          price: `$${price.toFixed(2)}`,
+          change: `${changePct >= 0 ? "+" : ""}${changePct.toFixed(2)}%`,
+          up: changePct >= 0,
+          source: "Yahoo Finance API"
+        };
+      }
+    } catch (e: any) {
+      console.warn("[SNOW] Yahoo Finance API quote failed:", e.message);
+    }
+  }
+
+  return null;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // WIDGET TAG BUILDER  (built from REAL data — AI never touches this)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -243,14 +327,20 @@ function buildWidgetTags(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AI CALLER WITH DYNAMIC MEMORY INJECTION (CONTINUOUS LEARNING INCLUDED)
+// AI CALLER WITH DYNAMIC MEMORY & MULTI-TURN HISTORY (CONTINUOUS LEARNING INCLUDED)
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function callAI(userPrompt: string, contextText: string): Promise<{ text: string; model: string }> {
+async function callAI(
+  userPrompt: string,
+  contextText: string,
+  history?: { role: string; text: string }[]
+): Promise<{ text: string; model: string }> {
   // Load persistent memories & brain state directives dynamically
   const memories = loadMemories();
   const brainState = loadBrainState();
-  const vectorDocs = loadVectorDocuments();
+  
+  // Real Vector Search via Cosine Similarity Ranking
+  const vectorMatches = await searchVectorDocuments(userPrompt, 3);
 
   let memoryContext = "\nSTORED USER KNOWLEDGE & MEMORIES:\n";
   if (memories.length > 0) {
@@ -268,10 +358,10 @@ async function callAI(userPrompt: string, contextText: string): Promise<{ text: 
     });
   }
 
-  if (vectorDocs.length > 0) {
-    memoryContext += "\nVECTOR MEMORY RAG SNIPPETS:\n";
-    vectorDocs.slice(-3).forEach(v => {
-      memoryContext += `- (${v.source}): ${v.text}\n`;
+  if (vectorMatches.length > 0) {
+    memoryContext += "\nCOSINE SIMILARITY VECTOR RAG SNIPPETS:\n";
+    vectorMatches.forEach(item => {
+      memoryContext += `- (${item.doc.source} | match: ${(item.score * 100).toFixed(1)}%): ${item.doc.text}\n`;
     });
   }
 
@@ -295,14 +385,28 @@ RULES:
   const apiKey = process.env.GEMINI_API_KEY || "";
   const GEMINI_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-flash-8b"];
 
+  // Build multi-turn chat turn payload
+  const geminiContents: any[] = [];
+  if (Array.isArray(history) && history.length > 0) {
+    history.slice(-8).forEach(item => {
+      if (item.text?.trim()) {
+        geminiContents.push({
+          role: item.role === "assistant" || item.role === "model" ? "model" : "user",
+          parts: [{ text: item.text }]
+        });
+      }
+    });
+  }
+  geminiContents.push({ role: "user", parts: [{ text: fullPrompt }] });
+
   if (apiKey) {
     const ai = new GoogleGenAI({ apiKey });
     for (const model of GEMINI_MODELS) {
       try {
-        console.log(`[SNOW] Trying Gemini ${model}...`);
+        console.log(`[SNOW] Trying Gemini ${model} (Multi-turn turn context: ${geminiContents.length} turns)...`);
         const res = await ai.models.generateContent({
           model,
-          contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+          contents: geminiContents,
           config: { systemInstruction: SNOW_PERSONA }
         });
         const text = res.text?.trim();
@@ -313,19 +417,30 @@ RULES:
     }
   }
 
-  // Ollama fallback
+  // Ollama fallback with Multi-Turn context
   const ollamaModel = process.env.OLLAMA_MODEL || "llama3.2:1b";
   console.log(`[SNOW] Falling back to Ollama (${ollamaModel})...`);
+
+  const ollamaMessages: any[] = [{ role: "system", content: SNOW_PERSONA }];
+  if (Array.isArray(history) && history.length > 0) {
+    history.slice(-8).forEach(item => {
+      if (item.text?.trim()) {
+        ollamaMessages.push({
+          role: item.role === "assistant" || item.role === "model" ? "assistant" : "user",
+          content: item.text
+        });
+      }
+    });
+  }
+  ollamaMessages.push({ role: "user", content: fullPrompt });
+
   try {
     const res = await fetch("http://127.0.0.1:11434/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         model: ollamaModel,
-        messages: [
-          { role: "system", content: SNOW_PERSONA },
-          { role: "user",   content: fullPrompt }
-        ],
+        messages: ollamaMessages,
         stream: false
       })
     });
@@ -341,6 +456,109 @@ RULES:
   return {
     text: "I'm having a bit of trouble connecting to my brain right now, but I'm still here! Give me a moment and try again.",
     model: "Snow (Offline)"
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTONOMOUS REACT MULTI-STEP AGENTIC REASONING ENGINE
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function runReActAgenticLoop(
+  userPrompt: string,
+  history?: { role: string; text: string }[]
+): Promise<{ text: string; toolsUsed: string[]; model: string }> {
+  const memories = loadMemories();
+  const brainState = loadBrainState();
+  const vectorMatches = await searchVectorDocuments(userPrompt, 3);
+
+  let memoryContext = "\nSTORED USER KNOWLEDGE & MEMORIES:\n";
+  if (memories.length > 0) {
+    memories.forEach(m => {
+      memoryContext += `- [${m.source}] ${m.rel} ${m.target}\n`;
+    });
+  } else {
+    memoryContext += "- No stored facts yet.\n";
+  }
+
+  if (brainState.learnedDirectives.length > 0) {
+    memoryContext += "\nLEARNED ADAPTIVE DIRECTIVES:\n";
+    brainState.learnedDirectives.forEach(d => {
+      memoryContext += `- ${d}\n`;
+    });
+  }
+
+  if (vectorMatches.length > 0) {
+    memoryContext += "\nCOSINE SIMILARITY VECTOR RAG SNIPPETS:\n";
+    vectorMatches.forEach(item => {
+      memoryContext += `- (${item.doc.source} | match: ${(item.score * 100).toFixed(1)}%): ${item.doc.text}\n`;
+    });
+  }
+
+  const systemPrompt = `You are Snow (Brain Level ${brainState.level}), a warm, charming, hyper-intelligent personal AI assistant.
+PERSONALITY: Friendly, enthusiastic, caring, and playfully clever. Never robotic or corporate. Use natural contractions and casual phrasing.
+
+${memoryContext}
+
+RULES:
+- NEVER output any raw brackets, tags, or JSON in speech. Speak only in natural, clean sentences.
+- You have full access to tools (WebSearch, Weather, SystemTelemetry, Bash, FileRead, MemoryStore, etc.). Invoke them autonomously whenever needed to execute multi-step reasoning.
+- Keep responses concise — 2 to 4 sentences is ideal unless detailed step-by-step guidance is requested.`;
+
+  const initialMessages: Message[] = [];
+  if (Array.isArray(history) && history.length > 0) {
+    history.slice(-8).forEach(item => {
+      if (item.text?.trim()) {
+        initialMessages.push({
+          role: item.role === "assistant" || item.role === "model" ? "assistant" : "user",
+          content: [{ type: "text", text: item.text }],
+          metadata: { timestamp: Date.now() }
+        });
+      }
+    });
+  }
+
+  const agent = await createAgent({
+    systemPrompt,
+    initialMessages,
+    maxTurns: 5,
+    permissionMode: "bypassPermissions"
+  });
+
+  const abortController = new AbortController();
+  const toolsExecuted: string[] = [];
+  let fullText = "";
+
+  try {
+    console.log("[SNOW AGENTIC ENGINE] Launching ReAct Multi-Step Reasoning Loop...");
+    for await (const event of agent.submitMessage(userPrompt, abortController.signal)) {
+      if (event.type === "tool_use_start") {
+        console.log(`[SNOW AGENTIC TOOL] Invoking tool: ${event.name}`);
+        if (!toolsExecuted.includes(event.name)) {
+          toolsExecuted.push(event.name);
+        }
+      }
+      if (event.type === "content_block_delta" && typeof event.delta === "string") {
+        fullText += event.delta;
+      }
+    }
+  } catch (e: any) {
+    console.warn("[SNOW AGENTIC ENGINE] ReAct loop notice:", e.message);
+  }
+
+  if (fullText.trim()) {
+    return {
+      text: fullText.trim(),
+      toolsUsed: toolsExecuted,
+      model: "Snow ReAct Agent Engine (Gemini 2.0 / Ollama)"
+    };
+  }
+
+  // Fallback to single-turn AI caller if ReAct loop returns empty
+  const fallback = await callAI(userPrompt, "", history);
+  return {
+    text: fallback.text,
+    toolsUsed: toolsExecuted,
+    model: fallback.model
   };
 }
 
@@ -372,9 +590,39 @@ async function startServer() {
     res.json(await fetchSystem());
   });
 
+  // ── MCP Server Client Management ───────────────────────────────────────────
+  let activeMcpConnections: any[] = [];
+  let activeMcpTools: any[] = [];
+
+  const mcpConfigPath = path.join(process.cwd(), "mcp_config.json");
+  if (fs.existsSync(mcpConfigPath)) {
+    try {
+      const mcpRaw = JSON.parse(fs.readFileSync(mcpConfigPath, "utf-8"));
+      if (Array.isArray(mcpRaw.mcpServers) && mcpRaw.mcpServers.length > 0) {
+        console.log(`[SNOW MCP] Connecting to ${mcpRaw.mcpServers.length} configured MCP server(s)...`);
+        connectMcpServers(mcpRaw.mcpServers).then(({ connections, tools }) => {
+          activeMcpConnections = connections;
+          activeMcpTools = tools;
+          console.log(`[SNOW MCP] ✅ Connected Servers: ${connections.filter(c => c.connected).length}, Active Tools: ${tools.length}`);
+        }).catch(err => {
+          console.warn("[SNOW MCP] Connection attempt notice:", err.message);
+        });
+      }
+    } catch (e: any) {
+      console.warn("[SNOW MCP] Error reading mcp_config.json:", e.message);
+    }
+  }
+
+  app.get("/api/snow/mcp", (_req, res) => {
+    res.json({
+      connections: activeMcpConnections,
+      tools: activeMcpTools.map(t => ({ name: t.name, description: t.description }))
+    });
+  });
+
   // ── /api/snow/chat — main AI endpoint ────────────────────────────────────
   app.post("/api/snow/chat", async (req, res) => {
-    const { prompt } = req.body;
+    const { prompt, history } = req.body;
     if (!prompt?.trim()) return res.status(400).json({ error: "Missing prompt" });
 
     console.log("\n[SNOW] ─── New query:", prompt);
@@ -386,6 +634,7 @@ async function startServer() {
     // Gather live tool data in parallel
     let weather: WeatherData | null = null;
     let system:  SystemData  | null = null;
+    let financialData: FinancialData | null = null;
     let searchResults: WebSearchResult[] = [];
     const toolsUsed: string[] = [];
 
@@ -406,8 +655,22 @@ async function startServer() {
     }
 
     const searchQuery = intent.webQuery || intent.stockQuery || prompt;
-    const needsSearch = intent.isStock || intent.isNews || intent.isSports ||
+
+    // Structured Financial Data API query for stock/crypto
+    if (intent.isStock) {
+      fetches.push(
+        fetchFinancialData(searchQuery).then(fd => {
+          if (fd) {
+            financialData = fd;
+            toolsUsed.push(fd.source);
+          }
+        })
+      );
+    }
+
+    const needsSearch = intent.isNews || intent.isSports ||
                         intent.isWeb || intent.isMusic ||
+                        (intent.isStock && !financialData) ||
                         (intent.isWeather && !intent.weatherLocation);
     if (needsSearch) {
       fetches.push(
@@ -438,6 +701,11 @@ async function startServer() {
         `System stats: CPU ${system.cpu}, RAM ${system.ram}, temperature ${system.temp}, status ${system.status}.`
       );
     }
+    if (financialData) {
+      contextLines.push(
+        `Market telemetry (${financialData.symbol}): Price ${financialData.price}, 24h change ${financialData.change} via ${financialData.source}.`
+      );
+    }
     if (searchResults.length > 0) {
       contextLines.push("Web search results:");
       searchResults.slice(0, 5).forEach((r, i) => {
@@ -445,19 +713,33 @@ async function startServer() {
       });
     }
 
-    // Call AI with clean dynamic prompt & memory RAG
-    const { text: aiRaw, model } = await callAI(prompt, contextLines.join("\n"));
+    // Execute Autonomous ReAct Multi-Step Agentic Loop
+    const { text: aiRaw, toolsUsed: reactTools, model } = await runReActAgenticLoop(prompt, history);
     const aiClean = stripTagArtifacts(aiRaw);
 
+    // Merge tools executed from pre-fetch and ReAct loop
+    const combinedTools = Array.from(new Set([...toolsUsed, ...reactTools]));
+
     // Build widget tags from real data
-    const widgetTags = buildWidgetTags(intent, weather, system, searchResults, prompt);
+    let widgetTags = buildWidgetTags(intent, weather, system, searchResults, prompt);
+
+    // Inject structured financial widget tag if available
+    if (financialData) {
+      widgetTags += `\n[UI_STOCK:${JSON.stringify({
+        symbol: financialData.symbol,
+        price: financialData.price,
+        change: financialData.change,
+        up: financialData.up,
+      })}]`;
+    }
+
     const finalText = aiClean + widgetTags;
 
     const brainState = loadBrainState();
 
     return res.json({
       text: finalText,
-      toolActivity: toolsUsed,
+      toolActivity: combinedTools,
       model,
       brainLevel: brainState.level,
       memoriesCount: loadMemories().length,

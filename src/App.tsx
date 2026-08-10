@@ -586,7 +586,13 @@ export default function App() {
       const res = await fetch("/api/snow/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: rawText.trim() })
+        body: JSON.stringify({
+          prompt: rawText.trim(),
+          history: chatHistory.slice(-10).map(m => ({
+            role: m.sender === "snow" ? "model" : "user",
+            text: m.text
+          }))
+        })
       });
 
       const data = await res.json();

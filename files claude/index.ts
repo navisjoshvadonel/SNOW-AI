@@ -35,6 +35,7 @@ export {
   WebSearchTool,
   WeatherTool,
   SystemTelemetryTool,
+  MemoryStoreTool,
   createDefaultToolRegistry,
 } from "./builtins.js";
 
@@ -61,6 +62,7 @@ import type {
   PermissionMode,
   ThinkingConfig,
   ToolDefinition,
+  Message,
 } from "./types.js";
 import { QueryEngine } from "./QueryEngine.js";
 import { createDefaultToolRegistry } from "./builtins.js";
@@ -99,6 +101,9 @@ export type AgentOptions = {
 
   /** Text appended to the system prompt after the default. */
   appendSystemPrompt?: string;
+
+  /** Initial multi-turn message history. */
+  initialMessages?: Message[];
 };
 
 /**
@@ -129,12 +134,13 @@ export async function createAgent(options: AgentOptions = {}): Promise<QueryEngi
     cwd: options.cwd ?? process.cwd(),
     tools: registry,
     mcpClients: mcpConnections as any,
-    permissionMode: options.permissionMode ?? "default",
+    permissionMode: options.permissionMode ?? "bypassPermissions",
     userSpecifiedModel: options.model,
     thinkingConfig: options.thinkingConfig ?? { type: "adaptive" },
     maxBudgetUsd: options.maxBudgetUsd,
     maxTurns: options.maxTurns,
     systemPrompt: options.systemPrompt,
     appendSystemPrompt: options.appendSystemPrompt,
+    initialMessages: options.initialMessages,
   });
 }

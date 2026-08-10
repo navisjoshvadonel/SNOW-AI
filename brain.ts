@@ -20,7 +20,7 @@ export interface ChromaVectorDocument {
   source: string;
   text: string;
   category: "code" | "history" | "guideline";
-  embedding: [number, number, number];
+  embedding: number[];
   timestamp: string;
 }
 
@@ -160,6 +160,67 @@ export function clearMemories() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// REAL VECTOR EMBEDDING & COSINE SIMILARITY MATH
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Calculate cosine similarity between two vector arrays */
+export function cosineSimilarity(vecA: number[], vecB: number[]): number {
+  if (!vecA || !vecB || vecA.length === 0 || vecB.length === 0) return 0;
+  // If lengths differ (e.g. legacy 3D vs 768D), compare overlapping dimensions
+  const minLen = Math.min(vecA.length, vecB.length);
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+
+  for (let i = 0; i < minLen; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
+  }
+
+  if (normA === 0 || normB === 0) return 0;
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+/** Generate term-frequency feature vector as robust offline embedding fallback */
+function generateOfflineVector(text: string): number[] {
+  const words = text.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter(Boolean);
+  const vector: number[] = new Array(64).fill(0);
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    let hash = 0;
+    for (let j = 0; j < word.length; j++) {
+      hash = (hash * 31 + word.charCodeAt(j)) % 64;
+    }
+    vector[Math.abs(hash)] += 1;
+  }
+  // Normalize vector
+  const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
+  return norm > 0 ? vector.map(v => Number((v / norm).toFixed(4))) : vector;
+}
+
+/** Compute real vector embedding via Gemini API or high-dim offline fallback */
+export async function computeEmbedding(text: string): Promise<number[]> {
+  const apiKey = process.env.GEMINI_API_KEY || "";
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response: any = await ai.models.embedContent({
+        model: "text-embedding-004",
+        contents: [{ parts: [{ text }] }],
+      });
+      const values = response.embedding?.values || response.embeddings?.[0]?.values;
+      if (Array.isArray(values) && values.length > 0) {
+        return values;
+      }
+    } catch (e: any) {
+      console.warn("[SNOW BRAIN] Gemini embedding failed, using term-freq fallback:", e.message);
+    }
+  }
+  return generateOfflineVector(text);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // CHROMA VECTOR STORE MANAGERS
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -181,22 +242,19 @@ export function saveVectorDocuments(docs: ChromaVectorDocument[]) {
   fs.writeFileSync(CHROMA_FILE, JSON.stringify(docs, null, 2));
 }
 
-export function addVectorDocument(source: string, text: string, category: "code" | "history" | "guideline"): ChromaVectorDocument {
+export async function addVectorDocument(
+  source: string,
+  text: string,
+  category: "code" | "history" | "guideline"
+): Promise<ChromaVectorDocument> {
   const docs = loadVectorDocuments();
-  // Generate pseudo 3D embedding coordinates based on text char hashing
-  let h1 = 0, h2 = 0, h3 = 0;
-  for (let i = 0; i < text.length; i++) {
-    const code = text.charCodeAt(i);
-    h1 = (h1 * 31 + code) % 20 - 10;
-    h2 = (h2 * 17 + code) % 20 - 10;
-    h3 = (h3 * 13 + code) % 20 - 10;
-  }
+  const embedding = await computeEmbedding(text);
   const newDoc: ChromaVectorDocument = {
     id: `vec-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     source,
     text,
     category,
-    embedding: [Number(h1.toFixed(1)), Number(h2.toFixed(1)), Number(h3.toFixed(1))],
+    embedding,
     timestamp: new Date().toISOString()
   };
   docs.push(newDoc);
@@ -207,6 +265,25 @@ export function addVectorDocument(source: string, text: string, category: "code"
 export function deleteVectorDocument(id: string) {
   const docs = loadVectorDocuments();
   saveVectorDocuments(docs.filter(d => d.id !== id));
+}
+
+/** Search vector documents using Cosine Similarity ranking */
+export async function searchVectorDocuments(
+  query: string,
+  topK: number = 3
+): Promise<{ doc: ChromaVectorDocument; score: number }[]> {
+  const docs = loadVectorDocuments();
+  if (docs.length === 0) return [];
+
+  const queryEmbedding = await computeEmbedding(query);
+  const scored = docs.map(doc => ({
+    doc,
+    score: cosineSimilarity(queryEmbedding, doc.embedding || [])
+  }));
+
+  // Sort descending by similarity score
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, topK);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

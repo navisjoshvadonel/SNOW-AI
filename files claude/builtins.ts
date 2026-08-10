@@ -641,6 +641,51 @@ export const SystemTelemetryTool: ToolDefinition<Record<string, never>> = {
   }
 };
 
+// ─── MemoryStoreTool ──────────────────────────────────────────────────────────
+
+type MemoryStoreInput = {
+  source: string;
+  rel: string;
+  target: string;
+  memory_text?: string;
+};
+
+export const MemoryStoreTool: ToolDefinition<MemoryStoreInput> = {
+  name: "MemoryStore",
+  description:
+    "Store a learned user preference, fact, or detail into long-term knowledge graph & vector memory. " +
+    "Example: source='User', rel='PREFERS', target='TypeScript', memory_text='User prefers TypeScript for coding.'",
+  inputSchema: {
+    type: "object",
+    properties: {
+      source: { type: "string", description: "Entity source (e.g. User, Snow)" },
+      rel: { type: "string", description: "Relationship verb (e.g. PREFERS, LIKES, LIVES_IN, USES)" },
+      target: { type: "string", description: "Target detail or preference" },
+      memory_text: { type: "string", description: "Optional full sentence memory for vector embedding" },
+    },
+    required: ["source", "rel", "target"],
+  },
+
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: `Saving memory: ${input.source} ${input.rel} ${input.target}` };
+    try {
+      const { addMemory, addVectorDocument } = await import("../brain.js");
+      const mem = addMemory(input.source, input.rel, input.target);
+      const textToEmbed = input.memory_text || `${input.source} ${input.rel} ${input.target}`;
+      await addVectorDocument("AutonomousAgent", textToEmbed, "guideline");
+      return {
+        content: `Successfully stored memory: [${mem.source}] ${mem.rel} ${mem.target}`,
+        isError: false,
+      };
+    } catch (err: any) {
+      return {
+        content: `Failed to save memory: ${err.message}`,
+        isError: true,
+      };
+    }
+  },
+};
+
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 function safeResolvePath(inputPath: string, cwd: string): string | null {
@@ -663,7 +708,11 @@ function countOccurrences(haystack: string, needle: string): number {
 
 export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>> {
   const registry = new Map<string, ToolDefinition<unknown>>();
-  for (const tool of [BashTool, FileReadTool, FileWriteTool, FileEditTool, GlobTool, GrepTool, WebSearchTool, WeatherTool, SystemTelemetryTool]) {
+  for (const tool of [
+    BashTool, FileReadTool, FileWriteTool, FileEditTool,
+    GlobTool, GrepTool, WebSearchTool, WeatherTool,
+    SystemTelemetryTool, MemoryStoreTool
+  ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }
   return registry;
