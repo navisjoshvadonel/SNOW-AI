@@ -3,8 +3,8 @@
     {
       "name": "memory",
       "transport": "stdio",
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-memory"]
+      "command": "node_modules/.bin/mcp-server-memory",
+      "args": []
     }
   ]
 }

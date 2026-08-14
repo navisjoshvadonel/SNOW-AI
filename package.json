@@ -4,13 +4,14 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "npx -y -p node@20 tsx server.ts",
-    "build": "npx -y -p node@20 vite build && npx -y -p node@20 esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "start": "npx -y -p node@20 node dist/server.cjs",
-    "lint": "npx -y -p node@20 tsc --noEmit"
+    "dev": "node_modules/.bin/tsx server.ts",
+    "build": "node_modules/.bin/vite build && node_modules/.bin/esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "start": "node dist/server.cjs",
+    "lint": "node_modules/.bin/tsc --noEmit"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
+    "@modelcontextprotocol/server-memory": "^2026.7.4",
     "@tailwindcss/vite": "^4.1.14",
     "@vitejs/plugin-react": "^5.0.4",
     "better-sqlite3": "^9.1.0",

@@ -72,16 +72,19 @@ export class McpClient {
       throw new Error(`Transport not implemented: ${this.config.transport}`);
     }
 
-    // Initialise the MCP session
+    // ── MCP handshake ────────────────────────────────────────────────────────
+    // Step 1: initialize (expects a response)
     await this.sendRequest("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "agent-core", version: "1.0.0" },
+      clientInfo: { name: "snow-jarvis", version: "1.0.0" },
     });
 
-    await this.sendRequest("notifications/initialized", {});
+    // Step 2: notifications/initialized is a one-way notification — NO response expected.
+    // Sending it as a JSON-RPC request causes -32601 Method not found. Use fire-and-forget.
+    this.sendNotification("notifications/initialized", {});
 
-    // Discover tools
+    // Step 3: discover available tools
     const toolsResult = await this.sendRequest("tools/list", {}) as {
       tools?: Array<{ name: string; description?: string; inputSchema?: unknown }>;
     };
@@ -94,6 +97,7 @@ export class McpClient {
     }));
 
     this.connected = true;
+    console.log(`[MCP] ✅ Connected to "${this.config.name}" — ${this.tools.length} tool(s) available`);
 
     return {
       ...this.config,
@@ -200,6 +204,9 @@ export class McpClient {
 
   // ── Private: JSON-RPC ──────────────────────────────────────────────────────
 
+  /**
+   * Send a JSON-RPC request and await the response.
+   */
   private sendRequest(
     method: string,
     params: unknown,
@@ -209,12 +216,7 @@ export class McpClient {
       const id = this.nextId++;
       this.pendingRequests.set(id, { resolve, reject });
 
-      const msg: JsonRpcRequest = {
-        jsonrpc: "2.0",
-        id,
-        method,
-        params,
-      };
+      const msg: JsonRpcRequest = { jsonrpc: "2.0", id, method, params };
 
       if (signal?.aborted) {
         this.pendingRequests.delete(id);
@@ -230,7 +232,6 @@ export class McpClient {
       if (this.config.transport === "stdio") {
         this.process!.stdin!.write(JSON.stringify(msg) + "\n");
       } else {
-        // HTTP: POST to /rpc
         fetch(`${this.config.url!}/rpc`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -249,6 +250,25 @@ export class McpClient {
           });
       }
     });
+  }
+
+  /**
+   * Send a one-way JSON-RPC notification (no id, no response expected).
+   * Used for notifications/initialized per the MCP spec.
+   */
+  private sendNotification(method: string, params: unknown): void {
+    const msg = { jsonrpc: "2.0", method, params };
+    if (this.config.transport === "stdio") {
+      this.process!.stdin!.write(JSON.stringify(msg) + "\n");
+    }
+    // For HTTP transport, notifications are fire-and-forget POST (no await)
+    else if (this.config.url) {
+      fetch(`${this.config.url}/rpc`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(msg),
+      }).catch(() => {/* notification — ignore errors */});
+    }
   }
 
   private rejectAllPending(err: Error): void {
