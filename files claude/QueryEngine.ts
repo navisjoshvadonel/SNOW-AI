@@ -330,7 +330,7 @@ export class QueryEngine {
   }
 
   private resolveModel(): string {
-    return this.config.userSpecifiedModel ?? "gemini-2.0-flash";
+    return this.config.userSpecifiedModel ?? "gemini-3.5-flash";
   }
 
   private resolveThinkingConfig(): ThinkingConfig {

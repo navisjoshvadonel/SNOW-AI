@@ -79,38 +79,52 @@ async function* callGeminiOnce(params: ModelCallParams, apiKey: string): AsyncGe
   const { model = "gemini-2.5-flash", system, messages, tools, signal } = params;
   const ai = new GoogleGenAI({ apiKey });
 
-  // Map messages to Gemini format
-  const contents = messages.map(msg => {
-    return {
-      role: msg.role === "assistant" ? "model" : "user",
-      parts: msg.content.map(block => {
-        if ("text" in block) return { text: block.text };
-        if ("type" in block && block.type === "tool_result") {
-          let responseObj: any;
-          try {
-            responseObj = typeof block.content === "string" && block.content.startsWith("{") ? JSON.parse(block.content) : { output: block.content };
-          } catch {
-            responseObj = { output: block.content };
+  // Map messages to Gemini format safely with alternating roles and user start
+  const contents: any[] = [];
+  for (const msg of messages) {
+    const role = msg.role === "assistant" || (msg.role as string) === "model" ? "model" : "user";
+    const parts: any[] = [];
+
+    for (const block of msg.content) {
+      if ("text" in block && typeof block.text === "string" && block.text.trim()) {
+        parts.push({ text: block.text });
+      } else if ("type" in block && block.type === "tool_result") {
+        let responseObj: any;
+        try {
+          responseObj = typeof block.content === "string" && block.content.startsWith("{") ? JSON.parse(block.content) : { output: block.content };
+        } catch {
+          responseObj = { output: block.content };
+        }
+        parts.push({
+          functionResponse: {
+            name: (block as any).name || (block as any).tool_use_id || "unknown",
+            response: responseObj
           }
-          return {
-            functionResponse: {
-              name: (block as any).name || (block as any).tool_use_id || "unknown",
-              response: responseObj
-            }
-          };
-        }
-        if ("type" in block && block.type === "tool_use") {
-          return {
-            functionCall: {
-              name: (block as any).name,
-              args: (block as any).input
-            }
-          };
-        }
-        return { text: "" };
-      })
-    };
-  });
+        });
+      } else if ("type" in block && block.type === "tool_use") {
+        parts.push({
+          functionCall: {
+            name: (block as any).name,
+            args: (block as any).input || {}
+          }
+        });
+      }
+    }
+
+    if (parts.length === 0) continue;
+
+    if (contents.length > 0 && contents[contents.length - 1].role === role) {
+      contents[contents.length - 1].parts.push(...parts);
+    } else {
+      contents.push({ role, parts });
+    }
+  }
+
+  while (contents.length > 0 && contents[0].role !== "user") {
+    contents.shift();
+  }
+
+  if (contents.length === 0) return;
 
   const functionDeclarations = tools.map(t => ({
     name: t.name,
@@ -312,7 +326,7 @@ function mapSchemaToGemini(schema: any): any {
     if (s.items) {
       res.items = traverse(s.items);
     }
-    if (s.required) {
+    if (Array.isArray(s.required) && s.required.length > 0) {
       res.required = s.required;
     }
     if (s.enum) {

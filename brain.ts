@@ -553,7 +553,7 @@ Return ONLY valid JSON matching this schema:
 }`;
 
       const res = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+        model: "gemini-3.5-flash",
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         config: {
           systemInstruction,
@@ -596,18 +596,19 @@ Return ONLY valid JSON matching this schema:
     }
   }
 
-  // Dynamic Semantic Fallback (Broad matching, flexible)
+  const isGreeting = /^(hello|hi|hey|greetings|good morning|good afternoon|good evening|howdy|sup|yo|hi there|hello snow|hi snow)\b/i.test(prompt.trim());
+  const isIdentity = /\b(who are you|what is your name|who created you|who made you|what can you do|your name|are you ai|are you snow)\b/i.test(prompt);
   const isWeather = /\b(weather|temperature|temp|forecast|rain|snow|cloud|sunny|climate|cold|hot|humidity|wind)\b/i.test(prompt);
   const wxMatch = prompt.match(/(?:weather|temperature|temp|forecast|climate)\s+(?:in|at|for|of)?\s+([a-zA-Z\s,]+)/i);
 
-  const isSystem = /\b(cpu|ram|memory|temp|hardware|status|pc|system|specs|battery|performance|load|process)\b/i.test(prompt);
+  const isSystem = /\b(cpu|ram|memory|hardware|pc|specs|battery|performance|load|process)\b/i.test(prompt);
   const isStock = /\b(stock|share|crypto|bitcoin|btc|eth|market|ticker|price|nasdaq|s&p|apple|nvda|tesla|googl)\b/i.test(prompt);
   const isNews = /\b(news|headline|breaking|latest|happened|world|event|article)\b/i.test(prompt);
   const isSports = /\b(sports|score|game|match|cricket|football|soccer|nba|league|vs)\b/i.test(prompt);
   const isTime = /\b(time|date|day|clock|timezone|today)\b/i.test(prompt);
   const isJoke = /\b(joke|funny|laugh|pun|humor)\b/i.test(prompt);
   const isMusic = /\b(music|song|artist|playlist|album|track|play)\b/i.test(prompt);
-  const isWeb = /\b(who|what|where|why|how|search|find|explain|define|tell me about|history|info)\b/i.test(prompt);
+  const isWeb = !isGreeting && !isIdentity && (/\b(search|find|explain|define|tell me about|history|info|what happened|latest news)\b/i.test(prompt));
   const isTrainRequest = /\b(train|learn|study|smart|harder|update brain|brain level)\b/i.test(prompt);
 
   // Auto-memory detection in conversation
@@ -626,7 +627,7 @@ Return ONLY valid JSON matching this schema:
     isTime,
     isJoke,
     isMusic,
-    isWeb: isWeb || (!isWeather && !isSystem && !isStock && !isTime && !isJoke),
+    isWeb: isWeb,
     isTrainRequest
   };
 }
