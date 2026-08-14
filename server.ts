@@ -13,13 +13,23 @@ import {
   loadVectorDocuments,
   addVectorDocument,
   deleteVectorDocument,
-  searchVectorDocuments,
   loadBrainState,
   recordFeedback,
   resolveIntent,
   trainBrain,
   ResolvedIntent
 } from "./brain";
+import {
+  ragIngest,
+  ragIngestConversation,
+  ragIngestFact,
+  ragSearch,
+  ragAugmentPrompt,
+  ragStats,
+  ragDeleteOld,
+  ragClear,
+  ragLoadAll,
+} from "./rag.js";
 import { connectMcpServers } from "./files claude/McpClient.ts";
 import { createAgent, Message } from "./files claude/index.ts";
 
@@ -338,9 +348,9 @@ async function callAI(
   // Load persistent memories & brain state directives dynamically
   const memories = loadMemories();
   const brainState = loadBrainState();
-  
-  // Real Vector Search via Cosine Similarity Ranking
-  const vectorMatches = await searchVectorDocuments(userPrompt, 3);
+
+  // ── Ollama RAG: semantic retrieval via nomic-embed-text ──────────────────
+  const ragContext = await ragAugmentPrompt(userPrompt, 5);
 
   let memoryContext = "\nSTORED USER KNOWLEDGE & MEMORIES:\n";
   if (memories.length > 0) {
@@ -358,11 +368,8 @@ async function callAI(
     });
   }
 
-  if (vectorMatches.length > 0) {
-    memoryContext += "\nCOSINE SIMILARITY VECTOR RAG SNIPPETS:\n";
-    vectorMatches.forEach(item => {
-      memoryContext += `- (${item.doc.source} | match: ${(item.score * 100).toFixed(1)}%): ${item.doc.text}\n`;
-    });
+  if (ragContext) {
+    memoryContext += ragContext;
   }
 
   const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), a warm, charming, hyper-intelligent personal AI assistant — like a brilliant best friend who happens to know everything.
@@ -469,7 +476,9 @@ async function runReActAgenticLoop(
 ): Promise<{ text: string; toolsUsed: string[]; model: string }> {
   const memories = loadMemories();
   const brainState = loadBrainState();
-  const vectorMatches = await searchVectorDocuments(userPrompt, 3);
+
+  // ── Ollama RAG: semantic retrieval via nomic-embed-text ──────────────────
+  const ragContext = await ragAugmentPrompt(userPrompt, 5);
 
   let memoryContext = "\nSTORED USER KNOWLEDGE & MEMORIES:\n";
   if (memories.length > 0) {
@@ -487,11 +496,8 @@ async function runReActAgenticLoop(
     });
   }
 
-  if (vectorMatches.length > 0) {
-    memoryContext += "\nCOSINE SIMILARITY VECTOR RAG SNIPPETS:\n";
-    vectorMatches.forEach(item => {
-      memoryContext += `- (${item.doc.source} | match: ${(item.score * 100).toFixed(1)}%): ${item.doc.text}\n`;
-    });
+  if (ragContext) {
+    memoryContext += ragContext;
   }
 
   const systemPrompt = `You are Snow (Brain Level ${brainState.level}), a warm, charming, hyper-intelligent personal AI assistant.
@@ -737,12 +743,18 @@ async function startServer() {
 
     const brainState = loadBrainState();
 
+    // ── RAG Auto-Ingest: store every conversation turn for future retrieval ──
+    ragIngestConversation(prompt, aiClean).catch(e =>
+      console.warn("[RAG] Background ingest failed:", e.message)
+    );
+
     return res.json({
       text: finalText,
       toolActivity: combinedTools,
       model,
       brainLevel: brainState.level,
       memoriesCount: loadMemories().length,
+      ragStats: ragStats(),
       timestamp: new Date().toISOString(),
     });
   });
@@ -814,8 +826,45 @@ async function startServer() {
     res.json({
       brainState,
       memoriesCount: memories.length,
-      vectorsCount: vectors.length
+      vectorsCount: vectors.length,
+      ragStats: ragStats(),
     });
+  });
+
+  // ── /api/snow/rag — Ollama RAG Knowledge Base API ────────────────────────
+
+  /** GET all RAG chunks + stats */
+  app.get("/api/snow/rag", (_req, res) => {
+    res.json({ stats: ragStats(), chunks: ragLoadAll().map(c => ({ ...c, embedding: undefined })) });
+  });
+
+  /** POST: manually ingest a document / fact into RAG */
+  app.post("/api/snow/rag/ingest", async (req, res) => {
+    const { text, source, category } = req.body;
+    if (!text || !source) return res.status(400).json({ error: "text and source required" });
+    const chunk = await ragIngest(text, source, category || "fact");
+    res.json({ success: true, chunk: { ...chunk, embedding: undefined } });
+  });
+
+  /** POST: search RAG store semantically */
+  app.post("/api/snow/rag/search", async (req, res) => {
+    const { query, topK = 5, minScore = 0.2, category } = req.body;
+    if (!query) return res.status(400).json({ error: "query required" });
+    const results = await ragSearch(query, topK, minScore, category);
+    res.json({ results: results.map(r => ({ score: r.score, chunk: { ...r.chunk, embedding: undefined } })) });
+  });
+
+  /** DELETE: prune old RAG history chunks */
+  app.delete("/api/snow/rag/prune", (req, res) => {
+    const daysOld = Number(req.query.days) || 30;
+    const deleted = ragDeleteOld(daysOld);
+    res.json({ success: true, deleted });
+  });
+
+  /** DELETE: wipe entire RAG store */
+  app.delete("/api/snow/rag", (_req, res) => {
+    ragClear();
+    res.json({ success: true });
   });
 
   // ── /api/tts — Text-To-Speech ──────────────────────────────────────────────
@@ -869,9 +918,11 @@ async function startServer() {
 
   const PORT = 3000;
   app.listen(PORT, "0.0.0.0", () => {
+    const rs = ragStats();
     console.log(`\n✅  Snow OS Autonomous Learning Agent ONLINE → http://0.0.0.0:${PORT}`);
     console.log(`    Gemini key   : ${process.env.GEMINI_API_KEY ? "✅ set" : "❌ missing"}`);
-    console.log(`    Brain Status : LV.${loadBrainState().level} (${loadMemories().length} Memories, ${loadVectorDocuments().length} Vectors)\n`);
+    console.log(`    RAG Engine   : ✅ Ollama nomic-embed-text (${rs.total} chunks indexed)`);
+    console.log(`    Brain Status : LV.${loadBrainState().level} (${loadMemories().length} Memories)\n`);
   });
 }
 
