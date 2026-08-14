@@ -1,4 +1,5 @@
 import express from "express";
+import { spawn } from "child_process";
 import path from "path";
 import fs from "fs";
 import { createServer as createViteServer } from "vite";
@@ -584,10 +585,56 @@ function stripTagArtifacts(text: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// OLLAMA AUTO-START
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function ensureOllamaRunning(): Promise<void> {
+  const ollamaBase = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+
+  // Check if Ollama is already up
+  const isAlive = await fetch(`${ollamaBase}/api/tags`, { signal: AbortSignal.timeout(2000) })
+    .then(r => r.ok)
+    .catch(() => false);
+
+  if (isAlive) {
+    console.log("[OLLAMA] ✅ Already running");
+    return;
+  }
+
+  console.log("[OLLAMA] 🚀 Not running — starting Ollama automatically...");
+
+  const proc = spawn("ollama", ["serve"], {
+    detached: true,
+    stdio: "ignore",
+  });
+  proc.unref(); // let it run independently in background
+
+  // Wait up to 15 seconds for Ollama to become ready
+  const MAX_WAIT_MS = 15_000;
+  const POLL_MS = 500;
+  const start = Date.now();
+
+  while (Date.now() - start < MAX_WAIT_MS) {
+    await new Promise(r => setTimeout(r, POLL_MS));
+    const ready = await fetch(`${ollamaBase}/api/tags`, { signal: AbortSignal.timeout(1500) })
+      .then(r => r.ok)
+      .catch(() => false);
+    if (ready) {
+      console.log(`[OLLAMA] ✅ Ready after ${Date.now() - start}ms`);
+      return;
+    }
+  }
+
+  console.warn("[OLLAMA] ⚠️  Could not confirm Ollama is ready — continuing anyway");
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SERVER SETUP & ROUTES
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function startServer() {
+  // Auto-start Ollama if not already running
+  await ensureOllamaRunning();
   const app = express();
   app.use(express.json());
 
