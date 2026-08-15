@@ -1,6 +1,4 @@
 import React, { useEffect, useRef } from "react";
-import { motion } from "motion/react";
-import { Cpu, Zap, Shield, Radio, Sparkles } from "lucide-react";
 
 export const MatrixSnowHUD: React.FC = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -94,89 +92,7 @@ export const MatrixSnowHUD: React.FC = () => {
       {/* Matrix Snowfall Canvas Rain Overlay */}
       <canvas ref={canvasRef} className="w-full h-full opacity-35" />
 
-      {/* ─────────────────────────────────────────────────────────────
-          FUTURISTIC CORNER HUD TECH BRACKETS (JARVIS STYLE)
-      ───────────────────────────────────────────────────────────── */}
-      
-      {/* TOP-LEFT CORNER HUD */}
-      <div className="absolute top-3 left-3 flex flex-col gap-1 z-10">
-        <div className="flex items-center gap-1.5 text-cyan-400">
-          <div className="w-4 h-4 border-t-2 border-l-2 border-cyan-400 shadow-[0_0_10px_#22d3ee]" />
-          <span className="font-mono text-[9px] font-bold tracking-widest text-cyan-300 uppercase flex items-center gap-1 bg-cyan-950/70 px-1.5 py-0.5 rounded border border-cyan-500/30 backdrop-blur-sm">
-            <Radio className="w-2.5 h-2.5 animate-pulse text-cyan-400" />
-            SYS.CORNER//01
-          </span>
-        </div>
-        <div className="flex items-center gap-1 pl-1">
-          <motion.div
-            animate={{ opacity: [0.3, 1, 0.3] }}
-            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
-            className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_6px_#22d3ee]"
-          />
-          <span className="font-mono text-[8px] text-cyan-400/70 font-semibold tracking-tighter">
-            MATRIX SNOWSTREAM ACTIVE
-          </span>
-        </div>
-      </div>
-
-      {/* TOP-RIGHT CORNER HUD */}
-      <div className="absolute top-3 right-3 flex flex-col items-end gap-1 z-10">
-        <div className="flex items-center gap-1.5 text-cyan-400">
-          <span className="font-mono text-[9px] font-bold tracking-widest text-cyan-300 uppercase flex items-center gap-1 bg-cyan-950/70 px-1.5 py-0.5 rounded border border-cyan-500/30 backdrop-blur-sm">
-            <Cpu className="w-2.5 h-2.5 text-emerald-400" />
-            JARVIS.PROTOCOL//v9.4
-          </span>
-          <div className="w-4 h-4 border-t-2 border-r-2 border-cyan-400 shadow-[0_0_10px_#22d3ee]" />
-        </div>
-        <div className="flex items-center gap-1 pr-1">
-          <span className="font-mono text-[8px] text-emerald-400/80 font-bold tracking-widest">
-            CORNER TELEMETRY 100%
-          </span>
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" />
-        </div>
-      </div>
-
-      {/* BOTTOM-LEFT CORNER HUD */}
-      <div className="absolute bottom-3 left-3 flex flex-col gap-1 z-10">
-        <div className="flex items-center gap-1 pl-1">
-          <Shield className="w-3 h-3 text-cyan-400/80" />
-          <span className="font-mono text-[8px] text-cyan-300/80 font-bold tracking-wider">
-            SNOWFALL HUD ENCRYPTED
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 text-cyan-400">
-          <div className="w-4 h-4 border-b-2 border-l-2 border-cyan-400 shadow-[0_0_10px_#22d3ee]" />
-          <div className="flex gap-1">
-            {[...Array(5)].map((_, i) => (
-              <motion.div
-                key={i}
-                animate={{ opacity: [0.2, 0.9, 0.2] }}
-                transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.3 }}
-                className="w-1.5 h-3 bg-cyan-400/70 rounded-xs"
-              />
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* BOTTOM-RIGHT CORNER HUD */}
-      <div className="absolute bottom-3 right-3 flex flex-col items-end gap-1 z-10">
-        <div className="flex items-center gap-1 pr-1">
-          <span className="font-mono text-[8px] text-cyan-300/80 font-bold tracking-widest">
-            CYBER CORE READY
-          </span>
-          <Zap className="w-3 h-3 text-amber-400 animate-pulse" />
-        </div>
-        <div className="flex items-center gap-1.5 text-cyan-400">
-          <span className="font-mono text-[9px] font-bold tracking-widest text-cyan-300 uppercase flex items-center gap-1 bg-cyan-950/70 px-1.5 py-0.5 rounded border border-cyan-500/30 backdrop-blur-sm">
-            <Sparkles className="w-2.5 h-2.5 text-cyan-300" />
-            JARVIS SNOW MATRIX
-          </span>
-          <div className="w-4 h-4 border-b-2 border-r-2 border-cyan-400 shadow-[0_0_10px_#22d3ee]" />
-        </div>
-      </div>
-
-      {/* Corner Scanning Radar Lines */}
+      {/* Subtle Container Border */}
       <div className="absolute inset-0 border border-cyan-500/15 rounded-3xl pointer-events-none" />
     </div>
   );
