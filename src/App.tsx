@@ -6,7 +6,7 @@ import {
   BrainCircuit, Database, Sparkles, Code,
   Zap, RefreshCw, Camera, Mic, MicOff, Video, VideoOff,
   Power, Download, Settings, Layers, Maximize2,
-  Keyboard, BarChart3, ShieldCheck, Play, Pause, X, Terminal,
+  Keyboard, BarChart3, Play, Pause, X,
   CloudLightning, CloudFog, SunMedium, Moon, Wind,
   FolderOpen, FileText, FileCode, Paperclip, Upload, FilePlus
 } from "lucide-react";
@@ -16,6 +16,7 @@ import ChromaDBStore, { ChromaDocument } from "./components/ChromaDBStore";
 import PromptCompiler from "./components/PromptCompiler";
 import CodeSandbox from "./components/CodeSandbox";
 import ModelStatus from "./components/ModelStatus";
+import MatrixSnowHUD from "./components/MatrixSnowHUD";
 import SnowfallBackground from "./components/SnowfallBackground";
 import { MemoryNode, CodeFile } from "./types";
 
@@ -1605,34 +1606,19 @@ export default function App() {
             </div>
 
             {/* ─────────────────────────────────────────────────────────────────────────────
-                CENTER COLUMN: HERO CORE VISUALIZER & EXECUTIVE DASHBOARD (5 Cols)
+                CENTER COLUMN: HERO CORE VISUALIZER & MATRIX SNOW HUD (5 Cols)
             ───────────────────────────────────────────────────────────────────────────── */}
-            <div className="col-span-5 flex flex-col justify-between p-5 rounded-3xl bg-slate-900/60 border border-cyan-500/30 shadow-[0_0_50px_rgba(6,182,212,0.08)] relative overflow-hidden backdrop-blur-md">
+            <div className="col-span-5 flex flex-col items-center justify-center p-5 rounded-3xl bg-slate-900/60 border border-cyan-500/30 shadow-[0_0_50px_rgba(6,182,212,0.08)] relative overflow-hidden backdrop-blur-md">
               
+              {/* Matrix Code Rain & Snowfall HUD Corner Animation Overlay */}
+              <MatrixSnowHUD />
+
               {/* Background Holographic Grid Accent */}
               <div className="absolute inset-0 hologram-bg opacity-30 pointer-events-none" />
               <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-400/80 to-transparent animate-pulse" />
 
-              {/* Top Bar Status Header */}
-              <div className="w-full flex justify-between items-center z-10 border-b border-cyan-500/20 pb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_10px_rgba(52,211,153,0.8)]" />
-                  <span className="text-xs font-mono font-bold tracking-widest text-cyan-200 uppercase">
-                    SNOW INTELLIGENCE SYSTEM
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono font-semibold text-cyan-400 bg-cyan-950/80 px-2.5 py-1 rounded-full border border-cyan-500/40 shadow-sm">
-                    {selectedModel.toUpperCase()}
-                  </span>
-                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-500/30">
-                    LVL {brainStatus?.brainState?.level || 9}
-                  </span>
-                </div>
-              </div>
-
               {/* Arc Reactor Center Core */}
-              <div className="my-auto py-3 z-10 flex flex-col items-center gap-3">
+              <div className="z-10 flex flex-col items-center gap-3">
                 <SnowArcCore state={isLoading ? "thinking" : isListening ? "listening" : "standby"} />
 
                 {/* S N O W Title */}
@@ -1641,7 +1627,7 @@ export default function App() {
                     S N O W
                   </h1>
                   <span className="text-[11px] font-mono tracking-widest text-cyan-400/70 font-semibold uppercase">
-                    Personal Executive Assistant
+                    Your Friend Here
                   </span>
 
                   {/* Status Indicator Pill */}
@@ -1659,77 +1645,6 @@ export default function App() {
                        isLoading ? "Processing directive..." : "Ready for directive"}
                     </span>
                   </div>
-                </div>
-              </div>
-
-              {/* Executive Quick Command Cards Grid */}
-              <div className="grid grid-cols-2 gap-2.5 z-10 my-2">
-                <button
-                  onClick={() => handleSendMessage("NJ requested daily executive briefing on system metrics, weather, and active tasks.")}
-                  className="p-3 rounded-2xl bg-slate-950/80 hover:bg-cyan-950/60 border border-cyan-500/25 hover:border-cyan-400/60 text-left transition-all group shadow-md cursor-pointer flex items-start gap-3"
-                >
-                  <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 group-hover:bg-cyan-400 group-hover:text-slate-950 transition">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-slate-200 group-hover:text-cyan-300 transition">Executive Briefing</div>
-                    <div className="text-[10px] text-slate-400 line-clamp-1">Summarize status, weather & tasks</div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => handleSendMessage("Perform an immediate code audit on active workspace files and point out optimizations.")}
-                  className="p-3 rounded-2xl bg-slate-950/80 hover:bg-cyan-950/60 border border-cyan-500/25 hover:border-cyan-400/60 text-left transition-all group shadow-md cursor-pointer flex items-start gap-3"
-                >
-                  <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 group-hover:bg-cyan-400 group-hover:text-slate-950 transition">
-                    <FileCode className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-slate-200 group-hover:text-cyan-300 transition">Codebase Audit</div>
-                    <div className="text-[10px] text-slate-400 line-clamp-1">Review & optimize project files</div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setActiveTab("sandbox")}
-                  className="p-3 rounded-2xl bg-slate-950/80 hover:bg-cyan-950/60 border border-cyan-500/25 hover:border-cyan-400/60 text-left transition-all group shadow-md cursor-pointer flex items-start gap-3"
-                >
-                  <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 group-hover:bg-cyan-400 group-hover:text-slate-950 transition">
-                    <Terminal className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-slate-200 group-hover:text-cyan-300 transition">Python Sandbox</div>
-                    <div className="text-[10px] text-slate-400 line-clamp-1">Execute code in isolated sandbox</div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setActiveTab("vector")}
-                  className="p-3 rounded-2xl bg-slate-950/80 hover:bg-cyan-950/60 border border-cyan-500/25 hover:border-cyan-400/60 text-left transition-all group shadow-md cursor-pointer flex items-start gap-3"
-                >
-                  <div className="p-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 group-hover:bg-cyan-400 group-hover:text-slate-950 transition">
-                    <Database className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <div className="text-xs font-bold text-slate-200 group-hover:text-cyan-300 transition">Vector RAG Memory</div>
-                    <div className="text-[10px] text-slate-400 line-clamp-1">Inspect 20+ indexed memory chunks</div>
-                  </div>
-                </button>
-              </div>
-
-              {/* Bottom Live System Telemetry Bar */}
-              <div className="w-full grid grid-cols-3 gap-2 pt-3 border-t border-cyan-500/20 z-10 text-[11px] font-mono">
-                <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-950/80 border border-cyan-500/20 text-cyan-300">
-                  <span className="text-slate-400 flex items-center gap-1"><Cpu className="w-3 h-3 text-cyan-400" /> CPU</span>
-                  <span className="font-bold">{systemLoadPct}%</span>
-                </div>
-                <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-950/80 border border-cyan-500/20 text-cyan-300">
-                  <span className="text-slate-400 flex items-center gap-1"><Database className="w-3 h-3 text-cyan-400" /> RAG</span>
-                  <span className="font-bold">{vectorDocs.length || 20} Chunks</span>
-                </div>
-                <div className="flex items-center justify-between px-3 py-1.5 rounded-xl bg-slate-950/80 border border-cyan-500/20 text-emerald-400">
-                  <span className="text-slate-400 flex items-center gap-1"><ShieldCheck className="w-3 h-3 text-emerald-400" /> STATUS</span>
-                  <span className="font-bold">OPTIMAL</span>
                 </div>
               </div>
 
