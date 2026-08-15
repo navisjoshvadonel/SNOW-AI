@@ -16,6 +16,7 @@ import ChromaDBStore, { ChromaDocument } from "./components/ChromaDBStore";
 import PromptCompiler from "./components/PromptCompiler";
 import CodeSandbox from "./components/CodeSandbox";
 import ModelStatus from "./components/ModelStatus";
+import SnowfallBackground from "./components/SnowfallBackground";
 import { MemoryNode, CodeFile } from "./types";
 
 type WeatherType = "default" | "sunny" | "rain" | "cloudy" | "snow" | "storm";
@@ -1165,6 +1166,7 @@ export default function App() {
 
   return (
     <div className={`w-full h-screen flex flex-col transition-colors duration-1000 bg-weather-${weatherState} overflow-hidden font-sans text-white relative bg-slate-950`}>
+      <SnowfallBackground />
       {showConfetti && <Confetti />}
 
       {/* Toast Notification */}
