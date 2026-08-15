@@ -1,0 +1,17 @@
+{
+  "short_name": "Snow Jarvis",
+  "name": "Snow Jarvis Executive Assistant",
+  "icons": [
+    {
+      "src": "/snow-icon.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#020617",
+  "theme_color": "#020617",
+  "display": "standalone",
+  "orientation": "any"
+}
