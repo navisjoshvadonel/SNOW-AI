@@ -6,7 +6,9 @@ import {
   BrainCircuit, Database, Sparkles, Code,
   Zap, RefreshCw, Camera, Mic, MicOff, Video, VideoOff,
   Power, Download, Settings, Layers, Maximize2,
-  Keyboard, BarChart3, ShieldCheck, Play, Pause, X, Terminal
+  Keyboard, BarChart3, ShieldCheck, Play, Pause, X, Terminal,
+  CloudLightning, CloudFog, SunMedium, Moon, Wind,
+  FolderOpen, FileText, FileCode, Paperclip, Upload, FilePlus
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import NetworkGraph from "./components/NetworkGraph";
@@ -33,7 +35,17 @@ interface ChatItem {
   feedbackGiven?: "thumbs_up" | "thumbs_down";
 }
 
-interface WeatherData { temp: string; condition: string; location: string; humidity?: string; wind?: string; feelsLike?: string; }
+interface WeatherData {
+  temp: string;
+  condition: string;
+  location: string;
+  humidity?: string;
+  wind?: string;
+  feelsLike?: string;
+  isDay?: boolean;
+  windSpeedKm?: number;
+  weatherCode?: number;
+}
 interface NewsData { headline: string; source: string; category?: string; }
 interface StockData { symbol: string; price: string; change: string; up: boolean; }
 interface SportData { team1: string; score1: string; team2: string; score2: string; sport: string; }
@@ -52,6 +64,116 @@ interface SystemData {
   uptimeSeconds?: number;
   loadAvg?: string;
 }
+
+const getWeatherVisual = (conditionStr: string, isDay: boolean = true, windSpeedKm: number = 0) => {
+  const c = (conditionStr || "").toLowerCase();
+  const isNight = !isDay;
+  const isHighWind = windSpeedKm >= 18 || c.includes("wind") || c.includes("gale") || c.includes("breezy");
+
+  // 1. NIGHT TIME & CLEAR / SKY
+  if (isNight && (c.includes("clear") || c.includes("sky"))) {
+    return {
+      icon: <Moon className="w-8 h-8 text-indigo-300 animate-pulse drop-shadow-[0_0_15px_rgba(165,180,252,0.9)]" />,
+      smallIcon: <Moon className="w-4 h-4 text-indigo-300" />,
+      bgGradient: "bg-gradient-to-br from-indigo-950/70 via-slate-900/90 to-slate-950/95 border-indigo-500/40 shadow-[0_0_30px_rgba(99,102,241,0.2)]",
+      badgeColor: "bg-indigo-500/15 border-indigo-500/40 text-indigo-200",
+      accentText: "text-indigo-300",
+      tag: "CLEAR NIGHT"
+    };
+  }
+
+  // 2. DAY TIME CLEAR / SUNNY
+  if (c.includes("clear") || c.includes("sun") || c.includes("sunny")) {
+    if (isNight) {
+      return {
+        icon: <Moon className="w-8 h-8 text-indigo-300 animate-pulse drop-shadow-[0_0_15px_rgba(165,180,252,0.9)]" />,
+        smallIcon: <Moon className="w-4 h-4 text-indigo-300" />,
+        bgGradient: "bg-gradient-to-br from-indigo-950/70 via-slate-900/90 to-slate-950/95 border-indigo-500/40 shadow-[0_0_30px_rgba(99,102,241,0.2)]",
+        badgeColor: "bg-indigo-500/15 border-indigo-500/40 text-indigo-200",
+        accentText: "text-indigo-300",
+        tag: "CLEAR NIGHT"
+      };
+    }
+    return {
+      icon: <Sun className="w-8 h-8 text-amber-400 animate-spin-slow drop-shadow-[0_0_14px_rgba(251,191,36,0.9)]" />,
+      smallIcon: <Sun className="w-4 h-4 text-amber-400" />,
+      bgGradient: "bg-gradient-to-br from-amber-950/50 via-slate-900/80 to-slate-950/90 border-amber-500/35 shadow-[0_0_25px_rgba(251,191,36,0.2)]",
+      badgeColor: "bg-amber-500/15 border-amber-500/35 text-amber-300",
+      accentText: "text-amber-300",
+      tag: "SUNNY DAY"
+    };
+  }
+
+  // 3. THUNDERSTORM
+  if (c.includes("storm") || c.includes("thunder") || c.includes("lightning")) {
+    return {
+      icon: <CloudLightning className="w-8 h-8 text-purple-400 animate-bounce drop-shadow-[0_0_15px_rgba(192,132,252,0.9)]" />,
+      smallIcon: <CloudLightning className="w-4 h-4 text-purple-400" />,
+      bgGradient: "bg-gradient-to-br from-purple-950/60 via-slate-900/90 to-slate-950/95 border-purple-500/40 shadow-[0_0_30px_rgba(192,132,252,0.25)]",
+      badgeColor: "bg-purple-500/15 border-purple-500/40 text-purple-300",
+      accentText: "text-purple-300",
+      tag: "THUNDERSTORM"
+    };
+  }
+
+  // 4. RAINY / DRIZZLE / SHOWERS
+  if (c.includes("rain") || c.includes("drizzle") || c.includes("shower")) {
+    return {
+      icon: <CloudRain className="w-8 h-8 text-blue-400 animate-pulse drop-shadow-[0_0_15px_rgba(96,165,250,0.9)]" />,
+      smallIcon: <CloudRain className="w-4 h-4 text-blue-400" />,
+      bgGradient: "bg-gradient-to-br from-blue-950/60 via-slate-900/85 to-slate-950/95 border-blue-500/40 shadow-[0_0_25px_rgba(96,165,250,0.2)]",
+      badgeColor: "bg-blue-500/15 border-blue-500/40 text-blue-300",
+      accentText: "text-blue-300",
+      tag: "RAINY"
+    };
+  }
+
+  // 5. HIGH WIND / GALE / BREEZY
+  if (isHighWind && !c.includes("snow") && !c.includes("rain")) {
+    return {
+      icon: <Wind className="w-8 h-8 text-teal-300 animate-pulse drop-shadow-[0_0_12px_rgba(94,234,212,0.8)]" />,
+      smallIcon: <Wind className="w-4 h-4 text-teal-300" />,
+      bgGradient: "bg-gradient-to-br from-teal-950/50 via-slate-900/80 to-slate-950/90 border-teal-500/35 shadow-[0_0_25px_rgba(94,234,212,0.18)]",
+      badgeColor: "bg-teal-500/15 border-teal-500/35 text-teal-300",
+      accentText: "text-teal-300",
+      tag: "WINDY"
+    };
+  }
+
+  // 6. SNOW / ICE
+  if (c.includes("snow") || c.includes("ice") || c.includes("frost")) {
+    return {
+      icon: <Snowflake className="w-8 h-8 text-cyan-200 animate-pulse drop-shadow-[0_0_15px_rgba(165,243,252,0.9)]" />,
+      smallIcon: <Snowflake className="w-4 h-4 text-cyan-200" />,
+      bgGradient: "bg-gradient-to-br from-cyan-950/50 via-slate-900/85 to-slate-950/90 border-cyan-500/40 shadow-[0_0_25px_rgba(165,243,252,0.2)]",
+      badgeColor: "bg-cyan-500/15 border-cyan-500/40 text-cyan-200",
+      accentText: "text-cyan-200",
+      tag: "SNOWY"
+    };
+  }
+
+  // 7. FOG / MIST / HAZE
+  if (c.includes("fog") || c.includes("mist") || c.includes("haze")) {
+    return {
+      icon: <CloudFog className="w-8 h-8 text-slate-300 animate-pulse drop-shadow-[0_0_12px_rgba(203,213,225,0.7)]" />,
+      smallIcon: <CloudFog className="w-4 h-4 text-slate-300" />,
+      bgGradient: "bg-gradient-to-br from-slate-900/90 via-slate-900/85 to-slate-950/95 border-slate-500/35 shadow-[0_0_20px_rgba(203,213,225,0.1)]",
+      badgeColor: "bg-slate-500/15 border-slate-500/35 text-slate-300",
+      accentText: "text-slate-300",
+      tag: "FOGGY"
+    };
+  }
+
+  // 8. CLOUDY / OVERCAST FALLBACK
+  return {
+    icon: isNight ? <Moon className="w-8 h-8 text-indigo-300 animate-pulse drop-shadow-[0_0_12px_rgba(165,180,252,0.7)]" /> : <Cloud className="w-8 h-8 text-cyan-300 animate-pulse drop-shadow-[0_0_12px_rgba(34,211,238,0.7)]" />,
+    smallIcon: isNight ? <Moon className="w-4 h-4 text-indigo-300" /> : <Cloud className="w-4 h-4 text-cyan-400" />,
+    bgGradient: "bg-slate-900/75 border-cyan-500/25 shadow-[0_0_20px_rgba(6,182,212,0.08)]",
+    badgeColor: "bg-cyan-500/10 border-cyan-500/25 text-cyan-300",
+    accentText: "text-cyan-200",
+    tag: isNight ? "CLOUDY NIGHT" : "CLOUDY"
+  };
+};
 
 interface GroundingMetadata {
   webSearchQueries?: string[];
@@ -206,18 +328,150 @@ const SnowArcCore = ({ state }: { state: "standby" | "thinking" | "listening" })
   );
 };
 
+const FormattedMessage = ({ text }: { text: string }) => {
+  if (!text) return null;
+
+  // Split squished inline numbers like "1. **Title**: text 2. **Title**: text"
+  let formatted = text.replace(/(\d+)\.\s+(\*\*.*?\*\*|[A-Z]\w+)/g, "\n\n$1. $2");
+  formatted = formatted.replace(/\s+(\d+)\.\s+/g, "\n\n$1. ");
+
+  const blocks = formatted.split("\n\n").filter(Boolean);
+
+  const renderInline = (str: string) => {
+    const parts = str.split(/(\*\*.*?\*\*|\*.*?\*|`.*?`)/g);
+
+    return parts.map((part, idx) => {
+      if (part.startsWith("**") && part.endsWith("**") && part.length >= 4) {
+        return (
+          <strong key={idx} className="text-cyan-300 font-bold tracking-wide font-sans">
+            {part.slice(2, -2)}
+          </strong>
+        );
+      }
+      if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
+        return (
+          <em key={idx} className="text-slate-300 italic font-sans">
+            {part.slice(1, -1)}
+          </em>
+        );
+      }
+      if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+        return (
+          <code key={idx} className="bg-slate-900 border border-cyan-500/30 text-cyan-300 px-1.5 py-0.5 rounded font-mono text-[12px]">
+            {part.slice(1, -1)}
+          </code>
+        );
+      }
+      return part;
+    });
+  };
+
+  return (
+    <div className="markdown-body space-y-3 font-sans text-[14px] leading-relaxed text-slate-100 select-text">
+      {blocks.map((block, bIdx) => {
+        const trimmed = block.trim();
+
+        // Code block
+        if (trimmed.startsWith("```")) {
+          const lines = trimmed.split("\n");
+          const lang = lines[0].replace("```", "").trim();
+          const codeContent = lines.slice(1, lines[lines.length - 1] === "```" ? -1 : lines.length).join("\n");
+          return (
+            <div key={bIdx} className="my-3 rounded-xl border border-cyan-500/30 bg-slate-950 overflow-hidden shadow-lg font-mono text-xs">
+              {lang && (
+                <div className="bg-slate-900/90 border-b border-cyan-500/20 px-3 py-1.5 text-[11px] text-cyan-400 font-semibold uppercase tracking-wider flex items-center justify-between">
+                  <span>{lang}</span>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(codeContent)}
+                    className="text-slate-400 hover:text-cyan-300 transition text-[10px] uppercase font-mono cursor-pointer"
+                  >
+                    Copy
+                  </button>
+                </div>
+              )}
+              <pre className="p-3.5 overflow-x-auto text-cyan-100 leading-relaxed">
+                <code>{codeContent}</code>
+              </pre>
+            </div>
+          );
+        }
+
+        // Headings
+        if (trimmed.startsWith("#")) {
+          const match = trimmed.match(/^(#{1,3})\s+(.*)$/);
+          if (match) {
+            const level = match[1].length;
+            const headingText = match[2];
+            if (level === 1) return <h1 key={bIdx} className="text-lg font-extrabold text-cyan-300 border-b border-cyan-500/20 pb-1 mt-2">{renderInline(headingText)}</h1>;
+            if (level === 2) return <h2 key={bIdx} className="text-base font-bold text-cyan-200 mt-2">{renderInline(headingText)}</h2>;
+            return <h3 key={bIdx} className="text-sm font-semibold text-cyan-100 mt-1">{renderInline(headingText)}</h3>;
+          }
+        }
+
+        // Numbered item
+        const numMatch = trimmed.match(/^(\d+)\.\s+(.*)$/s);
+        if (numMatch) {
+          const stepNum = numMatch[1];
+          const itemContent = numMatch[2];
+          return (
+            <div key={bIdx} className="flex gap-3 items-start p-3.5 rounded-xl bg-slate-900/70 border border-cyan-500/20 shadow-[0_2px_12px_rgba(0,0,0,0.3)] hover:border-cyan-500/40 transition my-2">
+              <span className="flex-shrink-0 w-6 h-6 rounded-lg bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 font-mono font-bold text-xs flex items-center justify-center shadow-[0_0_8px_rgba(34,211,238,0.3)] mt-0.5">
+                #{stepNum}
+              </span>
+              <div className="flex-1 text-slate-100 text-[13.5px] leading-relaxed font-sans">
+                {renderInline(itemContent)}
+              </div>
+            </div>
+          );
+        }
+
+        // Bullet item
+        if (trimmed.startsWith("- ") || trimmed.startsWith("* ")) {
+          const lines = trimmed.split("\n");
+          return (
+            <ul key={bIdx} className="space-y-2 my-2 pl-1">
+              {lines.map((l, lIdx) => {
+                const cleanLine = l.replace(/^[-*]\s+/, "");
+                return (
+                  <li key={lIdx} className="flex items-start gap-2.5 text-[13.5px] text-slate-100">
+                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 mt-2 flex-shrink-0 shadow-[0_0_6px_#22d3ee]" />
+                    <div>{renderInline(cleanLine)}</div>
+                  </li>
+                );
+              })}
+            </ul>
+          );
+        }
+
+        // Paragraph
+        return (
+          <p key={bIdx} className="text-slate-100 text-[13.5px] leading-relaxed">
+            {renderInline(trimmed)}
+          </p>
+        );
+      })}
+    </div>
+  );
+};
+
 const TypewriterText = ({ text }: { text: string }) => {
   const [displayedText, setDisplayedText] = useState("");
   useEffect(() => {
     let i = 0;
+    const step = Math.max(1, Math.floor(text.length / 40));
     const t = setInterval(() => {
-      setDisplayedText(text.slice(0, i));
-      i++;
-      if (i > text.length) clearInterval(t);
-    }, 15);
+      i += step;
+      if (i >= text.length) {
+        setDisplayedText(text);
+        clearInterval(t);
+      } else {
+        setDisplayedText(text.slice(0, i));
+      }
+    }, 12);
     return () => clearInterval(t);
   }, [text]);
-  return <span className={displayedText.length < text.length ? "typewriter-cursor" : ""}>{displayedText}</span>;
+
+  return <FormattedMessage text={displayedText} />;
 };
 
 const Confetti = () => {
@@ -278,6 +532,92 @@ export default function App() {
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Workspace File Vault & Context Attachment State
+  const [workspaceFiles, setWorkspaceFiles] = useState<Array<{ name: string; path: string; size: number; ext: string }>>([]);
+  const [selectedVaultPath, setSelectedVaultPath] = useState<string>("");
+  const [activeFileContent, setActiveFileContent] = useState<string>("");
+  const [attachedContextFiles, setAttachedContextFiles] = useState<Array<{ name: string; path: string; content: string }>>([]);
+  const [fileSearchQuery, setFileSearchQuery] = useState<string>("");
+  const [isLoadingFiles, setIsLoadingFiles] = useState<boolean>(false);
+
+  const fetchWorkspaceFiles = async () => {
+    setIsLoadingFiles(true);
+    try {
+      const res = await fetch("/api/snow/files");
+      const data = await res.json();
+      if (data.files) {
+        setWorkspaceFiles(data.files);
+        if (data.files.length > 0 && !selectedVaultPath) {
+          handleSelectVaultFile(data.files[0].path);
+        }
+      }
+    } catch (e) {
+      console.error("Failed to load workspace files:", e);
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  };
+
+  const handleSelectVaultFile = async (filePath: string) => {
+    setSelectedVaultPath(filePath);
+    try {
+      const res = await fetch("/api/snow/files/read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filePath })
+      });
+      const data = await res.json();
+      if (data.content !== undefined) {
+        setActiveFileContent(data.content);
+      }
+    } catch (e) {
+      console.error("Failed to read file content:", e);
+    }
+  };
+
+  const handleAttachFileToContext = (name: string, pathStr: string, content: string) => {
+    if (!attachedContextFiles.some(f => f.path === pathStr)) {
+      setAttachedContextFiles(prev => [...prev, { name, path: pathStr, content }]);
+      triggerToast(`Attached ${name} to Snow prompt context.`);
+    }
+  };
+
+  const handleRemoveAttachedFile = (pathStr: string) => {
+    setAttachedContextFiles(prev => prev.filter(f => f.path !== pathStr));
+  };
+
+  const handleIngestFileToRAG = async (name: string, content: string) => {
+    try {
+      await fetch("/api/snow/rag/ingest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: content, source: name, category: "code" })
+      });
+      triggerToast(`Indexed ${name} into RAG Vector Memory.`);
+    } catch (e) {
+      triggerToast(`Failed to index ${name}`);
+    }
+  };
+
+  const handleAskSnowAboutFile = (name: string, pathStr: string, content: string) => {
+    const fileExt = pathStr.split('.').pop() || 'text';
+    handleSendMessage(`Please analyze the codebase file "${name}" (${pathStr}) and provide key structural insights, bug fixes, or performance optimization recommendations:\n\n\`\`\`${fileExt}\n${content.slice(0, 15000)}\n\`\`\``);
+  };
+
+  const handleCustomFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        const text = evt.target?.result as string;
+        if (text) {
+          handleAttachFileToContext(file.name, file.name, text);
+        }
+      };
+      reader.readAsText(file);
+    }
+  };
 
   // Uptime Counter
   const [uptimeSeconds, setUptimeSeconds] = useState(439); // starts around 00:07:19
@@ -445,13 +785,36 @@ export default function App() {
         if (wx.current_weather) {
           const cw = wx.current_weather;
           const adminStr = l.admin1 ? `, ${l.admin1}` : "";
+
+          const CODE_MAP: Record<number, string> = {
+            0: "Clear Sky", 1: "Mainly Clear", 2: "Partly Cloudy", 3: "Overcast",
+            45: "Foggy", 48: "Depositing Rime Fog", 51: "Light Drizzle", 53: "Moderate Drizzle", 55: "Dense Drizzle",
+            61: "Slight Rain", 63: "Moderate Rain", 65: "Heavy Rain", 71: "Slight Snow", 73: "Moderate Snow", 75: "Heavy Snow",
+            80: "Slight Rain Showers", 81: "Moderate Rain Showers", 82: "Violent Rain Showers", 95: "Thunderstorm", 96: "Thunderstorm with Hail", 99: "Heavy Thunderstorm"
+          };
+
+          const conditionText = CODE_MAP[cw.weathercode] || (cw.weathercode === 0 ? "Clear Sky" : cw.weathercode <= 3 ? "Partly Cloudy" : "Overcast");
+
+          const isDay = cw.is_day === 1;
+          const windSpeedKm = cw.windspeed || 0;
+
+          if (!isDay) setWeatherState("storm");
+          else if (cw.weathercode === 0 || cw.weathercode === 1) setWeatherState("sunny");
+          else if (cw.weathercode >= 51 && cw.weathercode <= 82) setWeatherState("rain");
+          else if (cw.weathercode >= 95) setWeatherState("storm");
+          else if (cw.weathercode >= 71 && cw.weathercode <= 75) setWeatherState("snow");
+          else setWeatherState("cloudy");
+
           setLiveWeather({
             temp: `${cw.temperature}°C`,
-            condition: cw.weathercode === 0 ? "Clear Sky" : cw.weathercode <= 3 ? "Partly Cloudy" : cw.weathercode >= 61 ? "Rainy" : "Overcast",
+            condition: conditionText,
             location: `${l.name}${adminStr}, ${l.country || "India"}`,
             humidity: wx.hourly?.relative_humidity_2m?.[0] ? `${wx.hourly.relative_humidity_2m[0]}%` : "78%",
             wind: `${cw.windspeed} km/h`,
-            feelsLike: `${(cw.temperature + 1.2).toFixed(1)}°C`
+            feelsLike: `${(cw.temperature + 1.2).toFixed(1)}°C`,
+            isDay,
+            windSpeedKm,
+            weatherCode: cw.weathercode
           });
         }
       }
@@ -488,15 +851,25 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Initial greeting
+  // Initial formal time-aware greeting for NJ
   useEffect(() => {
     if (chatHistory.length === 0) {
       const now = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+      const hour = new Date().getHours();
+      let timeGreeting = "Good morning, NJ.";
+      if (hour >= 12 && hour < 17) {
+        timeGreeting = "Good afternoon, NJ.";
+      } else if (hour >= 17 && hour < 22) {
+        timeGreeting = "Good evening, NJ.";
+      } else if (hour >= 22 || hour < 5) {
+        timeGreeting = "Good evening, NJ.";
+      }
+
       setChatHistory([
         {
           id: "welcome-1",
           sender: "snow",
-          text: "Hello, I am SNOW. SNOW neural core is online. How can I assist you today sir?",
+          text: `${timeGreeting} I am at your service. How may I assist you today?`,
           timestamp: now
         }
       ]);
@@ -658,6 +1031,15 @@ export default function App() {
     const rawText = textToSend || inputText;
     if (!rawText.trim() || isLoading) return;
 
+    let promptForBackend = rawText.trim();
+    if (attachedContextFiles.length > 0) {
+      const attachmentBlock = attachedContextFiles
+        .map(f => `--- ATTACHED FILE: ${f.name} (${f.path}) ---\n${f.content.slice(0, 15000)}\n--- END OF ATTACHED FILE ---`)
+        .join("\n\n");
+      promptForBackend = `${attachmentBlock}\n\nUSER QUERY: ${rawText.trim()}`;
+      setAttachedContextFiles([]);
+    }
+
     if (isListening && recognitionRef.current) {
       recognitionRef.current.stop();
       setIsListening(false);
@@ -676,7 +1058,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: rawText.trim(),
+          prompt: promptForBackend,
           model: selectedModel,
           history: chatHistory.slice(-10).map(m => ({
             role: m.sender === "snow" ? "model" : "user",
@@ -835,11 +1217,16 @@ export default function App() {
         {/* Right Info Badges & Navigation Tabs */}
         <div className="flex items-center gap-3">
           {/* Quick Weather Badge */}
-          <div className="flex items-center gap-2 bg-slate-900/80 border border-cyan-500/20 px-3 py-1 rounded-xl text-xs">
-            <Cloud className="w-4 h-4 text-cyan-400" />
-            <span className="font-bold text-white">{liveWeather.temp}</span>
-            <span className="text-slate-400 text-[11px]">{liveWeather.location.split(",")[0]}</span>
-          </div>
+          {(() => {
+            const wxVisual = getWeatherVisual(liveWeather.condition, liveWeather.isDay, liveWeather.windSpeedKm);
+            return (
+              <div className="flex items-center gap-2 bg-slate-900/80 border border-cyan-500/20 px-3 py-1 rounded-xl text-xs">
+                {wxVisual.smallIcon}
+                <span className="font-bold text-white">{liveWeather.temp}</span>
+                <span className="text-slate-400 text-[11px]">{liveWeather.location.split(",")[0]}</span>
+              </div>
+            );
+          })()}
 
           <button
             onClick={() => setShowSettings(!showSettings)}
@@ -1023,102 +1410,153 @@ export default function App() {
               </div>
 
               {/* WIDGET 2: Weather */}
-              <div className="p-4 rounded-2xl bg-slate-900/70 border border-cyan-500/20 shadow-[0_0_20px_rgba(6,182,212,0.05)] space-y-3">
-                <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2">
-                  <div className="flex items-center gap-2 text-cyan-300 font-bold text-xs uppercase tracking-wider">
-                    <Cloud className="w-4 h-4 text-cyan-400" />
-                    <span>Weather</span>
-                  </div>
-                  <button onClick={() => fetchLiveWeather()} className="text-cyan-400/60 hover:text-cyan-300 transition">
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                <div className="flex items-center justify-between py-1">
-                  <div>
-                    <div className="text-3xl font-extrabold text-white tracking-tight font-mono drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]">
-                      {liveWeather.temp}
-                    </div>
-                    <div className="text-xs font-medium text-cyan-200 mt-0.5">{liveWeather.location}</div>
-                    <div className="text-[11px] text-slate-400 capitalize">{liveWeather.condition}</div>
-                  </div>
-
-                  <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center">
-                    <Cloud className="w-8 h-8 text-cyan-300 animate-pulse" />
-                  </div>
-                </div>
-
-                {/* Weather Details */}
-                <div className="grid grid-cols-3 gap-2 pt-1 border-t border-cyan-500/15 text-center">
-                  <div>
-                    <span className="text-[9px] text-slate-400 uppercase block">Humidity</span>
-                    <span className="text-xs font-mono font-bold text-cyan-200">{liveWeather.humidity}</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-slate-400 uppercase block">Wind</span>
-                    <span className="text-xs font-mono font-bold text-cyan-200">{liveWeather.wind}</span>
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-slate-400 uppercase block">Feels Like</span>
-                    <span className="text-xs font-mono font-bold text-cyan-200">{liveWeather.feelsLike}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* WIDGET 3: Camera */}
-              <div className="p-4 rounded-2xl bg-slate-900/70 border border-cyan-500/20 shadow-[0_0_20px_rgba(6,182,212,0.05)] space-y-3">
-                <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2">
-                  <div className="flex items-center gap-2 text-cyan-300 font-bold text-xs uppercase tracking-wider">
-                    <Camera className="w-4 h-4 text-cyan-400" />
-                    <span>Camera</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {isCameraActive && (
-                      <button onClick={captureSnapshot} className="text-cyan-400 hover:text-white p-1" title="Take Snapshot">
-                        <Camera className="w-3.5 h-3.5" />
+              {(() => {
+                const wxVisual = getWeatherVisual(liveWeather.condition, liveWeather.isDay, liveWeather.windSpeedKm);
+                return (
+                  <div className={`p-4 rounded-2xl ${wxVisual.bgGradient} space-y-3 transition-all duration-700`}>
+                    <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2">
+                      <div className={`flex items-center gap-2 font-bold text-xs uppercase tracking-wider ${wxVisual.accentText}`}>
+                        {wxVisual.smallIcon}
+                        <span>Weather</span>
+                        <span className={`text-[9px] px-2 py-0.5 rounded-full font-mono font-extrabold ${wxVisual.badgeColor} border`}>
+                          {wxVisual.tag}
+                        </span>
+                      </div>
+                      <button onClick={() => fetchLiveWeather()} className="text-cyan-400/60 hover:text-cyan-300 transition">
+                        <RefreshCw className="w-3.5 h-3.5" />
                       </button>
-                    )}
-                    <button
-                      onClick={toggleCamera}
-                      className={`p-1 rounded-lg border transition ${
-                        isCameraActive ? "border-rose-500/50 bg-rose-500/20 text-rose-300" : "border-cyan-500/30 bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20"
-                      }`}
-                      title={isCameraActive ? "Turn Off Camera" : "Turn On Camera"}
-                    >
-                      <Power className="w-3.5 h-3.5" />
+                    </div>
+
+                    <div className="flex items-center justify-between py-1">
+                      <div>
+                        <div className="text-3xl font-extrabold text-white tracking-tight font-mono drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]">
+                          {liveWeather.temp}
+                        </div>
+                        <div className="text-xs font-medium text-cyan-200 mt-0.5">{liveWeather.location}</div>
+                        <div className={`text-[11px] font-bold capitalize mt-0.5 ${wxVisual.accentText}`}>{liveWeather.condition}</div>
+                      </div>
+
+                      <div className={`p-3.5 rounded-2xl ${wxVisual.badgeColor} border flex items-center justify-center shadow-lg`}>
+                        {wxVisual.icon}
+                      </div>
+                    </div>
+
+                    {/* Weather Details */}
+                    <div className="grid grid-cols-3 gap-2 pt-1 border-t border-cyan-500/15 text-center">
+                      <div>
+                        <span className="text-[9px] text-slate-400 uppercase block font-semibold">Humidity</span>
+                        <span className="text-xs font-mono font-bold text-cyan-200">{liveWeather.humidity}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-400 uppercase block font-semibold">Wind</span>
+                        <span className="text-xs font-mono font-bold text-cyan-200">{liveWeather.wind}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-slate-400 uppercase block font-semibold">Feels Like</span>
+                        <span className="text-xs font-mono font-bold text-cyan-200">{liveWeather.feelsLike}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* WIDGET 3: File Vault & AI Context Explorer */}
+              <div className="p-4 rounded-2xl bg-slate-900/70 border border-cyan-500/20 shadow-[0_0_20px_rgba(6,182,212,0.05)] space-y-3">
+                <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2">
+                  <div className="flex items-center gap-2 text-cyan-300 font-bold text-xs uppercase tracking-wider">
+                    <FolderOpen className="w-4 h-4 text-cyan-400" />
+                    <span>Workspace Vault</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <label htmlFor="widget-file-upload" className="text-cyan-400/70 hover:text-cyan-300 transition cursor-pointer p-1" title="Upload Local File">
+                      <Upload className="w-3.5 h-3.5" />
+                      <input id="widget-file-upload" type="file" onChange={handleCustomFileUpload} className="hidden" />
+                    </label>
+                    <button onClick={fetchWorkspaceFiles} className="text-cyan-400/70 hover:text-cyan-300 transition p-1" title="Refresh Workspace Files">
+                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFiles ? 'animate-spin' : ''}`} />
                     </button>
                   </div>
                 </div>
 
-                {/* Viewport Frame */}
-                <div className="w-full h-36 rounded-xl bg-slate-950 border border-cyan-500/30 relative flex flex-col items-center justify-center overflow-hidden">
-                  <video
-                    ref={videoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className={`w-full h-full object-cover ${isCameraActive ? "block" : "hidden"}`}
+                {/* Search Bar & File Selector */}
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Search files (e.g. App.tsx)..."
+                    value={fileSearchQuery}
+                    onChange={(e) => setFileSearchQuery(e.target.value)}
+                    className="w-full bg-slate-950/80 border border-cyan-500/20 rounded-xl px-3 py-1 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-400 transition"
                   />
 
-                  {!isCameraActive && (
-                    <div className="flex flex-col items-center gap-2 text-center p-3">
-                      <div className="p-3 rounded-full bg-slate-900 border border-cyan-500/20">
-                        <VideoOff className="w-6 h-6 text-slate-500" />
-                      </div>
-                      <span className="text-xs font-semibold text-slate-400">Camera Off</span>
-                      <p className="text-[10px] text-slate-500 max-w-[180px]">
-                        Camera is inactive. Click the power button to start.
-                      </p>
-                    </div>
-                  )}
+                  {/* Scrollable File List */}
+                  <div className="h-28 overflow-y-auto space-y-1 pr-1 font-mono text-[11px] scrollbar-none">
+                    {workspaceFiles
+                      .filter(f => f.name.toLowerCase().includes(fileSearchQuery.toLowerCase()) || f.path.toLowerCase().includes(fileSearchQuery.toLowerCase()))
+                      .map((file) => {
+                        const isSelected = selectedVaultPath === file.path;
+                        const isAttached = attachedContextFiles.some(af => af.path === file.path);
+                        return (
+                          <div
+                            key={file.path}
+                            onClick={() => handleSelectVaultFile(file.path)}
+                            className={`flex items-center justify-between p-1.5 rounded-lg border transition cursor-pointer ${
+                              isSelected
+                                ? "bg-cyan-950/80 border-cyan-500/50 text-cyan-200"
+                                : "bg-slate-950/40 border-cyan-500/10 hover:bg-slate-900 text-slate-300"
+                            }`}
+                          >
+                            <div className="flex items-center gap-1.5 truncate">
+                              <FileCode className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />
+                              <span className="truncate">{file.name}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-slate-900 text-cyan-400/70 border border-cyan-500/20 font-sans font-bold">
+                                {file.ext}
+                              </span>
+                              {isAttached && <Paperclip className="w-3 h-3 text-cyan-400" />}
+                            </div>
+                          </div>
+                        );
+                      })}
+                  </div>
                 </div>
 
-                {/* Captured Snapshots Row */}
-                {snapshots.length > 0 && (
-                  <div className="flex gap-2 overflow-x-auto pt-1">
-                    {snapshots.map((snap, idx) => (
-                      <img key={idx} src={snap} alt="snap" className="w-10 h-10 rounded-lg object-cover border border-cyan-500/30 flex-shrink-0" />
-                    ))}
+                {/* Selected File Action Panel */}
+                {selectedVaultPath && (
+                  <div className="pt-2 border-t border-cyan-500/15 space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-mono text-cyan-300 font-bold truncate max-w-[150px]">{selectedVaultPath.split('/').pop()}</span>
+                      <span className="text-[10px] text-slate-400">{activeFileContent.length} chars</span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-1.5">
+                      <button
+                        onClick={() => handleAttachFileToContext(selectedVaultPath.split('/').pop() || selectedVaultPath, selectedVaultPath, activeFileContent)}
+                        className="p-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                        title="Attach file to prompt context"
+                      >
+                        <Paperclip className="w-3 h-3" />
+                        <span>Attach</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleAskSnowAboutFile(selectedVaultPath.split('/').pop() || selectedVaultPath, selectedVaultPath, activeFileContent)}
+                        className="p-1.5 rounded-xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                        title="Ask Snow for code suggestions & audit"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        <span>Suggest</span>
+                      </button>
+
+                      <button
+                        onClick={() => handleIngestFileToRAG(selectedVaultPath, activeFileContent)}
+                        className="p-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
+                        title="Index into RAG vector memory"
+                      >
+                        <Database className="w-3 h-3" />
+                        <span>RAG</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1172,11 +1610,6 @@ export default function App() {
               {/* Background Holographic Grid Accent */}
               <div className="absolute inset-0 hologram-bg opacity-30 pointer-events-none" />
 
-              <div className="w-full flex justify-between items-center z-10">
-                <span className="text-[10px] font-mono tracking-widest text-cyan-500/60 uppercase">NEURAL ENGINE // SNOW v3.6</span>
-                <span className="text-[10px] font-mono text-cyan-400/80 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/20">STATUS: OPTIMAL</span>
-              </div>
-
               {/* Arc Reactor Center Core */}
               <div className="my-auto py-8 z-10 flex flex-col items-center gap-6">
                 <SnowArcCore state={isLoading ? "thinking" : isListening ? "listening" : "standby"} />
@@ -1205,39 +1638,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Bottom Quick Action Floating Dock */}
-              <div className="flex items-center gap-4 z-10 bg-slate-950/80 border border-cyan-500/30 p-2.5 rounded-2xl shadow-[0_0_30px_rgba(6,182,212,0.15)]">
-                <button
-                  onClick={toggleCamera}
-                  className={`p-3 rounded-xl transition cursor-pointer border ${
-                    isCameraActive ? "bg-cyan-500/20 border-cyan-400 text-cyan-200 shadow-[0_0_15px_rgba(34,211,238,0.3)]" : "bg-slate-900 border-cyan-500/20 text-slate-400 hover:text-white"
-                  }`}
-                  title="Toggle Camera"
-                >
-                  <Camera className="w-5 h-5" />
-                </button>
 
-                <button
-                  onClick={toggleSpeechRecognition}
-                  className={`p-4 rounded-xl transition cursor-pointer border ${
-                    isListening ? "bg-rose-500/30 border-rose-400 text-rose-200 shadow-[0_0_20px_rgba(244,63,94,0.4)] animate-pulse" : "bg-slate-900 border-cyan-500/20 text-slate-400 hover:text-white"
-                  }`}
-                  title="Toggle Voice Input"
-                >
-                  {isListening ? <Mic className="w-6 h-6 text-rose-400" /> : <Mic className="w-6 h-6 text-cyan-400" />}
-                </button>
-
-                <button
-                  onClick={() => {
-                    const el = document.getElementById("chat-input-field");
-                    if (el) el.focus();
-                  }}
-                  className="p-3 rounded-xl bg-slate-900 border border-cyan-500/20 text-slate-400 hover:text-white transition cursor-pointer"
-                  title="Keyboard Focus"
-                >
-                  <Keyboard className="w-5 h-5" />
-                </button>
-              </div>
 
             </div>
 
@@ -1296,17 +1697,17 @@ export default function App() {
                           : "bg-slate-950/90 border border-cyan-500/25 text-slate-100 rounded-tl-none shadow-[0_0_20px_rgba(0,0,0,0.5)] hover:border-cyan-500/40"
                       }`}
                     >
-                      {msg.sender === "snow" && msg !== chatHistory[0] ? (
+                      {msg.sender === "snow" ? (
                         <TypewriterText text={msg.text} />
                       ) : (
-                        msg.text
+                        <FormattedMessage text={msg.text} />
                       )}
 
                       {msg.sender === "snow" && (
                         <div className="flex items-center justify-between mt-3 pt-2 border-t border-cyan-500/15 text-xs">
                           <span className="text-cyan-400/70 font-mono font-semibold tracking-wider text-[11px] flex items-center gap-1">
                             <Sparkles className="w-3 h-3 text-cyan-400 animate-pulse" />
-                            SNOW CORE
+                            SNOW
                           </span>
                           <div className="flex gap-2.5">
                             <button onClick={() => navigator.clipboard.writeText(msg.text)} className="text-slate-400 hover:text-cyan-300 transition" title="Copy">
@@ -1326,12 +1727,37 @@ export default function App() {
                     {/* Render Rich Widgets inside conversation */}
                     {msg.widget && (
                       <div className="w-full max-w-[90%] mt-1">
-                        {msg.widget.type === "weather" && (
-                          <div className="p-4 rounded-2xl border border-cyan-500/30 bg-slate-950/90 text-cyan-200 text-xs">
-                            <div className="font-bold border-b border-cyan-500/20 pb-1 mb-2 uppercase">{msg.widget.data.location}</div>
-                            <div className="text-2xl font-bold text-white">{msg.widget.data.temp} — {msg.widget.data.condition}</div>
-                          </div>
-                        )}
+                        {msg.widget.type === "weather" && (() => {
+                          const isDay = msg.widget.data.isDay !== undefined ? msg.widget.data.isDay : true;
+                          const windSpeed = msg.widget.data.windSpeedKm || 0;
+                          const visual = getWeatherVisual(msg.widget.data.condition || "Clear", isDay, windSpeed);
+                          return (
+                            <div className={`p-4 rounded-2xl border ${visual.bgGradient} text-cyan-200 text-xs shadow-lg`}>
+                              <div className="flex justify-between items-center border-b border-cyan-500/20 pb-1.5 mb-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-bold uppercase tracking-wider text-slate-300">{msg.widget.data.location}</span>
+                                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-mono font-extrabold ${visual.badgeColor} border`}>{visual.tag}</span>
+                                </div>
+                                {visual.smallIcon}
+                              </div>
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <div className="text-2xl font-bold text-white font-mono">{msg.widget.data.temp}</div>
+                                  <div className={`text-xs capitalize font-semibold ${visual.accentText}`}>{msg.widget.data.condition}</div>
+                                </div>
+                                <div className={`p-2.5 rounded-xl ${visual.badgeColor} border`}>
+                                  {visual.icon}
+                                </div>
+                              </div>
+                              {(msg.widget.data.humidity || msg.widget.data.wind) && (
+                                <div className="grid grid-cols-2 gap-2 mt-3 pt-2 border-t border-cyan-500/15 text-[11px]">
+                                  {msg.widget.data.humidity && <div><span className="text-slate-400">Humidity:</span> <span className="font-mono font-bold text-white">{msg.widget.data.humidity}</span></div>}
+                                  {msg.widget.data.wind && <div><span className="text-slate-400">Wind:</span> <span className="font-mono font-bold text-white">{msg.widget.data.wind}</span></div>}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                         {msg.widget.type === "stock" && (
                           <div className="p-4 rounded-2xl border border-emerald-500/30 bg-slate-950/90 text-emerald-200 text-xs">
                             <div className="font-bold border-b border-emerald-500/20 pb-1 mb-2">{msg.widget.data.symbol}</div>
@@ -1353,12 +1779,36 @@ export default function App() {
               </div>
 
               {/* Chat Input Container */}
-              <div className="p-3.5 border-t border-cyan-500/20 bg-slate-950/95 relative">
-                <div className="flex items-center gap-2 rounded-2xl bg-slate-900 border border-cyan-500/35 p-2 px-4 shadow-[inset_0_0_15px_rgba(6,182,212,0.05)] focus-within:border-cyan-400 focus-within:shadow-[0_0_25px_rgba(34,211,238,0.25)] transition-all">
+              <div className="p-3.5 border-t border-cyan-500/20 bg-slate-950/95 relative space-y-2">
+                {/* Attached Context Files Bar (Gemini / Claude Style) */}
+                {attachedContextFiles.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pb-1">
+                    {attachedContextFiles.map((file) => (
+                      <div key={file.path} className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-cyan-950/90 border border-cyan-400/40 text-cyan-300 text-xs shadow-md font-mono">
+                        <Paperclip className="w-3.5 h-3.5 text-cyan-400" />
+                        <span className="font-semibold max-w-[140px] truncate">{file.name}</span>
+                        <button
+                          onClick={() => handleRemoveAttachedFile(file.path)}
+                          className="text-cyan-400/60 hover:text-rose-400 transition ml-1 cursor-pointer"
+                          title="Remove Attachment"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2 rounded-2xl bg-slate-900 border border-cyan-500/35 p-2 px-3 shadow-[inset_0_0_15px_rgba(6,182,212,0.05)] focus-within:border-cyan-400 focus-within:shadow-[0_0_25px_rgba(34,211,238,0.25)] transition-all">
+                  <label htmlFor="chat-file-attachment" className="p-1.5 text-cyan-400/70 hover:text-cyan-300 transition cursor-pointer" title="Attach Workspace / Local File">
+                    <Paperclip className="w-4 h-4" />
+                    <input id="chat-file-attachment" type="file" onChange={handleCustomFileUpload} className="hidden" />
+                  </label>
+
                   <input
                     id="chat-input-field"
                     type="text"
-                    placeholder="Ask SNOW anything..."
+                    placeholder={attachedContextFiles.length > 0 ? "Ask SNOW about attached files..." : "Ask SNOW anything..."}
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
@@ -1367,7 +1817,7 @@ export default function App() {
 
                   <button
                     onClick={() => handleSendMessage()}
-                    disabled={!inputText.trim() || isLoading}
+                    disabled={(!inputText.trim() && attachedContextFiles.length === 0) || isLoading}
                     className="p-2.5 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 disabled:opacity-30 transition cursor-pointer font-bold shadow-[0_0_15px_rgba(34,211,238,0.3)]"
                   >
                     <Send className="w-4 h-4" />

@@ -200,29 +200,50 @@ export async function ragIngestFact(
 // ─── RETRIEVE ─────────────────────────────────────────────────────────────────
 
 /**
- * Search the RAG store for the most relevant chunks.
- * Returns top-K results sorted by cosine similarity.
+ * Search the RAG store for the most relevant chunks using Hybrid Retrieval:
+ * 1. Vector Cosine Similarity (70% weight)
+ * 2. Exact/Token Keyword Match (30% weight)
+ * 3. Recency boost for fresh interactions
  */
 export async function ragSearch(
   query: string,
   topK: number = 5,
-  minScore: number = 0.25,
+  minScore: number = 0.20,
   filterCategory?: string
 ): Promise<RagSearchResult[]> {
   const db = getDb();
   const queryVec = await embedText(query);
+  const queryTokens = query.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter(w => w.length > 2);
 
   let rows: any[];
   if (filterCategory) {
-    rows = db.prepare("SELECT * FROM rag_chunks WHERE category = ? ORDER BY timestamp DESC LIMIT 500").all(filterCategory);
+    rows = db.prepare("SELECT * FROM rag_chunks WHERE category = ? ORDER BY timestamp DESC LIMIT 1000").all(filterCategory);
   } else {
-    rows = db.prepare("SELECT * FROM rag_chunks ORDER BY timestamp DESC LIMIT 500").all();
+    rows = db.prepare("SELECT * FROM rag_chunks ORDER BY timestamp DESC LIMIT 1000").all();
   }
 
   if (rows.length === 0) return [];
 
+  const now = Date.now();
+
   const scored: RagSearchResult[] = rows.map(row => {
     const vec = unpackEmbedding(row.embedding as Buffer);
+    const vectorScore = cosine(queryVec, vec);
+
+    // Token match score (BM25 keyword search approximation)
+    const textLower = row.text.toLowerCase();
+    let tokenMatches = 0;
+    queryTokens.forEach(token => {
+      if (textLower.includes(token)) tokenMatches++;
+    });
+    const keywordScore = queryTokens.length > 0 ? tokenMatches / queryTokens.length : 0;
+
+    // Recency decay factor (up to 1.1x boost for very recent memories)
+    const ageHours = (now - new Date(row.timestamp).getTime()) / (1000 * 3600);
+    const recencyBoost = ageHours < 24 ? 1.05 : 1.0;
+
+    const hybridScore = (vectorScore * 0.70 + keywordScore * 0.30) * recencyBoost;
+
     return {
       chunk: {
         id: row.id,
@@ -232,14 +253,14 @@ export async function ragSearch(
         embedding: vec,
         timestamp: row.timestamp,
       },
-      score: cosine(queryVec, vec),
+      score: hybridScore,
     };
   });
 
   scored.sort((a, b) => b.score - a.score);
 
   const results = scored.filter(r => r.score >= minScore).slice(0, topK);
-  console.log(`[RAG] Query "${query.slice(0, 40)}..." → ${results.length} results (top score: ${results[0]?.score.toFixed(3) ?? "N/A"})`);
+  console.log(`[RAG Hybrid Search] Query "${query.slice(0, 40)}..." → ${results.length} results (top hybrid score: ${results[0]?.score.toFixed(3) ?? "N/A"})`);
 
   return results;
 }

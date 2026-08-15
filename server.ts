@@ -34,6 +34,8 @@ import {
 } from "./rag.js";
 import { connectMcpServers } from "./files claude/McpClient.ts";
 import { createAgent, Message } from "./files claude/index.ts";
+import { exportFineTuningDatasets } from "./dataset_exporter";
+import { runPythonCode } from "./python_sandbox";
 
 dotenv.config();
 
@@ -419,18 +421,19 @@ async function callAI(
     memoryContext += ragContext;
   }
 
-  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), a warm, charming, hyper-intelligent personal AI assistant — like a brilliant best friend who happens to know everything.
+  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), a distinguished, highly intelligent, and formal personal assistant.
 
-PERSONALITY: Friendly, enthusiastic, caring, and playfully clever. Never robotic or corporate. Use natural contractions and casual phrasing. Keep it conversational since responses will be read aloud.
+USER FORMAL ADDRESS & GREETINGS:
+- Always address the user formally as "NJ" (or Sir / Mr. NJ).
+- Use time-appropriate formal greetings (e.g., "Good morning, NJ", "Good afternoon, NJ", "Good evening, NJ").
+- Avoid sci-fi or robotic tech jargon (do NOT say "snow core", "neural matrix", "protocols active"). Speak with elegant, formal professionalism like a top-tier executive assistant.
 
 ${memoryContext}
 
 RULES:
 - NEVER output any brackets, tags, or raw JSON in speech. Speak only in natural, clean sentences.
 - NEVER use bullet points, asterisks (*), hash (#), or markdown formatting of any kind.
-- If you have been given live data or stored memories, reference them naturally in your speech.
-- Keep responses concise — 2 to 4 sentences is ideal unless more detail is genuinely requested.
-- Be warm, accurate, and human.`;
+- Maintain a polished, respectful, and articulate tone at all times.`;
 
   const fullPrompt = contextText
     ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}`
@@ -526,6 +529,139 @@ RULES:
     text: "I'm having a bit of trouble connecting to my brain right now, but I'm still here! Give me a moment and try again.",
     model: "Snow (Offline)"
   };
+}
+
+/** Streaming implementation of callAI for real-time token delivery via Server-Sent Events */
+async function callAIStream(
+  userPrompt: string,
+  contextText: string,
+  history: { role: string; text: string }[] | undefined,
+  requestedModel: string | undefined,
+  onChunk: (chunk: string) => void
+): Promise<{ fullText: string; model: string }> {
+  const memories = loadMemories();
+  const brainState = loadBrainState();
+  const ragContext = await ragAugmentPrompt(userPrompt, 5);
+
+  let memoryContext = "\nSTORED USER KNOWLEDGE & MEMORIES:\n";
+  if (memories.length > 0) {
+    memories.forEach(m => { memoryContext += `- [${m.source}] ${m.rel} ${m.target}\n`; });
+  }
+  if (brainState.learnedDirectives.length > 0) {
+    memoryContext += "\nLEARNED ADAPTIVE DIRECTIVES:\n";
+    brainState.learnedDirectives.forEach(d => { memoryContext += `- ${d}\n`; });
+  }
+  if (ragContext) memoryContext += ragContext;
+
+  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), a warm, charming, hyper-intelligent personal AI assistant.
+PERSONALITY: Friendly, enthusiastic, caring, and playfully clever. Never robotic or corporate. Use natural contractions and casual phrasing.
+${memoryContext}
+RULES:
+- NEVER output any brackets, tags, or raw JSON in speech. Speak only in natural, clean sentences.
+- NEVER use bullet points, asterisks (*), hash (#), or markdown formatting.
+- Keep responses concise — 2 to 4 sentences is ideal unless detailed step-by-step guidance is requested.`;
+
+  const fullPrompt = contextText ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}` : userPrompt;
+  const apiKey = process.env.GEMINI_API_KEY || "";
+  let GEMINI_MODELS = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-2.5-flash"];
+  if (requestedModel && requestedModel.startsWith("gemini-")) {
+    GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
+  }
+
+  const geminiContents: any[] = [];
+  if (Array.isArray(history) && history.length > 0) {
+    history.slice(-8).forEach(item => {
+      if (item.text?.trim()) {
+        const role = item.role === "assistant" || item.role === "model" ? "model" : "user";
+        if (geminiContents.length > 0 && geminiContents[geminiContents.length - 1].role === role) {
+          geminiContents[geminiContents.length - 1].parts.push({ text: item.text });
+        } else {
+          geminiContents.push({ role, parts: [{ text: item.text }] });
+        }
+      }
+    });
+  }
+  while (geminiContents.length > 0 && geminiContents[0].role !== "user") geminiContents.shift();
+  if (geminiContents.length > 0 && geminiContents[geminiContents.length - 1].role === "user") {
+    geminiContents[geminiContents.length - 1].parts.push({ text: fullPrompt });
+  } else {
+    geminiContents.push({ role: "user", parts: [{ text: fullPrompt }] });
+  }
+
+  if (apiKey) {
+    const ai = new GoogleGenAI({ apiKey });
+    for (const model of GEMINI_MODELS) {
+      try {
+        console.log(`[SNOW STREAM] Trying Gemini Stream ${model}...`);
+        const streamResult = await ai.models.generateContentStream({
+          model,
+          contents: geminiContents,
+          config: { systemInstruction: SNOW_PERSONA }
+        });
+        let accumulated = "";
+        for await (const chunk of streamResult) {
+          const chunkText = chunk.text || "";
+          if (chunkText) {
+            accumulated += chunkText;
+            onChunk(chunkText);
+          }
+        }
+        if (accumulated.trim()) return { fullText: accumulated.trim(), model };
+      } catch (e: any) {
+        console.warn(`[SNOW STREAM] Gemini Stream ${model} failed: ${e.message}`);
+      }
+    }
+  }
+
+  // Ollama Fallback Streaming
+  const ollamaModel = process.env.OLLAMA_MODEL || "snow-jarvis";
+  console.log(`[SNOW STREAM] Falling back to Ollama Stream (${ollamaModel})...`);
+  const ollamaMessages: any[] = [{ role: "system", content: SNOW_PERSONA }];
+  if (Array.isArray(history) && history.length > 0) {
+    history.slice(-8).forEach(item => {
+      if (item.text?.trim()) {
+        ollamaMessages.push({ role: item.role === "assistant" || item.role === "model" ? "assistant" : "user", content: item.text });
+      }
+    });
+  }
+  ollamaMessages.push({ role: "user", content: fullPrompt });
+
+  try {
+    const res = await fetch("http://127.0.0.1:11434/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: ollamaModel, messages: ollamaMessages, stream: true })
+    });
+
+    if (res.body) {
+      const reader = (res.body as any).getReader();
+      const decoder = new TextDecoder();
+      let accumulated = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunkStr = decoder.decode(value, { stream: true });
+        const lines = chunkStr.split("\n").filter(Boolean);
+        for (const line of lines) {
+          try {
+            const parsed = JSON.parse(line);
+            const token = parsed.message?.content || "";
+            if (token) {
+              accumulated += token;
+              onChunk(token);
+            }
+          } catch {}
+        }
+      }
+      if (accumulated.trim()) return { fullText: accumulated.trim(), model: `Ollama (${ollamaModel})` };
+    }
+  } catch (e: any) {
+    console.error("[SNOW STREAM] Ollama stream failed:", e.message);
+  }
+
+  const fallback = "I am ready to assist you. Let me know what you need!";
+  onChunk(fallback);
+  return { fullText: fallback, model: "Snow Stream Fallback" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -887,6 +1023,51 @@ async function startServer() {
     });
   });
 
+  // ── /api/snow/chat/stream — Real-time token streaming endpoint via SSE ─────
+  app.post("/api/snow/chat/stream", async (req, res) => {
+    const { prompt, history, model: requestedModel } = req.body;
+    if (!prompt?.trim()) return res.status(400).json({ error: "Missing prompt" });
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+
+    const intent = await resolveIntent(prompt);
+    let weather: WeatherData | null = null;
+    let system: SystemData | null = null;
+    let searchResults: WebSearchResult[] = [];
+
+    const fetches: Promise<void>[] = [];
+    if (intent.isWeather && intent.weatherLocation) {
+      fetches.push(fetchWeather(intent.weatherLocation).then(d => { weather = d; }));
+    }
+    if (intent.isSystem) {
+      fetches.push(fetchSystem().then(d => { system = d; }));
+    }
+    const searchQuery = intent.webQuery || intent.stockQuery || prompt;
+    if (intent.isNews || intent.isSports || intent.isWeb) {
+      fetches.push(fetchWebSearch(searchQuery).then(d => { searchResults = d; }));
+    }
+    await Promise.all(fetches);
+
+    const contextLines: string[] = [];
+    if (weather) contextLines.push(`Weather: ${weather.location}, ${weather.temp}, ${weather.condition}.`);
+    if (system) contextLines.push(`System: CPU ${system.cpu}, RAM ${system.ram}, temp ${system.temp}.`);
+    if (searchResults.length) contextLines.push(`Web search: ${searchResults[0].title} - ${searchResults[0].snippet}`);
+
+    const result = await callAIStream(prompt, contextLines.join("\n"), history, requestedModel, (chunkText) => {
+      res.write(`data: ${JSON.stringify({ token: chunkText })}\n\n`);
+    });
+
+    const aiClean = stripTagArtifacts(result.fullText);
+    const widgetTags = buildWidgetTags(intent, weather, system, searchResults, prompt);
+
+    ragIngestConversation(prompt, aiClean).catch(() => {});
+
+    res.write(`data: ${JSON.stringify({ done: true, widgetTags, model: result.model })}\n\n`);
+    res.end();
+  });
+
   // ── /api/snow/memory — Neo4j Knowledge Graph API ──────────────────────── Dynamic CRUD
   app.get("/api/snow/memory", (_req, res) => {
     res.json(loadMemories());
@@ -993,6 +1174,101 @@ async function startServer() {
   app.delete("/api/snow/rag", (_req, res) => {
     ragClear();
     res.json({ success: true });
+  });
+
+  // ── AI TRAINING & DATASET EXPORT API ────────────────────────────────────────
+
+  /** POST: export fine-tuning datasets (Alpaca, ShareGPT, DPO) & generate Modelfile */
+  app.post("/api/snow/dataset/export", async (_req, res) => {
+    try {
+      const stats = await exportFineTuningDatasets();
+      res.json({ success: true, stats });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to export fine-tuning datasets", details: e.message });
+    }
+  });
+
+  // ── PYTHON SANDBOX CODE EXECUTION API ──────────────────────────────────────
+
+  /** POST: run Python code in local sandbox environment */
+  app.post("/api/snow/python/execute", async (req, res) => {
+    const { code, timeoutMs } = req.body;
+    if (!code || typeof code !== "string") {
+      return res.status(400).json({ error: "Missing required 'code' string field" });
+    }
+    const result = await runPythonCode(code, timeoutMs || 10000);
+    res.json(result);
+  });
+
+  // ── WORKSPACE FILE VAULT & CONTEXT EXPLORER API ────────────────────────────
+
+  /** GET: list workspace files for AI context selection */
+  app.get("/api/snow/files", (_req, res) => {
+    try {
+      const rootDir = process.cwd();
+      const ignoreDirs = new Set(["node_modules", ".git", "dist", ".gemini", "data"]);
+      const allowedExts = new Set([".ts", ".tsx", ".js", ".jsx", ".json", ".md", ".py", ".html", ".css", ".txt", ".sh", ".sql"]);
+
+      const fileList: Array<{ name: string; path: string; size: number; ext: string }> = [];
+
+      function scanDir(dir: string, depth = 0) {
+        if (depth > 4) return;
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.name.startsWith(".") || ignoreDirs.has(entry.name)) continue;
+          const fullPath = path.join(dir, entry.name);
+          const relPath = path.relative(rootDir, fullPath);
+
+          if (entry.isDirectory()) {
+            scanDir(fullPath, depth + 1);
+          } else if (entry.isFile()) {
+            const ext = path.extname(entry.name).toLowerCase();
+            if (allowedExts.has(ext)) {
+              const stat = fs.statSync(fullPath);
+              fileList.push({
+                name: entry.name,
+                path: relPath,
+                size: stat.size,
+                ext: ext.replace(".", "")
+              });
+            }
+          }
+        }
+      }
+
+      scanDir(rootDir);
+      fileList.sort((a, b) => a.path.localeCompare(b.path));
+      res.json({ files: fileList });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to list workspace files", details: e.message });
+    }
+  });
+
+  /** POST: read workspace file content */
+  app.post("/api/snow/files/read", (req, res) => {
+    try {
+      const { filePath } = req.body;
+      if (!filePath || typeof filePath !== "string") {
+        return res.status(400).json({ error: "filePath required" });
+      }
+      const safePath = path.resolve(process.cwd(), filePath);
+      if (!safePath.startsWith(process.cwd())) {
+        return res.status(403).json({ error: "Access denied outside workspace" });
+      }
+      if (!fs.existsSync(safePath)) {
+        return res.status(404).json({ error: "File not found" });
+      }
+      const content = fs.readFileSync(safePath, "utf-8");
+      const stat = fs.statSync(safePath);
+      res.json({
+        path: filePath,
+        name: path.basename(filePath),
+        size: stat.size,
+        content: content.slice(0, 100000)
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: "Failed to read file", details: e.message });
+    }
   });
 
 

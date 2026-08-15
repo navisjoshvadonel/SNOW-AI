@@ -1,8 +1,8 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Playfair+Display:ital,wght@1,300;1,450;1,700&family=Space+Grotesk:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Plus Jakarta Sans", "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-serif: "Playfair Display", Georgia, Cambria, "Times New Roman", Times, serif;
   --font-display: "Space Grotesk", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
@@ -15,6 +15,105 @@ body {
   background-color: #030712;
   color: #ffffff;
   font-family: var(--font-sans);
+}
+
+/* ========== Markdown & Typography Enhancements ========== */
+.markdown-body {
+  font-family: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+  color: #f1f5f9;
+  line-height: 1.7;
+  letter-spacing: 0.01em;
+}
+
+.markdown-body p {
+  margin-bottom: 0.75rem;
+}
+
+.markdown-body p:last-child {
+  margin-bottom: 0;
+}
+
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-weight: 700;
+  color: #22d3ee;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+  letter-spacing: 0.02em;
+}
+
+.markdown-body h1 { font-size: 1.35rem; }
+.markdown-body h2 { font-size: 1.2rem; }
+.markdown-body h3 { font-size: 1.05rem; }
+
+.markdown-body ul,
+.markdown-body ol {
+  margin-top: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding-left: 1.25rem;
+}
+
+.markdown-body li {
+  margin-bottom: 0.4rem;
+}
+
+.markdown-body strong {
+  color: #67e8f9;
+  font-weight: 700;
+}
+
+.markdown-body code {
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(15, 23, 42, 0.8);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  color: #38bdf8;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.375rem;
+  font-size: 0.85em;
+}
+
+.markdown-body pre {
+  background: #090d16;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 0.75rem;
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  margin-top: 0.75rem;
+  margin-bottom: 0.85rem;
+  box-shadow: inset 0 0 15px rgba(0,0,0,0.5);
+}
+
+.markdown-body pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: #e2e8f0;
+}
+
+.markdown-body blockquote {
+  border-left: 3px solid #22d3ee;
+  padding-left: 0.85rem;
+  color: #94a3b8;
+  font-style: italic;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.markdown-card-item {
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(34, 211, 238, 0.18);
+  border-radius: 0.75rem;
+  padding: 0.75rem 1rem;
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  transition: border-color 0.2s ease;
+}
+
+.markdown-card-item:hover {
+  border-color: rgba(34, 211, 238, 0.4);
 }
 
 /* ========== Glass Panels ========== */
@@ -66,6 +165,14 @@ body {
 }
 
 /* ========== Snowflake Core Animations ========== */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.animate-spin-slow {
+  animation: spin-slow 12s linear infinite;
+}
+
 @keyframes spin-slow-glow {
   0%   { transform: rotate(0deg) scale(0.98); }
   50%  { transform: rotate(180deg) scale(1.04); }
