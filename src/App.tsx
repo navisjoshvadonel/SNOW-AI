@@ -1629,22 +1629,6 @@ export default function App() {
                   <span className="text-[11px] font-mono tracking-widest text-cyan-400/70 font-semibold uppercase">
                     Your Friend Here
                   </span>
-
-                  {/* Status Indicator Pill */}
-                  <div className={`flex items-center gap-2 px-4 py-1 mt-1 rounded-full border text-xs font-semibold backdrop-blur-md transition-all ${
-                    isListening ? "bg-rose-500/10 border-rose-500/40 text-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.3)]" :
-                    isLoading ? "bg-cyan-500/10 border-cyan-500/40 text-cyan-300 shadow-[0_0_15px_rgba(34,211,238,0.3)]" :
-                    "bg-cyan-950/80 border-cyan-500/30 text-cyan-300 shadow-[0_0_15px_rgba(34,211,238,0.15)]"
-                  }`}>
-                    <span className={`w-2 h-2 rounded-full ${
-                      isListening ? "bg-rose-400 animate-pulse" :
-                      isLoading ? "bg-cyan-400 animate-spin" : "bg-emerald-400 animate-pulse"
-                    }`} />
-                    <span>
-                      {isListening ? "Listening for speech..." :
-                       isLoading ? "Processing directive..." : "Ready for directive"}
-                    </span>
-                  </div>
                 </div>
               </div>
 
