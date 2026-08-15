@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Ensure standard system PATHs are set for GUI desktop launchers
+export PATH="/snap/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
 # Navigate to project directory
 PROJECT_DIR="/home/snowjd/Documents/Snow Jarvis"
 cd "$PROJECT_DIR" || exit 1
@@ -24,8 +27,10 @@ fi
 
 echo "[SNOW LAUNCHER] Launching SNOW App Window..."
 
-# Prefer Chromium in app mode if available
-if command -v chromium &> /dev/null; then
+# Prefer Chromium/Chrome in app mode if available
+if [ -x "/snap/bin/chromium" ]; then
+    /snap/bin/chromium --app=http://localhost:3000 --user-data-dir="$HOME/.config/snow-app" --class="SNOW" &
+elif command -v chromium &> /dev/null; then
     chromium --app=http://localhost:3000 --user-data-dir="$HOME/.config/snow-app" --class="SNOW" &
 elif command -v google-chrome &> /dev/null; then
     google-chrome --app=http://localhost:3000 --user-data-dir="$HOME/.config/snow-app" --class="SNOW" &
