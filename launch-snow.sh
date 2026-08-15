@@ -6,8 +6,8 @@ cd "$PROJECT_DIR" || exit 1
 
 # Check if port 3000 is active
 if ! curl -s http://localhost:3000 > /dev/null; then
-    echo "[SNOW LAUNCHER] Starting Snow Jarvis background server..."
-    npm run dev > /tmp/snow-jarvis-app.log 2>&1 &
+    echo "[SNOW LAUNCHER] Starting SNOW background server..."
+    npm run dev > /tmp/snow-app.log 2>&1 &
     
     # Wait for server readiness
     MAX_ATTEMPTS=20
@@ -16,19 +16,19 @@ if ! curl -s http://localhost:3000 > /dev/null; then
         sleep 1
         ATTEMPT=$((ATTEMPT + 1))
         if [ $ATTEMPT -ge $MAX_ATTEMPTS ]; then
-            echo "[SNOW LAUNCHER] Server failed to start. Check /tmp/snow-jarvis-app.log"
+            echo "[SNOW LAUNCHER] Server failed to start. Check /tmp/snow-app.log"
             exit 1
         fi
     done
 fi
 
-echo "[SNOW LAUNCHER] Launching Snow Jarvis App Window..."
+echo "[SNOW LAUNCHER] Launching SNOW App Window..."
 
 # Prefer Chromium in app mode if available
 if command -v chromium &> /dev/null; then
-    chromium --app=http://localhost:3000 --user-data-dir="$HOME/.config/snow-jarvis-app" --class="SnowJarvis" &
+    chromium --app=http://localhost:3000 --user-data-dir="$HOME/.config/snow-app" --class="SNOW" &
 elif command -v google-chrome &> /dev/null; then
-    google-chrome --app=http://localhost:3000 --user-data-dir="$HOME/.config/snow-jarvis-app" --class="SnowJarvis" &
+    google-chrome --app=http://localhost:3000 --user-data-dir="$HOME/.config/snow-app" --class="SNOW" &
 elif command -v firefox &> /dev/null; then
     firefox --new-window http://localhost:3000 &
 else
