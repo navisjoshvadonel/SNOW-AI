@@ -25,35 +25,45 @@ export const MatrixSnowHUD: React.FC = () => {
     // Matrix Snowfall Rain glyph pool
     const chars = ["0", "1", "❄", "❅", "❆", "⚡", "JARVIS", "SNOW", "AI", "0x9F", "λ", "Ω", "9", "4", "E", "C"];
     
-    // Create columns along the corners (left 25% and right 25%)
+    // Create columns along the corners (left 30% and right 30%)
     const fontSize = 12;
     const cols = Math.floor(canvas.width / fontSize);
     const drops: number[] = Array.from({ length: cols }, () => Math.random() * -100);
-    const speeds: number[] = Array.from({ length: cols }, () => Math.random() * 1.5 + 0.8);
+    // Slower, graceful drop speeds
+    const speeds: number[] = Array.from({ length: cols }, () => Math.random() * 0.4 + 0.2);
 
-    const render = () => {
+    let lastTime = performance.now();
+    const fpsInterval = 80; // Slower frame update rate (approx 12.5 FPS step rate for matrix code rain)
+
+    const render = (currentTime: number) => {
+      animationFrameId = requestAnimationFrame(render);
+
+      const elapsed = currentTime - lastTime;
+      if (elapsed < fpsInterval) return;
+      lastTime = currentTime - (elapsed % fpsInterval);
+
       // Semi-transparent fade trail effect
-      ctx.fillStyle = "rgba(2, 6, 23, 0.18)";
+      ctx.fillStyle = "rgba(2, 6, 23, 0.15)";
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
       ctx.font = `${fontSize}px "JetBrains Mono", monospace`;
 
       drops.forEach((y, i) => {
         const x = i * fontSize;
-        // Only render matrix rain along the left 30% and right 30% edges so the center Arc Reactor core stays clean
+        // Only render matrix rain along the left 32% and right 32% edges
         const isNearEdge = x < canvas.width * 0.32 || x > canvas.width * 0.68;
         
         if (isNearEdge) {
           const char = chars[Math.floor(Math.random() * chars.length)];
           const isSnowflake = char === "❄" || char === "❅" || char === "❆";
           
-          // Head character (bright white / cyan glow)
+          // Head character glow
           ctx.fillStyle = isSnowflake
             ? "rgba(255, 255, 255, 0.95)"
             : Math.random() > 0.85
             ? "#ffffff"
-            : "rgba(34, 211, 238, 0.9)";
-          ctx.shadowColor = isSnowflake ? "rgba(255, 255, 255, 0.9)" : "rgba(34, 211, 238, 0.8)";
+            : "rgba(34, 211, 238, 0.85)";
+          ctx.shadowColor = isSnowflake ? "rgba(255, 255, 255, 0.9)" : "rgba(34, 211, 238, 0.7)";
           ctx.shadowBlur = isSnowflake ? 8 : 4;
           
           ctx.fillText(char, x, y);
@@ -62,18 +72,16 @@ export const MatrixSnowHUD: React.FC = () => {
           ctx.shadowBlur = 0;
         }
 
-        // Advance y drop
+        // Slow step down
         drops[i] += fontSize * speeds[i];
 
-        if (drops[i] > canvas.height && Math.random() > 0.95) {
-          drops[i] = Math.random() * -20;
+        if (drops[i] > canvas.height && Math.random() > 0.96) {
+          drops[i] = Math.random() * -30;
         }
       });
-
-      animationFrameId = requestAnimationFrame(render);
     };
 
-    render();
+    render(performance.now());
 
     return () => {
       cancelAnimationFrame(animationFrameId);
@@ -84,7 +92,7 @@ export const MatrixSnowHUD: React.FC = () => {
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden z-0">
       {/* Matrix Snowfall Canvas Rain Overlay */}
-      <canvas ref={canvasRef} className="w-full h-full opacity-40" />
+      <canvas ref={canvasRef} className="w-full h-full opacity-35" />
 
       {/* ─────────────────────────────────────────────────────────────
           FUTURISTIC CORNER HUD TECH BRACKETS (JARVIS STYLE)
@@ -102,7 +110,7 @@ export const MatrixSnowHUD: React.FC = () => {
         <div className="flex items-center gap-1 pl-1">
           <motion.div
             animate={{ opacity: [0.3, 1, 0.3] }}
-            transition={{ duration: 1.5, repeat: Infinity }}
+            transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
             className="w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_6px_#22d3ee]"
           />
           <span className="font-mono text-[8px] text-cyan-400/70 font-semibold tracking-tighter">
@@ -143,7 +151,7 @@ export const MatrixSnowHUD: React.FC = () => {
               <motion.div
                 key={i}
                 animate={{ opacity: [0.2, 0.9, 0.2] }}
-                transition={{ duration: 0.8, repeat: Infinity, delay: i * 0.15 }}
+                transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.3 }}
                 className="w-1.5 h-3 bg-cyan-400/70 rounded-xs"
               />
             ))}
@@ -157,7 +165,7 @@ export const MatrixSnowHUD: React.FC = () => {
           <span className="font-mono text-[8px] text-cyan-300/80 font-bold tracking-widest">
             CYBER CORE READY
           </span>
-          <Zap className="w-3 h-3 text-amber-400 animate-bounce" />
+          <Zap className="w-3 h-3 text-amber-400 animate-pulse" />
         </div>
         <div className="flex items-center gap-1.5 text-cyan-400">
           <span className="font-mono text-[9px] font-bold tracking-widest text-cyan-300 uppercase flex items-center gap-1 bg-cyan-950/70 px-1.5 py-0.5 rounded border border-cyan-500/30 backdrop-blur-sm">
