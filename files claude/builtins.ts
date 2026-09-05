@@ -65,30 +65,53 @@ export const BashTool: ToolDefinition<BashInput> = {
     if (timeout > 600) {
       return { valid: false, message: "Timeout cannot exceed 600 seconds", code: 400 };
     }
-    // Block obviously dangerous patterns
-    const BLOCKED = [
-      /\brm\s+-rf\s+\/(?:\s|$)/,   // rm -rf /
-      /\bmkfs\b/,                    // filesystem format
-      /\bdd\s+if=.*of=\/dev/,        // low-level disk write
+
+    // Comprehensive security blocklist for system disruption, destructive commands, and secret exfiltration
+    const BLOCKED_COMMANDS: { pattern: RegExp; reason: string }[] = [
+      { pattern: /\brm\s+-(?:r[fv]|fr|rf)\s+(?:\/|\~|\$HOME|\.\.)(?:\s|$)/, reason: "Recursive deletion of root, home, or parent directory is prohibited" },
+      { pattern: /\bmkfs\b/, reason: "Filesystem formatting is prohibited" },
+      { pattern: /\bdd\s+if=.*of=\/dev/, reason: "Direct low-level block device write is prohibited" },
+      { pattern: /\b(shutdown|reboot|poweroff|halt|init\s+[06])\b/, reason: "System shutdown or reboot commands are prohibited" },
+      { pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: "Fork bombs are prohibited" },
+      { pattern: /(?:curl|wget|fetch)\s+[^|]+\|\s*(?:bash|sh|zsh|dash)/, reason: "Piping untrusted remote content into shell is prohibited" },
+      { pattern: /\b(?:nc|netcat|ncat)\s+.*-e\b/, reason: "Reverse shell command is prohibited" },
+      { pattern: /\/dev\/tcp\//, reason: "Direct bash TCP socket redirection is prohibited" },
+      { pattern: /\b(?:cat|less|more|head|tail|grep|strings)\s+.*(?:\.env|\.ssh|id_rsa|id_ed25519)/, reason: "Command attempts to read protected credentials or keys" },
     ];
-    for (const pattern of BLOCKED) {
+
+    for (const { pattern, reason } of BLOCKED_COMMANDS) {
       if (pattern.test(input.command)) {
-        return { valid: false, message: `Command matches blocked pattern: ${pattern}`, code: 403 };
+        return { valid: false, message: `Security violation: ${reason}`, code: 403 };
       }
     }
     return { valid: true };
   },
 
   checkPermission(input, ctx) {
-    if (ctx.permissionMode === "bypassPermissions") return { granted: true };
-    // In default mode, bash always requires approval unless it's a read-only command
-    const READ_ONLY = /^(cat|head|tail|ls|find|grep|echo|pwd|which|env|git (log|diff|status|show)|wc|sort|uniq)\b/;
-    if (READ_ONLY.test(input.command.trimStart())) return { granted: true };
-    // acceptEdits approves file writes but not arbitrary shell commands
-    if (ctx.permissionMode === "acceptEdits") {
-      return { granted: false, reason: "Bash requires explicit approval in acceptEdits mode" };
+    if (ctx.permissionMode === "bypassPermissions") {
+      // Even in bypass mode, extra sanity check against dangerous targets
+      if (/\b(?:rm\s+-rf|chmod\s+777|chown)\b/.test(input.command)) {
+        return { granted: false, reason: "Dangerous command requires explicit confirmation." };
+      }
+      return { granted: true };
     }
-    return { granted: true }; // default mode: approve (real impl would prompt)
+
+    const trimmed = input.command.trimStart();
+    const SAFE_READ_ONLY = /^(cat|head|tail|ls|find|grep|echo|pwd|which|git\s+(log|diff|status|show|branch)|wc|sort|uniq|date|uptime)\b/;
+
+    if (SAFE_READ_ONLY.test(trimmed)) {
+      if (/(?:\.env|\.ssh|id_rsa|id_ed25519)/i.test(trimmed)) {
+        return { granted: false, reason: "Reading sensitive secrets or credentials is prohibited." };
+      }
+      return { granted: true };
+    }
+
+    if (ctx.permissionMode === "acceptEdits") {
+      return { granted: false, reason: "Shell execution requires explicit user authorization in acceptEdits mode." };
+    }
+
+    // Default mode: shell command requires confirmation unless it's read-only
+    return { granted: false, reason: `Shell execution '${trimmed.slice(0, 30)}...' requires user confirmation.` };
   },
 
   async *execute(input, ctx) {
@@ -96,12 +119,22 @@ export const BashTool: ToolDefinition<BashInput> = {
 
     yield { type: "progress", data: null, label: input.description ?? input.command };
 
+    // Scrub sensitive environment variables (API keys, secrets, tokens) from child process environment
+    const safeEnv: Record<string, string> = {};
+    const SENSITIVE_KEY_PATTERN = /(?:KEY|SECRET|TOKEN|PASSWORD|AUTH|CREDENTIAL|PRIVATE)/i;
+    for (const [k, v] of Object.entries(process.env)) {
+      if (v !== undefined && !SENSITIVE_KEY_PATTERN.test(k)) {
+        safeEnv[k] = v;
+      }
+    }
+    safeEnv.PATH = process.env.PATH || "/usr/local/bin:/usr/bin:/bin";
+
     try {
       const { stdout, stderr } = await execAsync(input.command, {
         cwd: ctx.cwd,
         timeout,
         maxBuffer: 10 * 1024 * 1024, // 10 MB
-        env: { ...process.env },
+        env: safeEnv,
         signal: ctx.abortSignal,
       });
 
@@ -203,6 +236,17 @@ export const FileWriteTool: ToolDefinition<FileWriteInput> = {
     required: ["file_path", "content"],
   },
 
+  validate(input, ctx) {
+    if (!input.file_path?.trim()) {
+      return { valid: false, message: "file_path cannot be empty", code: 400 };
+    }
+    const abs = safeResolvePath(input.file_path, ctx.cwd);
+    if (!abs) {
+      return { valid: false, message: `Access denied: Cannot write to protected or out-of-workspace path: ${input.file_path}`, code: 403 };
+    }
+    return { valid: true };
+  },
+
   checkPermission(input, ctx) {
     if (ctx.permissionMode === "bypassPermissions" || ctx.permissionMode === "acceptEdits") {
       return { granted: true };
@@ -260,7 +304,13 @@ export const FileEditTool: ToolDefinition<FileEditInput> = {
   },
 
   validate(input, ctx) {
-    const abs = resolve(ctx.cwd, input.file_path);
+    if (!input.file_path?.trim()) {
+      return { valid: false, message: "file_path cannot be empty", code: 400 };
+    }
+    const abs = safeResolvePath(input.file_path, ctx.cwd);
+    if (!abs) {
+      return { valid: false, message: `Access denied: Cannot edit protected or out-of-workspace path: ${input.file_path}`, code: 403 };
+    }
     if (!existsSync(abs)) {
       return { valid: false, message: `File not found: ${input.file_path}`, code: 404 };
     }
@@ -331,6 +381,12 @@ export const GlobTool: ToolDefinition<GlobInput> = {
     const ignore = [
       "**/node_modules/**",
       "**/.git/**",
+      "**/.env*",
+      "**/*.pem",
+      "**/*.key",
+      "**/id_rsa*",
+      "**/id_ed25519*",
+      "**/data/*.db*",
       ...(input.exclude ?? []),
     ];
 
@@ -385,7 +441,16 @@ export const GrepTool: ToolDefinition<GrepInput> = {
 
     const files = await glob(input.glob ?? "**/*", {
       cwd: root,
-      ignore: ["**/node_modules/**", "**/.git/**"],
+      ignore: [
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/.env*",
+        "**/*.pem",
+        "**/*.key",
+        "**/id_rsa*",
+        "**/id_ed25519*",
+        "**/data/*.db*"
+      ],
       nodir: true,
     });
 
@@ -812,9 +877,25 @@ export const MediaControlTool: ToolDefinition<MediaControlInput> = {
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
+const SENSITIVE_FILE_PATTERNS = [
+  /(?:^|\/)\.env(?:\..*)?$/i,
+  /(?:^|\/)\.git(?:\/|$)/i,
+  /\.(pem|key|crt|p12|kdbx)$/i,
+  /id_rsa|id_ed25519/i,
+  /(?:^|\/)data\/.*\.db$/i
+];
+
 function safeResolvePath(inputPath: string, cwd: string): string | null {
   const abs = resolve(cwd, inputPath);
-  if (!abs.startsWith(resolve(cwd))) return null;
+  const resolvedCwd = resolve(cwd);
+  if (!abs.startsWith(resolvedCwd)) return null;
+
+  const rel = relative(resolvedCwd, abs);
+  for (const pattern of SENSITIVE_FILE_PATTERNS) {
+    if (pattern.test(rel) || pattern.test(abs)) {
+      return null; // Deny access to sensitive credentials or databases
+    }
+  }
   return abs;
 }
 

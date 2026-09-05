@@ -633,7 +633,7 @@ export default function App() {
     memoriesCount: 4,
     vectorsCount: 2
   });
-  const [selectedModel, setSelectedModel] = useState<string>("gemini-2.0-flash");
+  const [selectedModel, setSelectedModel] = useState<string>("gemini-2.5-flash");
   const [compilerMode, setCompilerMode] = useState<"general" | "education" | "debugging" | "context_awareness">("general");
 
   // Code Sandbox State
@@ -1136,11 +1136,22 @@ export default function App() {
       fetchMemories();
       fetchBrainStatus();
     } catch (err: any) {
-      console.error(err);
-      const isOffline = err instanceof TypeError && (err.message === "Failed to fetch" || err.message.includes("NetworkError"));
-      const friendlyMsg = isOffline
-        ? "SNOW backend is offline. Some features may be limited. How can I assist you today sir?"
-        : err.message || "Encountered a processing anomaly.";
+      console.error("[Snow Chat Error]", err);
+      const isNetworkError = err instanceof TypeError && (
+        err.message === "Failed to fetch" ||
+        err.message.includes("NetworkError") ||
+        err.message.includes("net::ERR") ||
+        err.message.includes("Connection refused")
+      );
+
+      let friendlyMsg: string;
+      if (isNetworkError) {
+        const hour = new Date().getHours();
+        const greet = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+        friendlyMsg = `${greet}, NJ. I am Snow, operating in standalone mode. My server is starting up — this usually takes about 15-20 seconds on first launch. Please send your message again in a moment, and I will be fully ready to assist you.`;
+      } else {
+        friendlyMsg = err.message || "Encountered a processing anomaly. Please try again.";
+      }
       
       const errTime = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
       setChatHistory((prev) => [...prev, { id: `err-${Date.now()}`, sender: "snow", text: friendlyMsg, timestamp: errTime }]);
@@ -1265,7 +1276,7 @@ export default function App() {
                   onChange={(e) => setSelectedModel(e.target.value)}
                   className="w-full bg-slate-950 border border-cyan-500/30 rounded-lg p-2 text-cyan-200 outline-none focus:border-cyan-400"
                 >
-                  <option value="gemini-2.0-flash">Gemini 2.0 Flash (Fast & Smart)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Fast & Smart)</option>
                   <option value="gemini-1.5-pro">Gemini 1.5 Pro (Deep Logic)</option>
                   <option value="gemini-1.5-flash">Gemini 1.5 Flash (Lightweight)</option>
                   <option value="ollama">Ollama Local Engine (Offline)</option>

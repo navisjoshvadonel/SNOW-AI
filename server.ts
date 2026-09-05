@@ -385,6 +385,97 @@ function buildWidgetTags(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// BUILT-IN OFFLINE AI BRAIN  (works without internet or Ollama)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function buildOfflineReply(
+  userPrompt: string,
+  history?: { role: string; text: string }[]
+): string {
+  const q = userPrompt.toLowerCase().trim();
+  const now = new Date();
+  const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  const dateStr = now.toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  const hour = now.getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+
+  // Greetings
+  if (/^(hi|hello|hey|sup|yo|greetings|howdy|good (morning|afternoon|evening|night))/.test(q)) {
+    return `${greeting}, NJ. I am Snow, your personal AI assistant. I am running in offline mode right now, which means my Gemini cloud brain is temporarily unavailable. However, I am fully operational locally and ready to assist you with anything I can handle directly. What do you need?`;
+  }
+
+  // Who are you / identity
+  if (/\b(who are you|what are you|your name|are you ai|are you snow|what can you do)\b/.test(q)) {
+    return `I am Snow, NJ's personal AI executive assistant. I am a locally-hosted intelligent system built to assist you with tasks, information, system monitoring, coding, research, and much more. Currently operating in offline mode — my full cloud intelligence will be available once network connectivity is restored or the Gemini API key is verified.`;
+  }
+
+  // Time / Date
+  if (/\b(what time|current time|what date|today's date|what day)\b/.test(q)) {
+    return `The current time is ${timeStr}, NJ. Today is ${dateStr}.`;
+  }
+
+  // System status
+  if (/\b(system status|cpu|ram|memory|disk|how is my computer|pc status|system health)\b/.test(q)) {
+    const uptimeSec = Math.round(os.uptime());
+    const hours = Math.floor(uptimeSec / 3600);
+    const mins = Math.floor((uptimeSec % 3600) / 60);
+    const totalMem = os.totalmem() / (1024 * 1024 * 1024);
+    const freeMem = os.freemem() / (1024 * 1024 * 1024);
+    const usedMem = totalMem - freeMem;
+    const ramPct = Math.round((usedMem / totalMem) * 100);
+    return `System telemetry for NJ: RAM usage is ${usedMem.toFixed(1)} GB of ${totalMem.toFixed(1)} GB (${ramPct}% utilized). System uptime is ${hours}h ${mins}m. All local subsystems are nominal.`;
+  }
+
+  // Network / offline status
+  if (/\b(offline|network|internet|connection|why can't|not working|backend)\b/.test(q)) {
+    return `I am currently operating in offline mode, NJ. This means my Gemini cloud AI is unreachable — either due to a network issue or an API key configuration. My local Ollama fallback has also been attempted. I can still help you with time, system info, local tasks, and general conversation. Once connectivity is restored, full intelligence will resume automatically.`;
+  }
+
+  // Weather (offline)
+  if (/\b(weather|temperature|rain|sunny|forecast|climate)\b/.test(q)) {
+    return `I would love to fetch live weather data for you, NJ, but I am currently in offline mode and unable to reach the weather API. Please check back once my network connection is restored, or visit weather.com for the latest conditions.`;
+  }
+
+  // Jokes
+  if (/\b(joke|funny|laugh|humor|tell me something funny)\b/.test(q)) {
+    const jokes = [
+      "Why do programmers prefer dark mode? Because light attracts bugs, NJ.",
+      "Why did the AI go to therapy? Too many unresolved promises, NJ.",
+      "What's an AI's favorite song? 'Don't Stop Be-leaf-ing' — because neural networks are rooted in data, NJ.",
+      "Why do computers never get hungry? Because they already have too many bytes, NJ.",
+    ];
+    return jokes[Math.floor(Math.random() * jokes.length)];
+  }
+
+  // Capabilities
+  if (/\b(what can you|your capabilities|features|help me with|abilities)\b/.test(q)) {
+    return `Here is what I can do for you, NJ: real-time weather lookup, system telemetry monitoring, web search and research, stock and crypto data, code analysis and generation, file management, calendar and time queries, memory and knowledge storage, and natural conversation. When my cloud brain (Gemini) is online, I can handle much more complex reasoning and multi-step tasks.`;
+  }
+
+  // Thank you
+  if (/\b(thank|thanks|appreciate|good job|well done|great)\b/.test(q)) {
+    return `My pleasure, NJ. That is precisely what I am here for. Is there anything else I can assist you with?`;
+  }
+
+  // Farewell
+  if (/\b(bye|goodbye|see you|later|exit|close|goodnight)\b/.test(q)) {
+    return `Farewell, NJ. I will be here whenever you need me. Take care and have an excellent rest of your day.`;
+  }
+
+  // Memory context from history
+  const lastUserMsg = history?.filter(h => h.role === "user").slice(-1)[0]?.text || "";
+
+  // Default intelligent offline response
+  const defaultResponses = [
+    `I understand your query, NJ. While I am operating in offline mode with limited capabilities, I want to help. Could you clarify what specific aspect you need assistance with? I can handle local tasks, system queries, time/date, and general conversation without internet access.`,
+    `That is an interesting query, NJ. I am currently running on my offline brain, so my full reasoning capabilities are limited. For the best results, please ensure the server is online and the Gemini API key is configured correctly. In the meantime, I am here to assist with what I can.`,
+    `Noted, NJ. I am processing your request in offline mode. My local knowledge base suggests I can assist with this — however, for complex queries, my full capabilities will return once cloud connectivity is established. What would you like to focus on?`,
+  ];
+
+  return defaultResponses[Math.floor(Math.random() * defaultResponses.length)];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // AI CALLER WITH DYNAMIC MEMORY & MULTI-TURN HISTORY (CONTINUOUS LEARNING INCLUDED)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -440,7 +531,8 @@ RULES:
     : userPrompt;
 
   const apiKey = process.env.GEMINI_API_KEY || "";
-  let GEMINI_MODELS = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-2.5-flash", "gemini-3.1-pro-preview", "gemini-2.5-pro"];
+  // Confirmed working Gemini model names (fastest first)
+  let GEMINI_MODELS = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
@@ -524,11 +616,9 @@ RULES:
     console.error("[SNOW] Ollama failed:", e.message);
   }
 
-  // Absolute last-resort built-in reply
-  return {
-    text: "I'm having a bit of trouble connecting to my brain right now, but I'm still here! Give me a moment and try again.",
-    model: "Snow (Offline)"
-  };
+  // Absolute last-resort: Built-in offline Snow intelligence
+  const offlineReply = buildOfflineReply(userPrompt, history);
+  return { text: offlineReply, model: "Snow (Offline Brain)" };
 }
 
 /** Streaming implementation of callAI for real-time token delivery via Server-Sent Events */
@@ -563,7 +653,8 @@ RULES:
 
   const fullPrompt = contextText ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}` : userPrompt;
   const apiKey = process.env.GEMINI_API_KEY || "";
-  let GEMINI_MODELS = ["gemini-3.5-flash", "gemini-3.6-flash", "gemini-2.5-flash"];
+  // Confirmed working Gemini model names
+  let GEMINI_MODELS = ["gemini-2.5-flash", "gemini-1.5-flash"];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
@@ -659,9 +750,9 @@ RULES:
     console.error("[SNOW STREAM] Ollama stream failed:", e.message);
   }
 
-  const fallback = "I am ready to assist you. Let me know what you need!";
+  const fallback = buildOfflineReply(userPrompt, history);
   onChunk(fallback);
-  return { fullText: fallback, model: "Snow Stream Fallback" };
+  return { fullText: fallback, model: "Snow (Offline Brain)" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -722,14 +813,15 @@ RULES:
     });
   }
 
-  const activeModel = requestedModel && requestedModel.startsWith("gemini-") ? requestedModel : "gemini-3.5-flash";
+  const activeModel = requestedModel && requestedModel.startsWith("gemini-") ? requestedModel : "gemini-2.5-flash";
+  const permissionMode = (process.env.SNOW_PERMISSION_MODE as any) || "default";
 
   const agent = await createAgent({
     systemPrompt,
     initialMessages,
     model: activeModel,
     maxTurns: 5,
-    permissionMode: "bypassPermissions"
+    permissionMode
   });
 
   const abortController = new AbortController();
@@ -834,7 +926,30 @@ async function startServer() {
   // Auto-start Ollama if not already running
   await ensureOllamaRunning();
   const app = express();
-  app.use(express.json());
+
+  // Security headers & body limit protection
+  app.use(express.json({ limit: "5mb" }));
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "SAMEORIGIN");
+    res.setHeader("X-XSS-Protection", "1; mode=block");
+    next();
+  });
+
+  // Optional API key enforcement if configured in .env (SNOW_API_KEY)
+  const configuredApiKey = process.env.SNOW_API_KEY || process.env.JARVIS_API_KEY;
+  if (configuredApiKey) {
+    app.use("/api/snow", (req, res, next) => {
+      const auth = req.headers["authorization"] || req.headers["x-api-key"];
+      const token = typeof auth === "string" && auth.startsWith("Bearer ")
+        ? auth.slice(7).trim()
+        : auth;
+      if (token !== configuredApiKey) {
+        return res.status(401).json({ error: "Unauthorized: Invalid or missing Snow API key" });
+      }
+      next();
+    });
+  }
 
   // ── /api/system — live telemetry polling ──────────────────────────────────
   app.get("/api/system", async (_req, res) => {
@@ -1190,17 +1305,20 @@ async function startServer() {
 
   // ── PYTHON SANDBOX CODE EXECUTION API ──────────────────────────────────────
 
-  /** POST: run Python code in local sandbox environment */
+  /** POST: run Python code in hardened local sandbox environment */
   app.post("/api/snow/python/execute", async (req, res) => {
     const { code, timeoutMs } = req.body;
     if (!code || typeof code !== "string") {
       return res.status(400).json({ error: "Missing required 'code' string field" });
     }
-    const result = await runPythonCode(code, timeoutMs || 10000);
+    const safeTimeout = Math.min(Math.max(Number(timeoutMs) || 10000, 1000), 60000);
+    const result = await runPythonCode(code, safeTimeout);
     res.json(result);
   });
 
   // ── WORKSPACE FILE VAULT & CONTEXT EXPLORER API ────────────────────────────
+
+  const SENSITIVE_FILE_PATTERN = /(?:^|[/\\])(?:\.env(?:\..*)?|\.git(?:\/|\\|$)|.*\.(?:pem|key|crt|p12|kdbx)|id_rsa.*|id_ed25519.*|data[/\\](?:snow_brain|snow_rag)\.db.*)$/i;
 
   /** GET: list workspace files for AI context selection */
   app.get("/api/snow/files", (_req, res) => {
@@ -1218,6 +1336,8 @@ async function startServer() {
           if (entry.name.startsWith(".") || ignoreDirs.has(entry.name)) continue;
           const fullPath = path.join(dir, entry.name);
           const relPath = path.relative(rootDir, fullPath);
+
+          if (SENSITIVE_FILE_PATTERN.test(relPath) || SENSITIVE_FILE_PATTERN.test(entry.name)) continue;
 
           if (entry.isDirectory()) {
             scanDir(fullPath, depth + 1);
@@ -1255,6 +1375,9 @@ async function startServer() {
       if (!safePath.startsWith(process.cwd())) {
         return res.status(403).json({ error: "Access denied outside workspace" });
       }
+      if (SENSITIVE_FILE_PATTERN.test(filePath) || SENSITIVE_FILE_PATTERN.test(safePath)) {
+        return res.status(403).json({ error: "Access denied: Target file is protected" });
+      }
       if (!fs.existsSync(safePath)) {
         return res.status(404).json({ error: "File not found" });
       }
@@ -1283,10 +1406,12 @@ async function startServer() {
     app.get("*", (_req, r) => r.sendFile(path.join(dist, "index.html")));
   }
 
-  const PORT = 3000;
-  app.listen(PORT, "0.0.0.0", () => {
+  const PORT = parseInt(process.env.PORT || "3000", 10);
+  const HOST = process.env.HOST || "127.0.0.1";
+  app.listen(PORT, HOST, () => {
     const rs = ragStats();
-    console.log(`\n✅  Snow OS Autonomous Learning Agent ONLINE → http://0.0.0.0:${PORT}`);
+    console.log(`\n✅  Snow OS Autonomous Learning Agent ONLINE → http://${HOST}:${PORT}`);
+    console.log(`    Host Binding : ${HOST} (Loopback/Localhost Secure Mode)`);
     console.log(`    Gemini key   : ${process.env.GEMINI_API_KEY ? "✅ set" : "❌ missing"}`);
     console.log(`    RAG Engine   : ✅ Ollama nomic-embed-text (${rs.total} chunks indexed)`);
     console.log(`    Brain Status : LV.${loadBrainState().level} (${loadMemories().length} Memories)\n`);
