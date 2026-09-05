@@ -19,6 +19,8 @@ import {
   recordFeedback,
   resolveIntent,
   trainBrain,
+  findGraphRelationships,
+  formatGraphContext,
   ResolvedIntent
 } from "./brain";
 import {
@@ -489,16 +491,22 @@ async function callAI(
   const memories = loadMemories();
   const brainState = loadBrainState();
 
-  // ── Ollama RAG: semantic retrieval via nomic-embed-text ──────────────────
+  // ── Unified Hybrid RAG: FTS5 BM25 + 768-dim Vector RRF ───────────────────
   const ragContext = await ragAugmentPrompt(userPrompt, 5);
+  const graphNodes = findGraphRelationships(userPrompt, 2);
+  const graphContext = formatGraphContext(graphNodes);
 
   let memoryContext = "\nSTORED USER KNOWLEDGE & MEMORIES:\n";
   if (memories.length > 0) {
-    memories.forEach(m => {
+    memories.slice(0, 10).forEach(m => {
       memoryContext += `- [${m.source}] ${m.rel} ${m.target}\n`;
     });
   } else {
     memoryContext += "- No stored facts yet.\n";
+  }
+
+  if (graphContext) {
+    memoryContext += graphContext + "\n";
   }
 
   if (brainState.learnedDirectives.length > 0) {
@@ -632,10 +640,15 @@ async function callAIStream(
   const memories = loadMemories();
   const brainState = loadBrainState();
   const ragContext = await ragAugmentPrompt(userPrompt, 5);
+  const graphNodes = findGraphRelationships(userPrompt, 2);
+  const graphContext = formatGraphContext(graphNodes);
 
   let memoryContext = "\nSTORED USER KNOWLEDGE & MEMORIES:\n";
   if (memories.length > 0) {
-    memories.forEach(m => { memoryContext += `- [${m.source}] ${m.rel} ${m.target}\n`; });
+    memories.slice(0, 10).forEach(m => { memoryContext += `- [${m.source}] ${m.rel} ${m.target}\n`; });
+  }
+  if (graphContext) {
+    memoryContext += graphContext + "\n";
   }
   if (brainState.learnedDirectives.length > 0) {
     memoryContext += "\nLEARNED ADAPTIVE DIRECTIVES:\n";
@@ -767,16 +780,22 @@ async function runReActAgenticLoop(
   const memories = loadMemories();
   const brainState = loadBrainState();
 
-  // ── Ollama RAG: semantic retrieval via nomic-embed-text ──────────────────
+  // ── Unified Hybrid RAG: FTS5 BM25 + 768-dim Vector RRF ───────────────────
   const ragContext = await ragAugmentPrompt(userPrompt, 5);
+  const graphNodes = findGraphRelationships(userPrompt, 2);
+  const graphContext = formatGraphContext(graphNodes);
 
   let memoryContext = "\nSTORED USER KNOWLEDGE & MEMORIES:\n";
   if (memories.length > 0) {
-    memories.forEach(m => {
+    memories.slice(0, 10).forEach(m => {
       memoryContext += `- [${m.source}] ${m.rel} ${m.target}\n`;
     });
   } else {
     memoryContext += "- No stored facts yet.\n";
+  }
+
+  if (graphContext) {
+    memoryContext += graphContext + "\n";
   }
 
   if (brainState.learnedDirectives.length > 0) {

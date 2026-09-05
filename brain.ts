@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
 import { GoogleGenAI } from "@google/genai";
+import { embedText, ragIngestFact } from "./rag.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES & DATA STRUCTURES
@@ -258,42 +259,105 @@ export function saveMemories(mems: MemoryNode[]) {
   tx(mems);
 }
 
-export function addMemory(source: string, rel: string, target: string): MemoryNode {
+export function addMemory(
+  source: string,
+  rel: string,
+  target: string,
+  category?: "User" | "Preference" | "Skill font" | "Course"
+): MemoryNode {
   const db = getDb();
   const newMem: MemoryNode = {
     id: `mem-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
     source: source.trim(),
     rel: rel.trim(),
     target: target.trim(),
+    category,
     timestamp: new Date().toISOString()
   };
 
   db.prepare("INSERT INTO memories (id, source, rel, target, category, timestamp) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(newMem.id, newMem.source, newMem.rel, newMem.target, null, newMem.timestamp);
+    .run(newMem.id, newMem.source, newMem.rel, newMem.target, newMem.category || null, newMem.timestamp);
 
-  // Sync to Chroma Vectors
+  // 1. Sync to local vector documents in brain.db
   addVectorDocument(`mem_${newMem.id}`, `${source} ${rel} ${target}`, "history");
+
+  // 2. Sync to unified RAG store in rag.db
+  ragIngestFact(source, rel, target).catch(() => {});
+
   return newMem;
 }
 
-/** Fast Knowledge Graph Traversal Query across entity relationships */
-export function findGraphRelationships(query: string): MemoryNode[] {
+/**
+ * Multi-hop Knowledge Graph Traversal across entity relationships.
+ * Traverses direct relationships (Hop 1) and discovers connected neighbors (Hop 2).
+ */
+export function findGraphRelationships(query: string, maxHops: number = 2): MemoryNode[] {
   const db = getDb();
   const pattern = `%${query.toLowerCase().trim()}%`;
-  const rows: any[] = db.prepare(`
+
+  // Hop 1: Direct entity/relation match
+  const hop1Rows: any[] = db.prepare(`
     SELECT * FROM memories 
     WHERE LOWER(source) LIKE ? OR LOWER(rel) LIKE ? OR LOWER(target) LIKE ?
     ORDER BY timestamp DESC
+    LIMIT 25
   `).all(pattern, pattern, pattern);
 
-  return rows.map(r => ({
-    id: r.id,
-    source: r.source,
-    rel: r.rel,
-    target: r.target,
-    category: r.category || undefined,
-    timestamp: r.timestamp
-  }));
+  const seenIds = new Set<string>();
+  const results: MemoryNode[] = [];
+  const entitiesToExpand = new Set<string>();
+
+  for (const r of hop1Rows) {
+    seenIds.add(r.id);
+    results.push({
+      id: r.id,
+      source: r.source,
+      rel: r.rel,
+      target: r.target,
+      category: r.category || undefined,
+      timestamp: r.timestamp
+    });
+    if (r.source) entitiesToExpand.add(r.source.toLowerCase().trim());
+    if (r.target) entitiesToExpand.add(r.target.toLowerCase().trim());
+  }
+
+  // Hop 2: Find connected neighbor nodes
+  if (maxHops >= 2 && entitiesToExpand.size > 0) {
+    const hop2Stmt = db.prepare(`
+      SELECT * FROM memories 
+      WHERE LOWER(source) = ? OR LOWER(target) = ?
+      ORDER BY timestamp DESC
+      LIMIT 8
+    `);
+
+    for (const entity of Array.from(entitiesToExpand).slice(0, 10)) {
+      const hop2Rows: any[] = hop2Stmt.all(entity, entity);
+      for (const r of hop2Rows) {
+        if (!seenIds.has(r.id)) {
+          seenIds.add(r.id);
+          results.push({
+            id: r.id,
+            source: r.source,
+            rel: r.rel,
+            target: r.target,
+            category: r.category || undefined,
+            timestamp: r.timestamp
+          });
+        }
+      }
+    }
+  }
+
+  return results;
+}
+
+/**
+ * Formats knowledge graph nodes into structured paths for LLM prompt augmentation.
+ */
+export function formatGraphContext(nodes: MemoryNode[]): string {
+  if (!nodes || nodes.length === 0) return "";
+  const lines = nodes.map(n => `- [${n.source}] --(${n.rel})--> [${n.target}]`);
+  return `\nCONNECTED KNOWLEDGE GRAPH (Multi-Hop Traversal):\n${lines.join("\n")}`;
 }
 
 export function deleteMemory(id: string): boolean {
@@ -308,7 +372,7 @@ export function clearMemories() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REAL VECTOR EMBEDDING & COSINE SIMILARITY MATH
+// UNIFIED VECTOR EMBEDDING & COSINE SIMILARITY MATH
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Calculate cosine similarity between two vector arrays */
@@ -329,41 +393,9 @@ export function cosineSimilarity(vecA: number[], vecB: number[]): number {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-/** Generate term-frequency feature vector as robust offline embedding fallback */
-function generateOfflineVector(text: string): number[] {
-  const words = text.toLowerCase().replace(/[^\w\s]/g, "").split(/\s+/).filter(Boolean);
-  const vector: number[] = new Array(64).fill(0);
-  for (let i = 0; i < words.length; i++) {
-    const word = words[i];
-    let hash = 0;
-    for (let j = 0; j < word.length; j++) {
-      hash = (hash * 31 + word.charCodeAt(j)) % 64;
-    }
-    vector[Math.abs(hash)] += 1;
-  }
-  const norm = Math.sqrt(vector.reduce((sum, val) => sum + val * val, 0));
-  return norm > 0 ? vector.map(v => Number((v / norm).toFixed(4))) : vector;
-}
-
-/** Compute real vector embedding via Gemini API or high-dim offline fallback */
+/** Compute real vector embedding via unified multi-provider pipeline */
 export async function computeEmbedding(text: string): Promise<number[]> {
-  const apiKey = process.env.GEMINI_API_KEY || "";
-  if (apiKey) {
-    try {
-      const ai = new GoogleGenAI({ apiKey });
-      const response: any = await ai.models.embedContent({
-        model: "text-embedding-004",
-        contents: [{ parts: [{ text }] }],
-      });
-      const values = response.embedding?.values || response.embeddings?.[0]?.values;
-      if (Array.isArray(values) && values.length > 0) {
-        return values;
-      }
-    } catch (e: any) {
-      console.warn("[SNOW BRAIN] Gemini embedding failed, using term-freq fallback:", e.message);
-    }
-  }
-  return generateOfflineVector(text);
+  return embedText(text);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -553,7 +585,7 @@ Return ONLY valid JSON matching this schema:
 }`;
 
       const res = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: "gemini-2.5-flash",
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         config: {
           systemInstruction,
@@ -565,7 +597,7 @@ Return ONLY valid JSON matching this schema:
       if (text) {
         const parsed = JSON.parse(text);
         
-        // Auto-save extracted facts to dynamic memory graph
+        // Auto-save extracted facts to dynamic memory graph and unified RAG
         if (Array.isArray(parsed.extractedFacts) && parsed.extractedFacts.length > 0) {
           parsed.extractedFacts.forEach((fact: any) => {
             if (fact.source && fact.rel && fact.target) {
@@ -611,10 +643,25 @@ Return ONLY valid JSON matching this schema:
   const isWeb = !isGreeting && !isIdentity && (/\b(search|find|explain|define|tell me about|history|info|what happened|latest news)\b/i.test(prompt));
   const isTrainRequest = /\b(train|learn|study|smart|harder|update brain|brain level)\b/i.test(prompt);
 
-  // Auto-memory detection in conversation
-  const factMatch = prompt.match(/(?:my name is|i like|i love|i prefer|i use|remember that)\s+([a-zA-Z0-9\s]+)/i);
-  if (factMatch) {
-    addMemory("User", "Prefers", factMatch[1].trim());
+  // Multi-type fact extraction in offline/semantic fallback
+  const nameMatch = prompt.match(/(?:my name is|call me)\s+([a-zA-Z\s]+)/i);
+  if (nameMatch) {
+    addMemory("User", "IsNamed", nameMatch[1].trim(), "User");
+  }
+
+  const prefMatch = prompt.match(/(?:i (?:prefer|like|love))\s+([a-zA-Z0-9\s]+)/i);
+  if (prefMatch) {
+    addMemory("User", "Prefers", prefMatch[1].trim(), "Preference");
+  }
+
+  const toolMatch = prompt.match(/(?:i (?:use|work with|build with))\s+([a-zA-Z0-9\s]+)/i);
+  if (toolMatch) {
+    addMemory("User", "Uses", toolMatch[1].trim(), "Preference");
+  }
+
+  const rememberMatch = prompt.match(/(?:remember that|note that)\s+([a-zA-Z0-9\s]+)/i);
+  if (rememberMatch) {
+    addMemory("User", "Recalls", rememberMatch[1].trim(), "Preference");
   }
 
   return {
