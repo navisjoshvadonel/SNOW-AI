@@ -272,6 +272,26 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
   let blockIndex = 0;
   let finalStopReason: StopReason = "end_turn";
 
+  // Handle small Ollama models that output JSON function calls into text content
+  if ((!msg.tool_calls || msg.tool_calls.length === 0) && typeof msg.content === "string") {
+    const trimmed = msg.content.trim();
+    if (trimmed.startsWith('{"type":"function"') || trimmed.startsWith('{"function":')) {
+      try {
+        const parsedFc = JSON.parse(trimmed);
+        const fn = parsedFc.function || parsedFc;
+        if (fn && fn.name) {
+          msg.tool_calls = [{
+            function: {
+              name: fn.name,
+              arguments: fn.parameters || fn.arguments || {}
+            }
+          }];
+          msg.content = "";
+        }
+      } catch {}
+    }
+  }
+
   if (msg.content) {
     yield { type: "content_block_start", index: blockIndex, block: { type: "text", text: "" } };
     yield { type: "content_block_delta", index: blockIndex, delta: msg.content };

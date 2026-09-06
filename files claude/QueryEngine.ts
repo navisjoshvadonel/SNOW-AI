@@ -52,13 +52,19 @@ import { callModel } from "./modelClient.js";
 import { costFromUsage, COST_PER_1K } from "./modelClient.js";
 
 async function dispatchTool(tool: ToolDefinition<unknown>, input: unknown, ctx: ToolUseContext): Promise<ToolResult> {
-  let result: ToolResult | undefined;
-  for await (const event of tool.execute(input, ctx)) {
-    if ("content" in event) {
-      result = event as ToolResult;
+  const gen = tool.execute(input, ctx);
+  let res = await gen.next();
+  let lastResult: ToolResult | undefined;
+  while (!res.done) {
+    if (res.value && "content" in (res.value as any)) {
+      lastResult = res.value as ToolResult;
     }
+    res = await gen.next();
   }
-  return result || { content: "No output", isError: false };
+  if (res.value && "content" in (res.value as any)) {
+    lastResult = res.value as ToolResult;
+  }
+  return lastResult || { content: "No output", isError: false };
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────

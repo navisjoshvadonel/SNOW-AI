@@ -39,6 +39,11 @@ export {
   AppLauncherTool,
   MediaControlTool,
   PythonSandboxTool,
+  ClipboardTool,
+  NotificationTool,
+  ProcessManagerTool,
+  ServiceManagerTool,
+  GitManagerTool,
   createDefaultToolRegistry,
 } from "./builtins.js";
 

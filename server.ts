@@ -539,8 +539,7 @@ RULES:
     : userPrompt;
 
   const apiKey = process.env.GEMINI_API_KEY || "";
-  // Confirmed working Gemini model names (fastest first)
-  let GEMINI_MODELS = ["gemini-2.5-flash", "gemini-1.5-flash", "gemini-2.5-pro", "gemini-1.5-pro"];
+  let GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
@@ -769,8 +768,54 @@ RULES:
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AUTONOMOUS REACT MULTI-STEP AGENTIC REASONING ENGINE
+// AUTONOMOUS MULTI-AGENT SPECIALIST ROUTER & REACT REASONING ENGINE
 // ─────────────────────────────────────────────────────────────────────────────
+
+type AgentSpecialist = "sysadmin" | "coder" | "researcher" | "general";
+
+function routeToSpecialist(prompt: string): { specialist: AgentSpecialist; directive: string; priorityTools: string } {
+  const p = prompt.toLowerCase();
+
+  // 1. SysAdmin Specialist
+  if (
+    /\b(cpu|ram|memory|disk|hardware|temperature|temp|process|processes|top|kill|service|systemd|daemon|journalctl|status|clipboard|copy|paste|notification|notify|volume|mute|media|play|pause|app|launch|terminal|reboot|shutdown|uptime)\b/.test(p)
+  ) {
+    return {
+      specialist: "sysadmin",
+      directive: "SPECIALIST ROLE: Linux System Administrator & OS Automation Specialist. You MUST invoke tools immediately when asked to inspect or change system state, clipboard, processes, or notifications. Use Clipboard (action: 'write', text: '...') to copy, Clipboard (action: 'read') to read clipboard, Notification (title, message) to notify, ProcessManager to inspect/kill processes, and ServiceManager to check/restart services. Never simulate or reply without executing the appropriate tool.",
+      priorityTools: "SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, MediaControl, AppLauncher, Bash"
+    };
+  }
+
+  // 2. Coder Specialist
+  if (
+    /\b(python|code|script|sandbox|function|class|git|branch|commit|diff|repository|repo|file|read file|write file|edit file|debug|traceback|syntax|compile|build|refactor)\b/.test(p)
+  ) {
+    return {
+      specialist: "coder",
+      directive: "SPECIALIST ROLE: Autonomous Software Engineer & Code Architect. You excel at executing Python code in the sandbox (PythonSandbox), diagnosing tracebacks with self-healing reflexion, running git operations (GitManager), and inspecting or editing codebase files (FileRead, FileWrite, FileEdit, Bash). Proactively test and verify code.",
+      priorityTools: "PythonSandbox, GitManager, FileRead, FileWrite, FileEdit, Bash, Glob, Grep"
+    };
+  }
+
+  // 3. Researcher Specialist
+  if (
+    /\b(search|find out|google|web|weather|forecast|who is|what is|latest news|remember|recall|memory|knowledge|learn|history)\b/.test(p)
+  ) {
+    return {
+      specialist: "researcher",
+      directive: "SPECIALIST ROLE: Deep Research & Knowledge Specialist. You excel at real-time web search (WebSearch), page analysis (WebFetch), weather forecasts (Weather), knowledge graph retrieval (MemoryStore), and hybrid dense-sparse RAG synthesis. Provide accurate, synthesized intelligence.",
+      priorityTools: "WebSearch, WebFetch, Weather, MemoryStore, Bash"
+    };
+  }
+
+  // 4. General Assistant
+  return {
+    specialist: "general",
+    directive: "SPECIALIST ROLE: Universal Personal AI Assistant. You have full access to all system tools and seamlessly orchestrate multi-step tasks across the operating system, code, and knowledge base.",
+    priorityTools: "All available tools"
+  };
+}
 
 async function runReActAgenticLoop(
   userPrompt: string,
@@ -809,14 +854,19 @@ async function runReActAgenticLoop(
     memoryContext += ragContext;
   }
 
+  const { specialist, directive, priorityTools } = routeToSpecialist(userPrompt);
+
   const systemPrompt = `You are Snow (Brain Level ${brainState.level}), a warm, charming, hyper-intelligent personal AI assistant.
 PERSONALITY: Friendly, enthusiastic, caring, and playfully clever. Never robotic or corporate. Use natural contractions and casual phrasing.
+
+${directive}
+PRIORITY TOOLSET: ${priorityTools}
 
 ${memoryContext}
 
 RULES:
 - NEVER output any raw brackets, tags, or JSON in speech. Speak only in natural, clean sentences.
-- You have full access to tools (WebSearch, Weather, SystemTelemetry, Bash, FileRead, MemoryStore, PythonSandbox, AppLauncher, MediaControl, etc.). Invoke them autonomously whenever needed to execute multi-step reasoning.
+- You have full access to native Linux tools (SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, PythonSandbox, GitManager, WebSearch, Weather, Bash, FileRead, FileWrite, FileEdit, MemoryStore, AppLauncher, MediaControl). Invoke them autonomously whenever needed to execute multi-step reasoning.
 - SELF-HEALING REFLEXION: When executing code via PythonSandbox or shell commands, if an execution returns an error or traceback, inspect the error details, fix the code/command, and re-execute immediately until it succeeds.
 - Keep responses concise — 2 to 4 sentences is ideal unless detailed step-by-step guidance is requested.`;
 
@@ -837,6 +887,7 @@ RULES:
   const permissionMode = (process.env.SNOW_PERMISSION_MODE as any) || "default";
 
   const agent = await createAgent({
+    cwd: process.cwd(),
     systemPrompt,
     initialMessages,
     model: activeModel,
@@ -849,7 +900,7 @@ RULES:
   let fullText = "";
 
   try {
-    console.log("[SNOW AGENTIC ENGINE] Launching ReAct Multi-Step Reasoning Loop...");
+    console.log(`[SNOW AGENTIC ENGINE] Launching ReAct Multi-Step Loop via Specialist: ${specialist.toUpperCase()}...`);
     for await (const event of agent.submitMessage(userPrompt, abortController.signal)) {
       if (event.type === "tool_use_start") {
         console.log(`[SNOW AGENTIC TOOL] Invoking tool: ${event.name}`);
@@ -869,7 +920,7 @@ RULES:
     return {
       text: fullText.trim(),
       toolsUsed: toolsExecuted,
-      model: `Snow ReAct Agent (${activeModel})`
+      model: `Snow ${specialist.toUpperCase()} Agent (${activeModel})`
     };
   }
 
@@ -1101,7 +1152,8 @@ async function startServer() {
 
     const isGreeting = /^(hello|hi|hey|greetings|good morning|good afternoon|good evening|howdy|sup|yo|hi there|hello snow|hi snow)\b/i.test(prompt.trim());
     const isIdentity = /\b(who are you|what is your name|who created you|who made you|what can you do|your name|are you ai|are you snow)\b/i.test(prompt);
-    const isSimpleConversation = isGreeting || isIdentity || (!needsSearch && !intent.isWeather && !intent.isSystem && !intent.isStock && !intent.isSports && !intent.isNews);
+    const hasAgenticIntent = /\b(run|execute|calculate|solve|python|code|script|test|debug|check|git|status|diff|log|branch|clipboard|copy|paste|notification|notify|process|processes|service|daemon|kill|open|launch|terminal|file|read|write|search|weather|amixer|volume)\b/i.test(prompt);
+    const isSimpleConversation = (isGreeting || isIdentity || (!needsSearch && !intent.isWeather && !intent.isSystem && !intent.isStock && !intent.isSports && !intent.isNews)) && !hasAgenticIntent;
 
     let aiRaw: string;
     let reactTools: string[] = [];

@@ -21,7 +21,7 @@
  *    when pure-JS alternatives are fast enough for small repos.
  */
 
-import { exec } from "child_process";
+import { exec, execFile, spawn } from "child_process";
 import { promisify } from "util";
 import {
   readFile, writeFile, appendFile, stat, readdir, mkdir
@@ -32,6 +32,7 @@ import { glob } from "glob"; // npm: glob
 import type { ToolDefinition, ToolUseContext } from "./types.js";
 
 const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 // ─── BashTool ─────────────────────────────────────────────────────────────────
 
@@ -925,6 +926,300 @@ export const PythonSandboxTool: ToolDefinition<PythonSandboxInput> = {
   }
 };
 
+// ─── ClipboardTool ──────────────────────────────────────────────────────────
+
+type ClipboardInput = {
+  action: "read" | "write";
+  text?: string;
+};
+
+export const ClipboardTool: ToolDefinition<ClipboardInput> = {
+  name: "Clipboard",
+  description:
+    "Read the current system clipboard contents or copy text directly into the system clipboard on Linux (supports Wayland and X11).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["read", "write"],
+        description: "Whether to read from or write to the clipboard"
+      },
+      text: {
+        type: "string",
+        description: "The text to copy into clipboard when action is 'write'"
+      }
+    },
+    required: ["action"]
+  },
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: `Clipboard ${input.action}...` };
+    try {
+      if (input.action === "read") {
+        let content = "";
+        try {
+          const { stdout } = await execAsync("wl-paste --no-newline 2>/dev/null || xclip -selection clipboard -o 2>/dev/null || xsel --clipboard --output 2>/dev/null");
+          content = stdout;
+        } catch {
+          content = "";
+        }
+        return {
+          content: content.trim() ? `Clipboard Content:\n${content}` : "(Clipboard is empty)",
+          isError: false
+        };
+      } else {
+        if (!input.text) {
+          return { content: "Error: 'text' parameter is required when writing to clipboard.", isError: true };
+        }
+        await new Promise<void>((resolvePromise, rejectPromise) => {
+          const proc = spawn("sh", ["-c", "wl-copy 2>/dev/null || xclip -selection clipboard 2>/dev/null || xsel --clipboard --input 2>/dev/null"]);
+          proc.stdin.write(input.text);
+          proc.stdin.end();
+          proc.on("close", (code) => {
+            if (code === 0) resolvePromise();
+            else rejectPromise(new Error(`Clipboard process exited with code ${code}`));
+          });
+          proc.on("error", rejectPromise);
+        });
+        return {
+          content: `Copied ${input.text.length} characters to system clipboard successfully.`,
+          isError: false
+        };
+      }
+    } catch (err: any) {
+      return {
+        content: `Clipboard action '${input.action}' failed: ${err.message}`,
+        isError: true
+      };
+    }
+  }
+};
+
+// ─── NotificationTool ───────────────────────────────────────────────────────
+
+type NotificationInput = {
+  title: string;
+  message: string;
+  urgency?: "low" | "normal" | "critical";
+};
+
+export const NotificationTool: ToolDefinition<NotificationInput> = {
+  name: "Notification",
+  description:
+    "Send a native Linux desktop notification via notify-send with the official SNOW icon.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      title: { type: "string", description: "Notification title" },
+      message: { type: "string", description: "Notification body text" },
+      urgency: { type: "string", enum: ["low", "normal", "critical"], description: "Urgency level (default: normal)" }
+    },
+    required: ["title", "message"]
+  },
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: `Notification: ${input.title}` };
+    const iconPath = "/home/snowjd/Documents/Snow Jarvis/public/snow-icon.png";
+    const urgency = input.urgency || "normal";
+
+    try {
+      await execFileAsync("notify-send", [
+        input.title,
+        input.message,
+        `--urgency=${urgency}`,
+        `--icon=${iconPath}`,
+        "--app-name=SNOW"
+      ]);
+      return {
+        content: `Desktop notification dispatched: "${input.title} — ${input.message}"`,
+        isError: false
+      };
+    } catch (err: any) {
+      return {
+        content: `Desktop notification failed: ${err.message}`,
+        isError: true
+      };
+    }
+  }
+};
+
+// ─── ProcessManagerTool ─────────────────────────────────────────────────────
+
+type ProcessManagerInput = {
+  action: "top_cpu" | "top_ram" | "find" | "kill";
+  query?: string;
+  signal?: "SIGTERM" | "SIGKILL";
+};
+
+export const ProcessManagerTool: ToolDefinition<ProcessManagerInput> = {
+  name: "ProcessManager",
+  description:
+    "Inspect top resource-consuming processes (CPU/RAM), search active processes, or terminate frozen tasks safely on Linux.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["top_cpu", "top_ram", "find", "kill"],
+        description: "Process action to perform"
+      },
+      query: {
+        type: "string",
+        description: "Process name pattern or PID (required for 'find' and 'kill')"
+      },
+      signal: {
+        type: "string",
+        enum: ["SIGTERM", "SIGKILL"],
+        description: "Termination signal (default: SIGTERM)"
+      }
+    },
+    required: ["action"]
+  },
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: `ProcessManager: ${input.action}` };
+    try {
+      if (input.action === "top_cpu") {
+        const { stdout } = await execAsync("ps -eo pid,ppid,%cpu,%mem,comm --sort=-%cpu | head -n 11");
+        return { content: `Top CPU Consuming Processes:\n${stdout}`, isError: false };
+      } else if (input.action === "top_ram") {
+        const { stdout } = await execAsync("ps -eo pid,ppid,%cpu,%mem,comm --sort=-%mem | head -n 11");
+        return { content: `Top RAM Consuming Processes:\n${stdout}`, isError: false };
+      } else if (input.action === "find") {
+        if (!input.query?.trim()) {
+          return { content: "Error: 'query' process name is required for find.", isError: true };
+        }
+        const safeQuery = input.query.replace(/[^a-zA-Z0-9_.-]/g, "");
+        const { stdout } = await execAsync(`ps -eo pid,%cpu,%mem,cmd | grep -i "${safeQuery}" | grep -v grep | head -n 15 || true`);
+        return { content: stdout.trim() ? `Matching Processes:\n${stdout}` : `No processes found matching "${safeQuery}".`, isError: false };
+      } else if (input.action === "kill") {
+        if (!input.query?.trim()) {
+          return { content: "Error: 'query' (PID or process name) is required for kill.", isError: true };
+        }
+        const sig = input.signal === "SIGKILL" ? "-9" : "-15";
+        if (/^\d+$/.test(input.query.trim())) {
+          const pid = parseInt(input.query.trim(), 10);
+          if (pid <= 10) return { content: "Safety restriction: Cannot kill system PID <= 10.", isError: true };
+          await execAsync(`kill ${sig} ${pid}`);
+          return { content: `Process PID ${pid} terminated with signal ${input.signal || 'SIGTERM'}.`, isError: false };
+        } else {
+          const safeName = input.query.replace(/[^a-zA-Z0-9_.-]/g, "");
+          if (["systemd", "init", "node", "sshd", "bash"].includes(safeName)) {
+            return { content: `Safety restriction: Refusing to kill critical system process '${safeName}'.`, isError: true };
+          }
+          await execAsync(`pkill ${sig} -f "${safeName}"`);
+          return { content: `Processes matching '${safeName}' terminated with signal ${input.signal || 'SIGTERM'}.`, isError: false };
+        }
+      }
+      return { content: "Unknown process action.", isError: true };
+    } catch (err: any) {
+      return {
+        content: `ProcessManager action '${input.action}' failed: ${err.message}`,
+        isError: true
+      };
+    }
+  }
+};
+
+// ─── ServiceManagerTool ─────────────────────────────────────────────────────
+
+type ServiceManagerInput = {
+  action: "status" | "restart" | "list_services";
+  serviceName?: string;
+};
+
+export const ServiceManagerTool: ToolDefinition<ServiceManagerInput> = {
+  name: "ServiceManager",
+  description:
+    "Manage and inspect Linux systemd user services (e.g. snow.service, status, restart, list running user services).",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["status", "restart", "list_services"],
+        description: "Service action to perform"
+      },
+      serviceName: {
+        type: "string",
+        description: "Service name (e.g. 'snow.service', default: 'snow.service')"
+      }
+    },
+    required: ["action"]
+  },
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: `ServiceManager: ${input.action}` };
+    try {
+      if (input.action === "list_services") {
+        const { stdout } = await execAsync("systemctl --user list-units --type=service --state=running --no-pager | head -n 25");
+        return { content: `Active User Services:\n${stdout}`, isError: false };
+      }
+      const service = (input.serviceName || "snow.service").trim();
+      const safeService = service.endsWith(".service") ? service : `${service}.service`;
+      if (input.action === "status") {
+        const { stdout, stderr } = await execAsync(`systemctl --user status ${safeService} --no-pager || true`);
+        return { content: stdout || stderr || "No status returned.", isError: false };
+      } else if (input.action === "restart") {
+        await execAsync(`systemctl --user restart ${safeService}`);
+        return { content: `Service '${safeService}' restarted successfully.`, isError: false };
+      }
+      return { content: "Unknown service action.", isError: true };
+    } catch (err: any) {
+      return { content: `Service action failed: ${err.message}`, isError: true };
+    }
+  }
+};
+
+// ─── GitManagerTool ─────────────────────────────────────────────────────────
+
+type GitManagerInput = {
+  action: "status" | "diff" | "log" | "branch";
+  args?: string;
+};
+
+export const GitManagerTool: ToolDefinition<GitManagerInput> = {
+  name: "GitManager",
+  description:
+    "Inspect git repository status, diff summaries, branch names, and commit history for pair programming.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["status", "diff", "log", "branch"],
+        description: "Git action to perform"
+      },
+      args: {
+        type: "string",
+        description: "Optional safe arguments (e.g. '-n 5' or file path)"
+      }
+    },
+    required: ["action"]
+  },
+  async *execute(input, ctx) {
+    yield { type: "progress", data: null, label: `GitManager: ${input.action}` };
+    const cwd = ctx.cwd || process.cwd();
+    try {
+      let cmd = "";
+      if (input.action === "status") {
+        cmd = "git status --short --branch";
+      } else if (input.action === "diff") {
+        const safeArgs = input.args ? input.args.replace(/[^a-zA-Z0-9_./-]/g, "") : "--stat";
+        cmd = `git diff ${safeArgs}`;
+      } else if (input.action === "log") {
+        cmd = "git log -n 5 --oneline --decorate";
+      } else if (input.action === "branch") {
+        cmd = "git branch -a";
+      }
+      const { stdout } = await execAsync(cmd, { cwd });
+      return {
+        content: stdout.trim() ? `Git ${input.action} output:\n${stdout}` : `Git ${input.action}: (Clean / No output)`,
+        isError: false
+      };
+    } catch (err: any) {
+      return { content: `GitManager failed: ${err.message}`, isError: true };
+    }
+  }
+};
+
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 const SENSITIVE_FILE_PATTERNS = [
@@ -967,7 +1262,8 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
     BashTool, FileReadTool, FileWriteTool, FileEditTool,
     GlobTool, GrepTool, WebSearchTool, WeatherTool,
     SystemTelemetryTool, MemoryStoreTool, AppLauncherTool, MediaControlTool,
-    PythonSandboxTool
+    PythonSandboxTool, ClipboardTool, NotificationTool, ProcessManagerTool,
+    ServiceManagerTool, GitManagerTool
   ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }
