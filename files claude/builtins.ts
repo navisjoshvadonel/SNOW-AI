@@ -875,6 +875,56 @@ export const MediaControlTool: ToolDefinition<MediaControlInput> = {
   }
 };
 
+// ─── PythonSandboxTool ───────────────────────────────────────────────────────
+
+type PythonSandboxInput = {
+  code: string;
+  timeoutMs?: number;
+};
+
+export const PythonSandboxTool: ToolDefinition<PythonSandboxInput> = {
+  name: "PythonSandbox",
+  description:
+    "Execute Python 3 scripts in an isolated, security-hardened Linux sandbox. Automatically captures stdout, stderr, and tracebacks for code diagnostics and self-healing.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      code: { type: "string", description: "The Python 3 code to execute in the sandbox" },
+      timeoutMs: { type: "number", description: "Optional execution timeout in milliseconds (default: 8000, max: 30000)" }
+    },
+    required: ["code"]
+  },
+  validate(input) {
+    if (!input.code?.trim()) {
+      return { valid: false, message: "Python code cannot be empty", code: 400 };
+    }
+    return { valid: true };
+  },
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: "Executing Python in isolated sandbox..." };
+    try {
+      const { runPythonCode } = await import("../python_sandbox.js");
+      const result = await runPythonCode(input.code, Math.min(30000, input.timeoutMs || 8000));
+      if (result.success) {
+        return {
+          content: `Python execution succeeded (${result.executionTimeMs}ms):\n\nSTDOUT:\n${result.stdout || "(No output printed)"}`,
+          isError: false
+        };
+      } else {
+        return {
+          content: `Python execution failed (${result.executionTimeMs}ms):\n\nSTDERR / TRACEBACK:\n${result.stderr}\n\nSTDOUT:\n${result.stdout || "(None)"}`,
+          isError: true
+        };
+      }
+    } catch (err: any) {
+      return {
+        content: `Sandbox invocation error: ${err.message}`,
+        isError: true
+      };
+    }
+  }
+};
+
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
 const SENSITIVE_FILE_PATTERNS = [
@@ -916,9 +966,11 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
   for (const tool of [
     BashTool, FileReadTool, FileWriteTool, FileEditTool,
     GlobTool, GrepTool, WebSearchTool, WeatherTool,
-    SystemTelemetryTool, MemoryStoreTool, AppLauncherTool, MediaControlTool
+    SystemTelemetryTool, MemoryStoreTool, AppLauncherTool, MediaControlTool,
+    PythonSandboxTool
   ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }
   return registry;
 }
+

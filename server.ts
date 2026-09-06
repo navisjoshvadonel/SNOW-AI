@@ -816,7 +816,8 @@ ${memoryContext}
 
 RULES:
 - NEVER output any raw brackets, tags, or JSON in speech. Speak only in natural, clean sentences.
-- You have full access to tools (WebSearch, Weather, SystemTelemetry, Bash, FileRead, MemoryStore, etc.). Invoke them autonomously whenever needed to execute multi-step reasoning.
+- You have full access to tools (WebSearch, Weather, SystemTelemetry, Bash, FileRead, MemoryStore, PythonSandbox, AppLauncher, MediaControl, etc.). Invoke them autonomously whenever needed to execute multi-step reasoning.
+- SELF-HEALING REFLEXION: When executing code via PythonSandbox or shell commands, if an execution returns an error or traceback, inspect the error details, fix the code/command, and re-execute immediately until it succeeds.
 - Keep responses concise — 2 to 4 sentences is ideal unless detailed step-by-step guidance is requested.`;
 
   const initialMessages: Message[] = [];
@@ -1231,12 +1232,12 @@ async function startServer() {
     res.json(loadVectorDocuments());
   });
 
-  app.post("/api/snow/vectors", (req, res) => {
+  app.post("/api/snow/vectors", async (req, res) => {
     const { source, text, category } = req.body;
     if (!source || !text) {
       return res.status(400).json({ error: "source and text are required" });
     }
-    const doc = addVectorDocument(source, text, category || "code");
+    const doc = await addVectorDocument(source, text, category || "code");
     res.json({ success: true, document: doc });
   });
 

@@ -58,8 +58,9 @@ async function* callModelOnce(params: ModelCallParams): AsyncGenerator<QueryEven
   }
 
   if (!isOffline) {
-    const modelsToTry = ["gemini-2.0-flash", "gemini-2.0-flash-lite"];
-    for (const m of modelsToTry) {
+    const requested = params.model && params.model.startsWith("gemini-") ? params.model : "gemini-2.5-flash";
+    const modelsToTry = [requested, "gemini-2.5-flash", "gemini-1.5-flash"];
+    for (const m of Array.from(new Set(modelsToTry))) {
       try {
         yield* callGeminiOnce({ ...params, model: m }, apiKey!);
         return;

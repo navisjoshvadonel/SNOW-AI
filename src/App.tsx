@@ -8,7 +8,8 @@ import {
   Power, Download, Settings, Layers, Maximize2,
   Keyboard, BarChart3, Play, Pause, X,
   CloudLightning, CloudFog, SunMedium, Moon, Wind,
-  FolderOpen, FileText, FileCode, Paperclip, Upload, FilePlus
+  FolderOpen, FileText, FileCode, Paperclip, Upload, FilePlus,
+  Volume2, VolumeX
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import NetworkGraph from "./components/NetworkGraph";
@@ -197,27 +198,32 @@ const Snowflake3D = () => (
 );
 
 // Cyber Arc Reactor Core Visualizer with Rotating Snowflake Engine
-const SnowArcCore = ({ state }: { state: "standby" | "thinking" | "listening" }) => {
+const SnowArcCore = ({ state }: { state: "standby" | "thinking" | "listening" | "speaking" }) => {
   return (
     <div className="relative flex items-center justify-center w-64 h-64 select-none">
       {/* Outer Glow Ring */}
       <div className={`absolute inset-0 rounded-full blur-2xl transition-all duration-700 ${
         state === "thinking" ? "bg-cyan-500/40 scale-110" :
-        state === "listening" ? "bg-rose-500/40 scale-110" : "bg-cyan-500/20 opacity-70"
+        state === "listening" ? "bg-rose-500/40 scale-110" :
+        state === "speaking" ? "bg-emerald-500/45 scale-110 shadow-[0_0_45px_rgba(16,185,129,0.5)]" :
+        "bg-cyan-500/20 opacity-70"
       }`} />
 
       {/* Rotating Outer Tech Dash Ring */}
       <motion.div
         animate={{ rotate: 360 }}
-        transition={{ duration: state === "thinking" ? 4 : 20, repeat: Infinity, ease: "linear" }}
+        transition={{ duration: state === "thinking" ? 4 : state === "speaking" ? 5 : 20, repeat: Infinity, ease: "linear" }}
         className="absolute inset-0 rounded-full border border-dashed border-cyan-500/30 shadow-[0_0_15px_rgba(6,182,212,0.15)]"
       />
 
       {/* Counter-Rotating Mid Tech Ring */}
       <motion.div
         animate={{ rotate: -360 }}
-        transition={{ duration: state === "thinking" ? 6 : 25, repeat: Infinity, ease: "linear" }}
-        className="absolute inset-3 rounded-full border border-cyan-400/20 border-t-cyan-400/80 border-b-cyan-400/80"
+        transition={{ duration: state === "thinking" ? 6 : state === "speaking" ? 7 : 25, repeat: Infinity, ease: "linear" }}
+        className={`absolute inset-3 rounded-full border ${
+          state === "speaking" ? "border-emerald-400/30 border-t-emerald-400/90 border-b-emerald-400/90" :
+          "border-cyan-400/20 border-t-cyan-400/80 border-b-cyan-400/80"
+        }`}
       />
 
       {/* Radar Sweep Circle */}
@@ -230,6 +236,14 @@ const SnowArcCore = ({ state }: { state: "standby" | "thinking" | "listening" })
         <>
           <div className="absolute inset-0 border border-rose-500/50 rounded-full animate-ping [animation-duration:1.8s]" />
           <div className="absolute inset-4 border border-rose-500/30 rounded-full animate-ping [animation-duration:1.8s] [animation-delay:0.4s]" />
+        </>
+      )}
+
+      {/* Speaking Pulse Rings */}
+      {state === "speaking" && (
+        <>
+          <div className="absolute inset-0 border border-emerald-400/60 rounded-full animate-ping [animation-duration:1.3s]" />
+          <div className="absolute inset-4 border border-cyan-400/40 rounded-full animate-ping [animation-duration:1.3s] [animation-delay:0.3s]" />
         </>
       )}
 
@@ -249,13 +263,13 @@ const SnowArcCore = ({ state }: { state: "standby" | "thinking" | "listening" })
           <motion.div
             animate={{
               rotateY: 360,
-              rotateZ: state === "thinking" ? [0, 180, 360] : [0, 15, -15, 0],
-              scale: state === "thinking" ? [0.95, 1.08, 0.95] : state === "listening" ? [1, 1.1, 1] : 1
+              rotateZ: state === "thinking" ? [0, 180, 360] : state === "speaking" ? [-10, 10, -10] : [0, 15, -15, 0],
+              scale: state === "thinking" ? [0.95, 1.08, 0.95] : state === "listening" ? [1, 1.1, 1] : state === "speaking" ? [1.02, 1.14, 1.02] : 1
             }}
             transition={{
-              rotateY: { duration: state === "thinking" ? 4 : 8, repeat: Infinity, ease: "linear" },
-              rotateZ: { duration: state === "thinking" ? 3 : 10, repeat: Infinity, ease: "easeInOut" },
-              scale: { duration: 2, repeat: Infinity, ease: "easeInOut" }
+              rotateY: { duration: state === "thinking" ? 4 : state === "speaking" ? 6 : 8, repeat: Infinity, ease: "linear" },
+              rotateZ: { duration: state === "thinking" ? 3 : state === "speaking" ? 1.5 : 10, repeat: Infinity, ease: "easeInOut" },
+              scale: { duration: state === "speaking" ? 1.2 : 2, repeat: Infinity, ease: "easeInOut" }
             }}
             className="relative flex items-center justify-center w-full h-full"
           >
@@ -264,6 +278,7 @@ const SnowArcCore = ({ state }: { state: "standby" | "thinking" | "listening" })
               className={`w-20 h-20 transition-all duration-500 ${
                 state === "listening" ? "text-rose-400 drop-shadow-[0_0_25px_rgba(244,63,94,0.9)]" :
                 state === "thinking" ? "text-cyan-200 drop-shadow-[0_0_30px_rgba(34,211,238,0.95)] scale-110" :
+                state === "speaking" ? "text-emerald-300 drop-shadow-[0_0_30px_rgba(16,185,129,0.95)] scale-110" :
                 "text-cyan-300 drop-shadow-[0_0_20px_rgba(34,211,238,0.7)]"
               }`}
             />
@@ -277,6 +292,7 @@ const SnowArcCore = ({ state }: { state: "standby" | "thinking" | "listening" })
               <Snowflake
                 className={`w-24 h-24 opacity-60 transition-colors duration-500 ${
                   state === "listening" ? "text-rose-300 drop-shadow-[0_0_15px_rgba(251,113,133,0.6)]" :
+                  state === "speaking" ? "text-emerald-200 drop-shadow-[0_0_20px_rgba(167,243,208,0.7)]" :
                   "text-blue-300 drop-shadow-[0_0_15px_rgba(147,197,253,0.6)]"
                 }`}
               />
@@ -293,29 +309,32 @@ const SnowArcCore = ({ state }: { state: "standby" | "thinking" | "listening" })
             >
               <Sparkles
                 className={`w-28 h-28 opacity-40 ${
-                  state === "listening" ? "text-rose-400" : "text-cyan-400"
+                  state === "listening" ? "text-rose-400" :
+                  state === "speaking" ? "text-emerald-400" : "text-cyan-400"
                 }`}
               />
             </motion.div>
           </motion.div>
 
           {/* Central Waveform Overlay */}
-          <div className="absolute inset-0 flex items-center justify-center gap-1 z-20 pointer-events-none opacity-80">
+          <div className="absolute inset-0 flex items-center justify-center gap-1 z-20 pointer-events-none opacity-85">
             {[...Array(7)].map((_, i) => (
               <motion.div
                 key={i}
                 animate={{
                   height: state === "thinking" ? [4, 20, 4] :
-                          state === "listening" ? [6, 26, 6] : [4, 12, 4]
+                          state === "listening" ? [6, 26, 6] :
+                          state === "speaking" ? [8, 38, 8] : [4, 12, 4]
                 }}
                 transition={{
-                  duration: 0.6 + (i % 3) * 0.15,
+                  duration: state === "speaking" ? 0.35 + (i % 3) * 0.1 : 0.6 + (i % 3) * 0.15,
                   repeat: Infinity,
                   repeatType: "reverse",
-                  delay: i * 0.05
+                  delay: i * 0.04
                 }}
                 className={`w-1 rounded-full ${
                   state === "listening" ? "bg-rose-200 shadow-[0_0_8px_#fecdd3]" :
+                  state === "speaking" ? "bg-emerald-300 shadow-[0_0_12px_#6ee7b7]" :
                   state === "thinking" ? "bg-white shadow-[0_0_8px_#ffffff]" : "bg-cyan-100/90 shadow-[0_0_6px_#cff4fc]"
                 }`}
               />
@@ -497,6 +516,10 @@ export default function App() {
   const [chatHistory, setChatHistory] = useState<ChatItem[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const silenceTimerRef = useRef<any>(null);
+  const lastSpacePressRef = useRef<number>(0);
   const [showConfetti, setShowConfetti] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -918,48 +941,230 @@ export default function App() {
     }
   };
 
-  // Web Speech API Voice Recognition Toggle
-  const toggleSpeechRecognition = () => {
-    if (isListening) {
-      if (recognitionRef.current) recognitionRef.current.stop();
-      setIsListening(false);
-    } else {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      if (!SpeechRecognition) {
-        triggerToast("Web Speech Recognition is not supported in this browser.");
-        return;
-      }
-
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = "en-US";
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        triggerToast("Listening for speech input...");
-      };
-
-      recognition.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
-          .map((result: any) => result[0].transcript)
-          .join("");
-        setInputText(transcript);
-      };
-
-      recognition.onerror = (event: any) => {
-        console.error("Speech recognition error:", event.error);
-        setIsListening(false);
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognitionRef.current = recognition;
-      recognition.start();
+  // ─── Jarvis Web Audio Futuristic Wake Chime ──────────────────────────────────
+  const playJarvisWakeChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      // High-tech Jarvis 4-tone ascending sweep: C5 (523Hz), E5 (659Hz), G5 (784Hz), C6 (1046Hz)
+      const notes = [523.25, 659.25, 783.99, 1046.50];
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now + idx * 0.055);
+        gain.gain.setValueAtTime(0.001, now + idx * 0.055);
+        gain.gain.exponentialRampToValueAtTime(0.18, now + idx * 0.055 + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.055 + 0.22);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + idx * 0.055);
+        osc.stop(now + idx * 0.055 + 0.23);
+      });
+    } catch (e) {
+      console.warn("Jarvis chime error:", e);
     }
   };
+
+  // ─── Speech Text Cleaner (Strips Markdown/Code/Tags for Crisp Voice) ─────────
+  const cleanForSpeech = (rawText: string): string => {
+    if (!rawText) return "";
+    return rawText
+      // Strip markdown code blocks
+      .replace(/```[\s\S]*?```/g, "Code omitted for speech.")
+      // Strip inline code
+      .replace(/`([^`]+)`/g, "$1")
+      // Strip markdown bold/italics/headers
+      .replace(/[#*_~>]/g, "")
+      // Strip bracketed widgets/tags like [UI_WEATHER: ...] or [WEATHER: ...]
+      .replace(/\[(?:WEATHER|UI_[A-Z_]+)\s*:?[^\]]*\]/gi, "")
+      .replace(/\[[^\]]*\]/g, "")
+      // Strip URLs
+      .replace(/https?:\/\/\S+/g, "")
+      // Strip raw JSON
+      .replace(/\{[^{}]*\}/g, "")
+      // Collapse multiple whitespace
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
+  // ─── Stop Ongoing Jarvis Speech (Barge-In) ───────────────────────────────────
+  const stopJarvisSpeech = () => {
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
+  };
+
+  // ─── Speak Response as Jarvis ────────────────────────────────────────────────
+  const speakJarvis = (textToSpeak: string) => {
+    if (isMuted || !("speechSynthesis" in window)) return;
+    try {
+      window.speechSynthesis.cancel();
+      const cleaned = cleanForSpeech(textToSpeak);
+      if (!cleaned) return;
+
+      // Extract first 2-3 sentences for concise, crisp spoken delivery
+      const sentenceMatches = cleaned.match(/[^.!?]+[.!?]+/g);
+      const spokenSummary = sentenceMatches && sentenceMatches.length > 0 
+        ? sentenceMatches.slice(0, 3).join(" ").trim() 
+        : cleaned.slice(0, 260).trim();
+
+      const utterance = new SpeechSynthesisUtterance(spokenSummary);
+      utterance.rate = 1.05; // Slightly brisk, intelligent cadence
+      utterance.pitch = 0.98; // Grounded, crisp Jarvis tone
+
+      const voices = window.speechSynthesis.getVoices();
+      const preferred = voices.find(v => 
+        (v.name.includes("UK English") || v.name.includes("Daniel") || v.name.includes("Natural") || v.name.includes("Google UK English Male"))
+      ) || voices.find(v => v.lang.startsWith("en-GB")) 
+        || voices.find(v => v.lang.startsWith("en-US")) 
+        || voices.find(v => v.lang.startsWith("en"));
+
+      if (preferred) utterance.voice = preferred;
+
+      utterance.onstart = () => setIsSpeaking(true);
+      utterance.onend = () => setIsSpeaking(false);
+      utterance.onerror = () => setIsSpeaking(false);
+
+      window.speechSynthesis.speak(utterance);
+    } catch (e) {
+      console.warn("Speech synthesis error:", e);
+      setIsSpeaking(false);
+    }
+  };
+
+  // Ref to handleSendMessage to avoid stale closures in voice timers
+  const handleSendMessageRef = useRef<(text?: string) => Promise<void>>(async () => {});
+
+  // ─── Continuous Voice Recognition with Auto-Submission ─────────────────────
+  const startJarvisVoiceListening = () => {
+    // Barge-in: interrupt ongoing speech if any
+    stopJarvisSpeech();
+
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      triggerToast("Web Speech Recognition is not supported in this browser.");
+      return;
+    }
+
+    if (recognitionRef.current) {
+      try { recognitionRef.current.stop(); } catch {}
+    }
+
+    const recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = "en-US";
+
+    let lastTranscript = "";
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      playJarvisWakeChime();
+      triggerToast("⚡ Jarvis Listening (Speak your command)...");
+    };
+
+    recognition.onresult = (event: any) => {
+      let interimTranscript = "";
+      let finalTranscript = "";
+
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        } else {
+          interimTranscript += event.results[i][0].transcript;
+        }
+      }
+
+      const activeSpeech = (finalTranscript || interimTranscript).trim();
+      if (activeSpeech) {
+        lastTranscript = activeSpeech;
+        setInputText(activeSpeech);
+
+        // Reset silence detection timer (1.2 seconds of silence = auto submit)
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = setTimeout(() => {
+          if (lastTranscript.trim()) {
+            try { recognition.stop(); } catch {}
+            setIsListening(false);
+            handleSendMessageRef.current(lastTranscript.trim());
+          }
+        }, 1200);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      if (event.error !== "no-speech") {
+        setIsListening(false);
+      }
+    };
+
+    recognition.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current = recognition;
+    try {
+      recognition.start();
+    } catch (e) {
+      console.warn("Failed to start speech recognition:", e);
+      setIsListening(false);
+    }
+  };
+
+  const toggleSpeechRecognition = () => {
+    if (isListening) {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch {}
+      }
+      setIsListening(false);
+      triggerToast("Voice input paused.");
+    } else {
+      startJarvisVoiceListening();
+    }
+  };
+
+  // ─── Double-Space Auto-Wake Global Listener ─────────────────────────────────
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        const target = e.target as HTMLElement;
+        const isInputField = target && (
+          target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.isContentEditable
+        );
+
+        // If typing inside input field that already has text, preserve regular spaces
+        if (isInputField) {
+          const inputElem = target as HTMLInputElement;
+          const hasContent = inputElem.value && inputElem.value.trim().length > 0;
+          if (hasContent && !e.ctrlKey && !e.altKey) {
+            return; // Normal typing inside input
+          }
+        }
+
+        const now = Date.now();
+        const diff = now - lastSpacePressRef.current;
+        lastSpacePressRef.current = now;
+
+        if (diff > 50 && diff < 380) {
+          // Rapid Double-Space detected!
+          e.preventDefault();
+          lastSpacePressRef.current = 0;
+          startJarvisVoiceListening();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isMuted]);
 
   // Export Conversation Transcript
   const handleExtractConversation = () => {
@@ -1032,6 +1237,9 @@ export default function App() {
   const handleSendMessage = async (textToSend?: string) => {
     const rawText = textToSend || inputText;
     if (!rawText.trim() || isLoading) return;
+
+    // Barge-in: immediately stop any active Jarvis speech
+    stopJarvisSpeech();
 
     let promptForBackend = rawText.trim();
     if (attachedContextFiles.length > 0) {
@@ -1135,6 +1343,11 @@ export default function App() {
 
       fetchMemories();
       fetchBrainStatus();
+
+      // Verbal speech delivery
+      if (!data.error && cleanDisplay) {
+        speakJarvis(cleanDisplay);
+      }
     } catch (err: any) {
       console.error("[Snow Chat Error]", err);
       const isNetworkError = err instanceof TypeError && (
@@ -1155,10 +1368,15 @@ export default function App() {
       
       const errTime = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
       setChatHistory((prev) => [...prev, { id: `err-${Date.now()}`, sender: "snow", text: friendlyMsg, timestamp: errTime }]);
+      speakJarvis(friendlyMsg);
     } finally {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    handleSendMessageRef.current = handleSendMessage;
+  });
 
   // Date and Time formatting for Header
   const [currentDateTime, setCurrentDateTime] = useState({
@@ -1630,7 +1848,7 @@ export default function App() {
 
               {/* Arc Reactor Center Core */}
               <div className="z-10 flex flex-col items-center gap-3">
-                <SnowArcCore state={isLoading ? "thinking" : isListening ? "listening" : "standby"} />
+                <SnowArcCore state={isLoading ? "thinking" : isListening ? "listening" : isSpeaking ? "speaking" : "standby"} />
 
                 {/* S N O W Title */}
                 <div className="flex flex-col items-center gap-1.5">
@@ -1640,6 +1858,27 @@ export default function App() {
                   <span className="text-[11px] font-mono tracking-widest text-cyan-400/70 font-semibold uppercase">
                     Your Friend Here
                   </span>
+
+                  {isSpeaking && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-400/50 text-emerald-300 text-[10px] font-mono tracking-wider shadow-[0_0_15px_rgba(16,185,129,0.3)] mt-1"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                      <span>JARVIS AUDIO ACTIVE</span>
+                    </motion.div>
+                  )}
+                  {isListening && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-rose-950/80 border border-rose-400/50 text-rose-300 text-[10px] font-mono tracking-wider shadow-[0_0_15px_rgba(244,63,94,0.3)] mt-1"
+                    >
+                      <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
+                      <span>LISTENING (SPEAK NOW)</span>
+                    </motion.div>
+                  )}
                 </div>
               </div>
 
@@ -1783,6 +2022,44 @@ export default function App() {
 
               {/* Chat Input Container */}
               <div className="p-3.5 border-t border-cyan-500/20 bg-slate-950/95 relative space-y-2">
+                {/* Jarvis Voice & Telemetry Status Bar */}
+                <div className="flex items-center justify-between px-1 text-[11px] font-mono">
+                  <div className="flex items-center gap-2">
+                    <div className={`w-2 h-2 rounded-full ${
+                      isSpeaking ? "bg-emerald-400 animate-ping" :
+                      isListening ? "bg-rose-400 animate-ping" :
+                      isLoading ? "bg-cyan-400 animate-spin" : "bg-slate-500"
+                    }`} />
+                    <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
+                      {isSpeaking ? "Jarvis Speaking..." :
+                       isListening ? "Listening (Speak Now)..." :
+                       isLoading ? "Processing Directive..." : "Jarvis Standby"}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded bg-slate-800/80 border border-cyan-500/20 text-cyan-300 text-[10px] hidden sm:inline" title="Double tap Space anywhere to wake">
+                      Space ×2 to Wake
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        if (!isMuted) stopJarvisSpeech();
+                        setIsMuted(!isMuted);
+                        triggerToast(!isMuted ? "Jarvis Voice Muted." : "Jarvis Voice Unmuted.");
+                      }}
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] transition cursor-pointer font-mono ${
+                        isMuted 
+                          ? "bg-rose-950/60 border-rose-500/30 text-rose-300 hover:bg-rose-900/60" 
+                          : "bg-cyan-950/60 border-cyan-500/30 text-cyan-300 hover:bg-cyan-900/60"
+                      }`}
+                      title={isMuted ? "Unmute Voice" : "Mute Voice"}
+                    >
+                      {isMuted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3 text-cyan-400" />}
+                      <span>{isMuted ? "Muted" : "Voice On"}</span>
+                    </button>
+                  </div>
+                </div>
+
                 {/* Attached Context Files Bar (Gemini / Claude Style) */}
                 {attachedContextFiles.length > 0 && (
                   <div className="flex flex-wrap gap-2 pb-1">
@@ -1811,12 +2088,26 @@ export default function App() {
                   <input
                     id="chat-input-field"
                     type="text"
-                    placeholder={attachedContextFiles.length > 0 ? "Ask SNOW about attached files..." : "Ask SNOW anything..."}
+                    placeholder={isListening ? "Listening to your voice..." : attachedContextFiles.length > 0 ? "Ask SNOW about attached files..." : "Ask SNOW anything or double-tap Space..."}
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
                     className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-slate-500 focus:ring-0 font-sans"
                   />
+
+                  {/* Microphone Toggle Button */}
+                  <button
+                    type="button"
+                    onClick={toggleSpeechRecognition}
+                    className={`p-2 rounded-xl border transition cursor-pointer ${
+                      isListening
+                        ? "bg-rose-500/20 border-rose-400 text-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.4)] animate-pulse"
+                        : "bg-slate-800/80 border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/10 hover:border-cyan-400"
+                    }`}
+                    title={isListening ? "Stop Voice Listening" : "Start Voice Listening (or press Space ×2)"}
+                  >
+                    {isListening ? <MicOff className="w-4 h-4 text-rose-400" /> : <Mic className="w-4 h-4" />}
+                  </button>
 
                   <button
                     onClick={() => handleSendMessage()}

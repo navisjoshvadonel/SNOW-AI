@@ -38,6 +38,7 @@ export {
   MemoryStoreTool,
   AppLauncherTool,
   MediaControlTool,
+  PythonSandboxTool,
   createDefaultToolRegistry,
 } from "./builtins.js";
 
