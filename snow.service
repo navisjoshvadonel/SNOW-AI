@@ -1,0 +1,18 @@
+[Unit]
+Description=SNOW AI Personal Operating System Assistant
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/snowjd/Documents/Snow Jarvis
+ExecStart=/usr/bin/node "/home/snowjd/Documents/Snow Jarvis/node_modules/.bin/tsx" "/home/snowjd/Documents/Snow Jarvis/server.ts"
+Restart=on-failure
+RestartSec=3s
+Environment=PORT=3000
+Environment=NODE_ENV=production
+Environment=PATH=/snap/bin:/usr/local/bin:/usr/bin:/bin:/home/snowjd/.local/bin:/home/snowjd/bin
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

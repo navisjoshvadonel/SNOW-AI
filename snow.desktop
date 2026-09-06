@@ -1,0 +1,25 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=SNOW
+GenericName=AI Operating System Assistant
+Comment=SNOW Personal AI Assistant (Press Win+S anywhere to summon)
+Exec="/home/snowjd/Documents/Snow Jarvis/launch-snow.sh" --summon
+Icon=/home/snowjd/Documents/Snow Jarvis/public/snow-icon.png
+Terminal=false
+Categories=Utility;Development;AudioVideo;
+StartupWMClass=SNOW
+StartupNotify=true
+Actions=Summon;RestartDaemon;StatusDaemon;
+
+[Desktop Action Summon]
+Name=Summon SNOW HUD (Win+S)
+Exec="/home/snowjd/Documents/Snow Jarvis/launch-snow.sh" --summon
+
+[Desktop Action RestartDaemon]
+Name=Restart Background Daemon
+Exec=systemctl --user restart snow.service
+
+[Desktop Action StatusDaemon]
+Name=Check Daemon Status
+Exec=gnome-terminal -- bash -c "systemctl --user status snow.service; read -p 'Press enter to exit'"
