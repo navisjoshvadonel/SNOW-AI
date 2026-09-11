@@ -1254,6 +1254,85 @@ function countOccurrences(haystack: string, needle: string): number {
   return count;
 }
 
+// ─── ComputerUseTool ──────────────────────────────────────────────────────────
+
+type ComputerUseInput = {
+  action: "screenshot" | "click" | "double_click" | "right_click" | "move" | "type" | "hotkey" | "launch";
+  x?: number;
+  y?: number;
+  text?: string;
+  keys?: string[];
+  target?: string;
+};
+
+export const ComputerUseTool: ToolDefinition<ComputerUseInput> = {
+  name: "ComputerUse",
+  description:
+    "Directly interact with and control the real Linux desktop (Claude Computer Use style). " +
+    "Can capture desktop screenshots, click buttons/windows at (x, y) coordinates, move the pointer, " +
+    "type text into active inputs, press hotkeys (e.g. ['ctrl', 't'], ['alt', 'tab']), or launch desktop applications.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["screenshot", "click", "double_click", "right_click", "move", "type", "hotkey", "launch"],
+        description: "The desktop automation action to execute"
+      },
+      x: { type: "number", description: "Target X pixel coordinate on the 1920x1080 desktop" },
+      y: { type: "number", description: "Target Y pixel coordinate on the 1920x1080 desktop" },
+      text: { type: "string", description: "Text to type into the active window" },
+      keys: { type: "array", items: { type: "string" }, description: "List of keys for hotkey combinations (e.g. ['ctrl', 'c'])" },
+      target: { type: "string", description: "Application name, file path, or URL to open with xdg-open" }
+    },
+    required: ["action"]
+  },
+
+  validate(input) {
+    if (!input.action) return { valid: false, message: "Action is required", code: 400 };
+    return { valid: true };
+  },
+
+  checkPermission(_input, _ctx) {
+    return { granted: true };
+  },
+
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: `ComputerUse: ${input.action}` };
+    const SCRIPT_PATH = "/home/snowjd/Documents/Snow Jarvis/scripts/desktop_actuator.py";
+
+    try {
+      if (input.action === "screenshot") {
+        const { stdout } = await execFileAsync("python3", [SCRIPT_PATH, "screenshot", "640"]);
+        const data = JSON.parse(stdout.trim());
+        return {
+          content: `Screenshot captured (${data.width}x${data.height}). Screen state is active.`,
+          isError: false
+        };
+      } else {
+        const { stdout } = await execFileAsync("python3", [SCRIPT_PATH, "action", JSON.stringify(input)]);
+        const data = JSON.parse(stdout.trim());
+        if (data.success) {
+          return {
+            content: `Desktop action '${input.action}' executed successfully. Details: ${JSON.stringify(data)}`,
+            isError: false
+          };
+        } else {
+          return {
+            content: `Desktop action failed: ${data.error || "Unknown error"}`,
+            isError: true
+          };
+        }
+      }
+    } catch (err: any) {
+      return {
+        content: `ComputerUse error: ${err.message}`,
+        isError: true
+      };
+    }
+  }
+};
+
 // ─── Registry builder ─────────────────────────────────────────────────────────
 
 export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>> {
@@ -1263,7 +1342,7 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
     GlobTool, GrepTool, WebSearchTool, WeatherTool,
     SystemTelemetryTool, MemoryStoreTool, AppLauncherTool, MediaControlTool,
     PythonSandboxTool, ClipboardTool, NotificationTool, ProcessManagerTool,
-    ServiceManagerTool, GitManagerTool
+    ServiceManagerTool, GitManagerTool, ComputerUseTool
   ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }

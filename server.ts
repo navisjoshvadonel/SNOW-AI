@@ -21,7 +21,13 @@ import {
   trainBrain,
   findGraphRelationships,
   formatGraphContext,
-  ResolvedIntent
+  ResolvedIntent,
+  addVisualEpisode,
+  loadRecentVisualEpisodes,
+  searchVisualEpisodes,
+  deleteVisualEpisode,
+  clearVisualEpisodes,
+  VisualEpisode
 } from "./brain";
 import {
   ragIngest,
@@ -37,6 +43,8 @@ import {
 import { connectMcpServers } from "./files claude/McpClient.ts";
 import { createAgent, Message } from "./files claude/index.ts";
 import { exportFineTuningDatasets } from "./dataset_exporter";
+import { routineScheduler } from "./src/services/routineScheduler";
+import { desktopActuator } from "./src/services/desktopActuator";
 import { runPythonCode } from "./python_sandbox";
 
 dotenv.config();
@@ -63,6 +71,20 @@ interface SystemData {
   status: string;
   uptimeSeconds: number;
   loadAvg: string;
+  sentinel?: {
+    status: "OPTIMAL" | "WARNING" | "CRITICAL";
+    alerts: string[];
+    recommendations: string[];
+  };
+}
+
+export interface ToolStepTelemetry {
+  id: string;
+  name: string;
+  inputSummary?: string;
+  outputSnippet?: string;
+  isError?: boolean;
+  durationMs?: number;
 }
 
 interface WebSearchResult {
@@ -147,7 +169,42 @@ async function fetchSystem(): Promise<SystemData> {
       }
     } catch { /* fallback */ }
 
+    let tempStr = "42°C";
+    let tempNum = 42;
+    try {
+      const cpuTemp = await si.cpuTemperature();
+      if (typeof cpuTemp.main === "number" && cpuTemp.main > 0) {
+        tempNum = Math.round(cpuTemp.main);
+        tempStr = `${tempNum}°C`;
+      }
+    } catch { /* fallback */ }
+
     const uptimeSec = Math.round(os.uptime());
+
+    // ── Proactive Sentinel Diagnostics ──
+    const alerts: string[] = [];
+    const recommendations: string[] = [];
+
+    if (cpuLoadPct >= 85) {
+      alerts.push(`High CPU load: ${cpuLoadPct}%`);
+      recommendations.push("Inspect active worker processes and throttle compute intensive jobs");
+    }
+    if (ramPct >= 88) {
+      alerts.push(`Elevated RAM consumption: ${ramPct}% (${usedMem.toFixed(1)} GB)`);
+      recommendations.push("Clear unneeded browser caches or free daemon buffers");
+    }
+    if (tempNum >= 78) {
+      alerts.push(`Thermal threshold alert: ${tempNum}°C`);
+      recommendations.push("Verify system fan airflow and avoid continuous max CPU frequency");
+    }
+    if (diskPct >= 90) {
+      alerts.push(`Storage partition nearly full: ${diskPct}% (${diskUsedStr})`);
+      recommendations.push("Purge temporary files or old package caches");
+    }
+
+    const sentinelStatus: "OPTIMAL" | "WARNING" | "CRITICAL" =
+      alerts.length >= 2 || cpuLoadPct > 90 || tempNum > 85 ? "CRITICAL" :
+      alerts.length > 0 ? "WARNING" : "OPTIMAL";
 
     return {
       cpu: `${cpuLoadPct}%`,
@@ -158,16 +215,26 @@ async function fetchSystem(): Promise<SystemData> {
       ramTotal: `${totalMem.toFixed(1)} GB`,
       disk: diskUsedStr,
       diskPct,
-      temp: "42°C",
-      status: "Optimal",
+      temp: tempStr,
+      status: sentinelStatus === "CRITICAL" ? "Critical" : sentinelStatus === "WARNING" ? "Warning" : "Optimal",
       uptimeSeconds: uptimeSec,
-      loadAvg: cpuLoadPct > 70 ? `High ${cpuLoadPct}%` : cpuLoadPct > 40 ? `Moderate ${cpuLoadPct}%` : `Optimal ${cpuLoadPct}%`
+      loadAvg: cpuLoadPct > 70 ? `High ${cpuLoadPct}%` : cpuLoadPct > 40 ? `Moderate ${cpuLoadPct}%` : `Optimal ${cpuLoadPct}%`,
+      sentinel: {
+        status: sentinelStatus,
+        alerts,
+        recommendations
+      }
     };
   } catch (e: any) {
     console.warn("[SNOW] System fetch failed:", e.message);
     return {
       cpu: "12%", cpuPct: 12, ram: "5.5 GB / 15.3 GB", ramPct: 36, ramUsed: "5.5 GB", ramTotal: "15.3 GB",
-      disk: "69.3/157.5 GB", diskPct: 44, temp: "42°C", status: "Optimal", uptimeSeconds: Math.round(os.uptime()), loadAvg: "Optimal 12%"
+      disk: "69.3/157.5 GB", diskPct: 44, temp: "42°C", status: "Optimal", uptimeSeconds: Math.round(os.uptime()), loadAvg: "Optimal 12%",
+      sentinel: {
+        status: "OPTIMAL",
+        alerts: [],
+        recommendations: []
+      }
     };
   }
 }
@@ -298,7 +365,8 @@ function buildWidgetTags(
   weather: WeatherData | null,
   system: SystemData | null,
   searchResults: WebSearchResult[],
-  prompt: string
+  prompt: string,
+  visualMemories?: VisualEpisode[]
 ): string {
   const tags: string[] = [];
 
@@ -381,6 +449,21 @@ function buildWidgetTags(
         sport: intent.isSports ? "Sports" : "Game",
       })}]`);
     }
+  }
+
+  // Visual Episodic Memory recall widget
+  if (visualMemories && visualMemories.length > 0) {
+    tags.push(`[UI_VISUAL_MEMORY:${JSON.stringify({
+      episodes: visualMemories.slice(0, 3).map(e => ({
+        id: e.id,
+        source: e.source,
+        scene: e.scene,
+        objects: e.objects,
+        activity: e.activity,
+        timestamp: e.timestamp,
+        thumbnail: e.thumbnail || ""
+      }))
+    })}]`);
   }
 
   return tags.length > 0 ? "\n\n" + tags.join("\n") : "";
@@ -485,7 +568,8 @@ async function callAI(
   userPrompt: string,
   contextText: string,
   history?: { role: string; text: string }[],
-  requestedModel?: string
+  requestedModel?: string,
+  images?: string[]
 ): Promise<{ text: string; model: string }> {
   // Load persistent memories & brain state directives dynamically
   const memories = loadMemories();
@@ -570,11 +654,28 @@ RULES:
     geminiContents.push({ role: "user", parts: [{ text: fullPrompt }] });
   }
 
+  // Inject multimodal frames if provided
+  if (images && images.length > 0) {
+    const lastUserTurn = geminiContents[geminiContents.length - 1];
+    for (const img of images) {
+      if (!img || typeof img !== "string") continue;
+      const mimeMatch = img.match(/^data:([^;]+);base64,/);
+      const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+      const base64Data = img.replace(/^data:[^;]+;base64,/, "");
+      lastUserTurn.parts.push({
+        inlineData: {
+          mimeType,
+          data: base64Data
+        }
+      });
+    }
+  }
+
   if (apiKey) {
     const ai = new GoogleGenAI({ apiKey });
     for (const model of GEMINI_MODELS) {
       try {
-        console.log(`[SNOW] Trying Gemini ${model} (Multi-turn turn context: ${geminiContents.length} turns)...`);
+        console.log(`[SNOW] Trying Gemini ${model} (Multi-turn turn context: ${geminiContents.length} turns, Visual inputs: ${images?.length || 0})...`);
         const res = await ai.models.generateContent({
           model,
           contents: geminiContents,
@@ -603,7 +704,11 @@ RULES:
       }
     });
   }
-  ollamaMessages.push({ role: "user", content: fullPrompt });
+  const ollamaUserMsg: any = { role: "user", content: fullPrompt };
+  if (images && images.length > 0) {
+    ollamaUserMsg.images = images.map(img => img.replace(/^data:[^;]+;base64,/, ""));
+  }
+  ollamaMessages.push(ollamaUserMsg);
 
   try {
     const res = await fetch("http://127.0.0.1:11434/api/chat", {
@@ -634,7 +739,8 @@ async function callAIStream(
   contextText: string,
   history: { role: string; text: string }[] | undefined,
   requestedModel: string | undefined,
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  images?: string[]
 ): Promise<{ fullText: string; model: string }> {
   const memories = loadMemories();
   const brainState = loadBrainState();
@@ -665,8 +771,8 @@ RULES:
 
   const fullPrompt = contextText ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}` : userPrompt;
   const apiKey = process.env.GEMINI_API_KEY || "";
-  // Confirmed working Gemini model names
-  let GEMINI_MODELS = ["gemini-2.5-flash", "gemini-1.5-flash"];
+  // Confirmed working Gemini model names (prioritize low-latency Gemini 2.5 Flash)
+  let GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro", "gemini-1.5-flash"];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
@@ -691,11 +797,28 @@ RULES:
     geminiContents.push({ role: "user", parts: [{ text: fullPrompt }] });
   }
 
+  // Inject multimodal frames if provided
+  if (images && images.length > 0) {
+    const lastUserTurn = geminiContents[geminiContents.length - 1];
+    for (const img of images) {
+      if (!img || typeof img !== "string") continue;
+      const mimeMatch = img.match(/^data:([^;]+);base64,/);
+      const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+      const base64Data = img.replace(/^data:[^;]+;base64,/, "");
+      lastUserTurn.parts.push({
+        inlineData: {
+          mimeType,
+          data: base64Data
+        }
+      });
+    }
+  }
+
   if (apiKey) {
     const ai = new GoogleGenAI({ apiKey });
     for (const model of GEMINI_MODELS) {
       try {
-        console.log(`[SNOW STREAM] Trying Gemini Stream ${model}...`);
+        console.log(`[SNOW STREAM] Trying Gemini Stream ${model} (Visual inputs: ${images?.length || 0})...`);
         const streamResult = await ai.models.generateContentStream({
           model,
           contents: geminiContents,
@@ -717,7 +840,7 @@ RULES:
   }
 
   // Ollama Fallback Streaming
-  const ollamaModel = process.env.OLLAMA_MODEL || "snow-jarvis";
+  const ollamaModel = process.env.OLLAMA_MODEL || "snow";
   console.log(`[SNOW STREAM] Falling back to Ollama Stream (${ollamaModel})...`);
   const ollamaMessages: any[] = [{ role: "system", content: SNOW_PERSONA }];
   if (Array.isArray(history) && history.length > 0) {
@@ -727,7 +850,11 @@ RULES:
       }
     });
   }
-  ollamaMessages.push({ role: "user", content: fullPrompt });
+  const ollamaUserMsg: any = { role: "user", content: fullPrompt };
+  if (images && images.length > 0) {
+    ollamaUserMsg.images = images.map(img => img.replace(/^data:[^;]+;base64,/, ""));
+  }
+  ollamaMessages.push(ollamaUserMsg);
 
   try {
     const res = await fetch("http://127.0.0.1:11434/api/chat", {
@@ -820,8 +947,9 @@ function routeToSpecialist(prompt: string): { specialist: AgentSpecialist; direc
 async function runReActAgenticLoop(
   userPrompt: string,
   history?: { role: string; text: string }[],
-  requestedModel?: string
-): Promise<{ text: string; toolsUsed: string[]; model: string }> {
+  requestedModel?: string,
+  images?: string[]
+): Promise<{ text: string; toolsUsed: string[]; toolSteps: ToolStepTelemetry[]; model: string }> {
   const memories = loadMemories();
   const brainState = loadBrainState();
 
@@ -897,16 +1025,57 @@ RULES:
 
   const abortController = new AbortController();
   const toolsExecuted: string[] = [];
+  const toolSteps: ToolStepTelemetry[] = [];
+  const pendingStarts = new Map<string, { name: string; inputSummary?: string; startTime: number }>();
   let fullText = "";
+  const promptToExecute = (images && images.length > 0)
+    ? `${userPrompt}\n\n[Attached visual context: ${images.length} frame(s) active on screen/camera]`
+    : userPrompt;
 
   try {
     console.log(`[SNOW AGENTIC ENGINE] Launching ReAct Multi-Step Loop via Specialist: ${specialist.toUpperCase()}...`);
-    for await (const event of agent.submitMessage(userPrompt, abortController.signal)) {
+    for await (const event of agent.submitMessage(promptToExecute, abortController.signal, images)) {
       if (event.type === "tool_use_start") {
         console.log(`[SNOW AGENTIC TOOL] Invoking tool: ${event.name}`);
         if (!toolsExecuted.includes(event.name)) {
           toolsExecuted.push(event.name);
         }
+        let inputSummary = "";
+        if (event.input) {
+          if (typeof event.input === "string") {
+            inputSummary = event.input;
+          } else if (typeof event.input === "object") {
+            const keys = Object.keys(event.input);
+            if (keys.includes("command")) inputSummary = String((event.input as any).command);
+            else if (keys.includes("code")) inputSummary = String((event.input as any).code);
+            else if (keys.includes("path")) inputSummary = String((event.input as any).path);
+            else if (keys.includes("query")) inputSummary = String((event.input as any).query);
+            else inputSummary = JSON.stringify(event.input).slice(0, 100);
+          }
+        }
+        pendingStarts.set(event.toolUseId, {
+          name: event.name,
+          inputSummary: inputSummary.slice(0, 200),
+          startTime: Date.now()
+        });
+      }
+      if (event.type === "tool_result") {
+        const start = pendingStarts.get(event.toolUseId);
+        const duration = start ? Date.now() - start.startTime : undefined;
+        let contentStr = "";
+        if (typeof event.result?.content === "string") {
+          contentStr = event.result.content;
+        } else if (Array.isArray(event.result?.content)) {
+          contentStr = event.result.content.map(c => ("text" in c ? c.text : "")).join("\n");
+        }
+        toolSteps.push({
+          id: event.toolUseId,
+          name: start?.name || "Tool",
+          inputSummary: start?.inputSummary,
+          outputSnippet: contentStr.trim().slice(0, 300),
+          isError: !!event.result?.isError,
+          durationMs: duration
+        });
       }
       if (event.type === "content_block_delta" && typeof event.delta === "string") {
         fullText += event.delta;
@@ -920,6 +1089,7 @@ RULES:
     return {
       text: fullText.trim(),
       toolsUsed: toolsExecuted,
+      toolSteps,
       model: `Snow ${specialist.toUpperCase()} Agent (${activeModel})`
     };
   }
@@ -929,6 +1099,7 @@ RULES:
   return {
     text: fallback.text,
     toolsUsed: toolsExecuted,
+    toolSteps,
     model: fallback.model
   };
 }
@@ -939,7 +1110,7 @@ RULES:
 
 function stripTagArtifacts(text: string): string {
   return text
-    .replace(/\[(?:WEATHER|UI_WEATHER|UI_NEWS|UI_STOCK|UI_SPORT|UI_TIME|UI_JOKE|UI_MUSIC|UI_SYSTEM)[^\]]*\]/gi, "")
+    .replace(/\[(?:WEATHER|UI_WEATHER|UI_NEWS|UI_STOCK|UI_SPORT|UI_TIME|UI_JOKE|UI_MUSIC|UI_SYSTEM|UI_VISUAL_MEMORY)[^\]]*\]/gi, "")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/\s{2,}/g, " ")
     .trim();
@@ -1008,7 +1179,7 @@ async function startServer() {
   });
 
   // Optional API key enforcement if configured in .env (SNOW_API_KEY)
-  const configuredApiKey = process.env.SNOW_API_KEY || process.env.JARVIS_API_KEY;
+  const configuredApiKey = process.env.SNOW_API_KEY;
   if (configuredApiKey) {
     app.use("/api/snow", (req, res, next) => {
       const auth = req.headers["authorization"] || req.headers["x-api-key"];
@@ -1025,6 +1196,97 @@ async function startServer() {
   // ── /api/system — live telemetry polling ──────────────────────────────────
   app.get("/api/system", async (_req, res) => {
     res.json(await fetchSystem());
+  });
+
+  // ── /api/snow/sentinel/health — proactive sentinel diagnostics & alerts ───
+  app.get("/api/snow/sentinel/health", async (_req, res) => {
+    const sys = await fetchSystem();
+    res.json({
+      status: sys.sentinel?.status || "OPTIMAL",
+      alerts: sys.sentinel?.alerts || [],
+      recommendations: sys.sentinel?.recommendations || [],
+      telemetry: {
+        cpu: sys.cpu,
+        ram: sys.ram,
+        disk: sys.disk,
+        temp: sys.temp,
+        loadAvg: sys.loadAvg,
+        uptimeSeconds: sys.uptimeSeconds
+      },
+      timestamp: new Date().toISOString()
+    });
+  });
+
+  // ── /api/snow/briefing — 100% dynamic live daily intelligence briefing ─────
+  app.get("/api/snow/briefing", async (_req, res) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY || "";
+      const briefing = await routineScheduler.generateDailyBriefing(apiKey);
+      res.json(briefing);
+    } catch (e: any) {
+      console.warn("[SNOW BRIEFING] Failed:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── /api/snow/briefing/trigger — generate and dispatch desktop notification ─
+  app.post("/api/snow/briefing/trigger", async (_req, res) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY || "";
+      const briefing = await routineScheduler.generateDailyBriefing(apiKey);
+      await routineScheduler.dispatchNotification(
+        `☀️ SNOW: ${briefing.greeting}`,
+        `${briefing.weather.condition}, ${briefing.weather.tempC}. System: ${briefing.system.tempC}°C. Click to open Briefing HUD.`,
+        "normal"
+      );
+      res.json({ success: true, briefing });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── /api/snow/routines — list active background routines ────────────────────
+  app.get("/api/snow/routines", (_req, res) => {
+    res.json({ routines: routineScheduler.getRoutines() });
+  });
+
+  // ── /api/snow/routines/run/:id — manually trigger a routine on demand ───────
+  app.post("/api/snow/routines/run/:id", async (req, res) => {
+    const apiKey = process.env.GEMINI_API_KEY || "";
+    const result = await routineScheduler.runRoutine(req.params.id, apiKey);
+    res.json(result);
+  });
+
+  // ── Desktop Actuator & Computer Use Endpoints ──────────────────────────────
+  app.get("/api/snow/actuator/status", async (_req, res) => {
+    const status = await desktopActuator.getStatus();
+    res.json(status);
+  });
+
+  app.post("/api/snow/actuator/screenshot", async (req, res) => {
+    const maxDim = req.body.maxDim ? parseInt(req.body.maxDim, 10) : 1280;
+    const shot = await desktopActuator.getScreenshot(maxDim);
+    res.json(shot);
+  });
+
+  app.post("/api/snow/actuator/action", async (req, res) => {
+    const result = await desktopActuator.executeAction(req.body);
+    res.json(result);
+  });
+
+  app.post("/api/snow/actuator/ground-and-act", async (req, res) => {
+    try {
+      const directive = req.body.directive;
+      if (!directive || typeof directive !== "string") {
+        return res.status(400).json({ error: "Missing directive string" });
+      }
+      const apiKey = process.env.GEMINI_API_KEY || "";
+      const result = await desktopActuator.groundAndActuate(directive, apiKey);
+      res.json(result);
+    } catch (e: any) {
+      console.warn("[SNOW ACTUATOR] Ground-and-act error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // ── MCP Server Client Management ───────────────────────────────────────────
@@ -1059,13 +1321,17 @@ async function startServer() {
 
   // ── /api/snow/chat — main AI endpoint ────────────────────────────────────
   app.post("/api/snow/chat", async (req, res) => {
-    const { prompt, history, model: requestedModel } = req.body;
-    if (!prompt?.trim()) return res.status(400).json({ error: "Missing prompt" });
+    const { prompt, history, model: requestedModel, images: reqImages, image: reqImage } = req.body;
+    if (!prompt?.trim() && !reqImages?.length && !reqImage) return res.status(400).json({ error: "Missing prompt or visual input" });
 
-    console.log("\n[SNOW] ─── New query:", prompt, "Model:", requestedModel || "default");
+    const effectivePrompt = (prompt && prompt.trim()) ? prompt.trim() : "Describe and analyze what you see in this visual input.";
+    const rawImages: string[] = Array.isArray(reqImages) ? reqImages : (reqImage ? [reqImage] : []);
+    const images = rawImages.filter(img => typeof img === "string" && img.length > 0);
+
+    console.log("\n[SNOW] ─── New query:", effectivePrompt, "Model:", requestedModel || "default", "Visual frames:", images.length);
 
     // Dynamic Intent & Slot resolution (No hardcoding)
-    const intent = await resolveIntent(prompt);
+    const intent = await resolveIntent(effectivePrompt);
     console.log("[SNOW] Dynamic Neural Intent:", JSON.stringify(intent));
 
     // Gather live tool data in parallel
@@ -1091,7 +1357,7 @@ async function startServer() {
       );
     }
 
-    const searchQuery = intent.webQuery || intent.stockQuery || prompt;
+    const searchQuery = intent.webQuery || intent.stockQuery || effectivePrompt;
 
     // Structured Financial Data API query for stock/crypto
     if (intent.isStock) {
@@ -1150,25 +1416,51 @@ async function startServer() {
       });
     }
 
-    const isGreeting = /^(hello|hi|hey|greetings|good morning|good afternoon|good evening|howdy|sup|yo|hi there|hello snow|hi snow)\b/i.test(prompt.trim());
-    const isIdentity = /\b(who are you|what is your name|who created you|who made you|what can you do|your name|are you ai|are you snow)\b/i.test(prompt);
-    const hasAgenticIntent = /\b(run|execute|calculate|solve|python|code|script|test|debug|check|git|status|diff|log|branch|clipboard|copy|paste|notification|notify|process|processes|service|daemon|kill|open|launch|terminal|file|read|write|search|weather|amixer|volume)\b/i.test(prompt);
-    const isSimpleConversation = (isGreeting || isIdentity || (!needsSearch && !intent.isWeather && !intent.isSystem && !intent.isStock && !intent.isSports && !intent.isNews)) && !hasAgenticIntent;
+    // ── Visual Episodic Memory Recall ("Where did I leave my...", "What was on my screen") ──
+    const isVisualRecall = /\b(where did i (put|leave|place|keep|set)|where is my|where's my|where are my|have you seen my|did you see my|what was on my (screen|terminal|camera)|what did you see|recall seeing|remember seeing|find my)\b/i.test(effectivePrompt);
+    let matchingVisualMemories: VisualEpisode[] = [];
+
+    if (isVisualRecall) {
+      const objMatch = effectivePrompt.match(/\b(?:my|the)\s+([a-zA-Z0-9_\- ]+?)(?:\?|$|\.|\,)/i);
+      const queryTarget = objMatch ? objMatch[1].trim() : effectivePrompt;
+      matchingVisualMemories = searchVisualEpisodes(queryTarget, 4);
+      if (matchingVisualMemories.length === 0) {
+        matchingVisualMemories = loadRecentVisualEpisodes(4);
+      }
+      if (matchingVisualMemories.length > 0) {
+        toolsUsed.push("VisualEpisodicMemory");
+        contextLines.push("STORED VISUAL EPISODIC OBSERVATIONS (Camera/Screen History):");
+        matchingVisualMemories.forEach((ep, i) => {
+          const epDate = new Date(ep.timestamp);
+          const diffMin = Math.max(1, Math.round((Date.now() - epDate.getTime()) / 60000));
+          const timeStr = diffMin < 60 ? `${diffMin} minute(s) ago` : `${Math.round(diffMin / 60)} hour(s) ago`;
+          contextLines.push(`  - Observed [${timeStr}] via ${ep.source.toUpperCase()}: Scene: "${ep.scene}", Objects present: [${ep.objects}], Activity: "${ep.activity || 'stationary'}"`);
+        });
+      }
+    }
+
+    const isGreeting = /^(hello|hi|hey|greetings|good morning|good afternoon|good evening|howdy|sup|yo|hi there|hello snow|hi snow)\b/i.test(effectivePrompt.trim());
+    const isIdentity = /\b(who are you|what is your name|who created you|who made you|what can you do|your name|are you ai|are you snow)\b/i.test(effectivePrompt);
+    const hasAgenticIntent = /\b(run|execute|calculate|solve|python|code|script|test|debug|check|git|status|diff|log|branch|clipboard|copy|paste|notification|notify|process|processes|service|daemon|kill|open|launch|terminal|file|read|write|search|weather|amixer|volume)\b/i.test(effectivePrompt);
+    const hasVision = images.length > 0;
+    const isSimpleConversation = isVisualRecall || (hasVision && !hasAgenticIntent) || ((isGreeting || isIdentity || (!needsSearch && !intent.isWeather && !intent.isSystem && !intent.isStock && !intent.isSports && !intent.isNews)) && !hasAgenticIntent);
 
     let aiRaw: string;
     let reactTools: string[] = [];
+    let toolSteps: ToolStepTelemetry[] = [];
     let model: string;
 
     if (isSimpleConversation) {
-      console.log("[SNOW] Conversational route active — invoking direct persona AI caller...");
-      const res = await callAI(prompt, contextLines.join("\n"), history, requestedModel);
+      console.log(`[SNOW] Conversational route active (Vision frames: ${images.length}, Visual memories: ${matchingVisualMemories.length}) — invoking direct persona AI caller...`);
+      const res = await callAI(effectivePrompt, contextLines.join("\n"), history, requestedModel, images);
       aiRaw = res.text;
       model = res.model;
     } else {
-      console.log("[SNOW AGENT] Multi-step agent route active — running ReAct engine...");
-      const res = await runReActAgenticLoop(prompt, history, requestedModel);
+      console.log(`[SNOW AGENT] Multi-step agent route active (Vision frames: ${images.length}) — running ReAct engine...`);
+      const res = await runReActAgenticLoop(effectivePrompt, history, requestedModel, images);
       aiRaw = res.text;
       reactTools = res.toolsUsed;
+      toolSteps = res.toolSteps || [];
       model = res.model;
     }
 
@@ -1177,8 +1469,24 @@ async function startServer() {
     // Merge tools executed from pre-fetch and ReAct loop
     const combinedTools = Array.from(new Set([...toolsUsed, ...reactTools]));
 
+    if (toolSteps.length === 0 && combinedTools.length > 0) {
+      toolSteps = combinedTools.map(tool => ({
+        id: `tool-${Date.now()}-${tool}`,
+        name: tool,
+        isError: false,
+        durationMs: 25,
+        outputSnippet: tool === "SystemTelemetry" && system
+          ? `CPU: ${system.cpu}, RAM: ${system.ram}, Temp: ${system.temp}`
+          : tool === "Weather" && weather
+          ? `${weather.location}: ${weather.temp}, ${weather.condition}`
+          : tool === "VisualEpisodicMemory" && matchingVisualMemories.length > 0
+          ? `Found ${matchingVisualMemories.length} visual observation(s): ${matchingVisualMemories[0].scene}`
+          : undefined
+      }));
+    }
+
     // Build widget tags from real data
-    let widgetTags = buildWidgetTags(intent, weather, system, searchResults, prompt);
+    let widgetTags = buildWidgetTags(intent, weather, system, searchResults, effectivePrompt, matchingVisualMemories);
 
     // Inject structured financial widget tag if available
     if (financialData) {
@@ -1195,31 +1503,37 @@ async function startServer() {
     const brainState = loadBrainState();
 
     // ── RAG Auto-Ingest: store every conversation turn for future retrieval ──
-    ragIngestConversation(prompt, aiClean).catch(e =>
+    ragIngestConversation(effectivePrompt, aiClean).catch(e =>
       console.warn("[RAG] Background ingest failed:", e.message)
     );
 
     return res.json({
       text: finalText,
       toolActivity: combinedTools,
+      toolSteps,
       model,
       brainLevel: brainState.level,
       memoriesCount: loadMemories().length,
       ragStats: ragStats(),
+      sentinel: system?.sentinel,
       timestamp: new Date().toISOString(),
     });
   });
 
   // ── /api/snow/chat/stream — Real-time token streaming endpoint via SSE ─────
   app.post("/api/snow/chat/stream", async (req, res) => {
-    const { prompt, history, model: requestedModel } = req.body;
-    if (!prompt?.trim()) return res.status(400).json({ error: "Missing prompt" });
+    const { prompt, history, model: requestedModel, images: reqImages, image: reqImage } = req.body;
+    if (!prompt?.trim() && !reqImages?.length && !reqImage) return res.status(400).json({ error: "Missing prompt or visual input" });
+
+    const effectivePrompt = (prompt && prompt.trim()) ? prompt.trim() : "Describe and analyze what you see in this visual input.";
+    const rawImages: string[] = Array.isArray(reqImages) ? reqImages : (reqImage ? [reqImage] : []);
+    const images = rawImages.filter(img => typeof img === "string" && img.length > 0);
 
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
-    const intent = await resolveIntent(prompt);
+    const intent = await resolveIntent(effectivePrompt);
     let weather: WeatherData | null = null;
     let system: SystemData | null = null;
     let searchResults: WebSearchResult[] = [];
@@ -1231,7 +1545,7 @@ async function startServer() {
     if (intent.isSystem) {
       fetches.push(fetchSystem().then(d => { system = d; }));
     }
-    const searchQuery = intent.webQuery || intent.stockQuery || prompt;
+    const searchQuery = intent.webQuery || intent.stockQuery || effectivePrompt;
     if (intent.isNews || intent.isSports || intent.isWeb) {
       fetches.push(fetchWebSearch(searchQuery).then(d => { searchResults = d; }));
     }
@@ -1242,14 +1556,14 @@ async function startServer() {
     if (system) contextLines.push(`System: CPU ${system.cpu}, RAM ${system.ram}, temp ${system.temp}.`);
     if (searchResults.length) contextLines.push(`Web search: ${searchResults[0].title} - ${searchResults[0].snippet}`);
 
-    const result = await callAIStream(prompt, contextLines.join("\n"), history, requestedModel, (chunkText) => {
+    const result = await callAIStream(effectivePrompt, contextLines.join("\n"), history, requestedModel, (chunkText) => {
       res.write(`data: ${JSON.stringify({ token: chunkText })}\n\n`);
-    });
+    }, images);
 
     const aiClean = stripTagArtifacts(result.fullText);
-    const widgetTags = buildWidgetTags(intent, weather, system, searchResults, prompt);
+    const widgetTags = buildWidgetTags(intent, weather, system, searchResults, effectivePrompt);
 
-    ragIngestConversation(prompt, aiClean).catch(() => {});
+    ragIngestConversation(effectivePrompt, aiClean).catch(() => {});
 
     res.write(`data: ${JSON.stringify({ done: true, widgetTags, model: result.model })}\n\n`);
     res.end();
@@ -1325,6 +1639,100 @@ async function startServer() {
       vectorsCount: vectors.length,
       ragStats: ragStats(),
     });
+  });
+
+  // ── /api/snow/vision — Astra Episodic Visual Memory ─────────────────────
+  app.get("/api/snow/vision/episodes", (_req, res) => {
+    try {
+      const episodes = loadRecentVisualEpisodes(40);
+      res.json({ episodes });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/snow/vision/search", (req, res) => {
+    try {
+      const { query = "" } = req.body;
+      const episodes = searchVisualEpisodes(query, 25);
+      res.json({ episodes });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/snow/vision/episodes/:id", (req, res) => {
+    try {
+      const success = deleteVisualEpisode(req.params.id);
+      res.json({ success });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/snow/vision/episodes", (_req, res) => {
+    try {
+      clearVisualEpisodes();
+      res.json({ success: true, message: "All visual episodic memories cleared." });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/snow/vision/index-scene", async (req, res) => {
+    const image = req.body.image || req.body.frame;
+    const source = req.body.source || "camera";
+    if (!image || typeof image !== "string") {
+      return res.status(400).json({ error: "Missing image or frame" });
+    }
+
+    try {
+      const apiKey = process.env.GEMINI_API_KEY || "";
+      let scene = req.body.scene || "Workstation scene";
+      let objects: string[] = Array.isArray(req.body.objects) ? req.body.objects : [];
+      let activity = req.body.activity || "active user session";
+
+      // If scene wasn't explicitly supplied, use Gemini 2.5 Flash to perceive the scene
+      if (!req.body.scene && apiKey) {
+        const ai = new GoogleGenAI({ apiKey });
+        const mimeMatch = image.match(/^data:([^;]+);base64,/);
+        const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
+        const base64Data = image.replace(/^data:[^;]+;base64,/, "");
+
+        const prompt = `You are an Astra-grade real-time spatial scene observer.
+Look at this image. Output a STRICT JSON object in this exact format with NO markdown wrapping:
+{"scene": "1-sentence summary of the scene", "objects": ["list", "of", "notable", "visible", "items", "windows", "or", "tools"], "activity": "brief note on current activity"}`;
+
+        const geminiRes = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: [{
+            role: "user",
+            parts: [
+              { text: prompt },
+              { inlineData: { mimeType, data: base64Data } }
+            ]
+          }]
+        });
+
+        const raw = geminiRes.text?.trim() || "";
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          try {
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.scene) scene = parsed.scene;
+            if (Array.isArray(parsed.objects)) objects = parsed.objects;
+            if (parsed.activity) activity = parsed.activity;
+          } catch {}
+        }
+      }
+
+      const episode = addVisualEpisode(source, scene, objects, activity, image);
+      console.log(`[SNOW VISION] 👁️ Indexed visual episode: "${scene}" with ${objects.length} objects`);
+      return res.json({ success: true, episode });
+    } catch (e: any) {
+      console.warn("[SNOW VISION] Index scene notice:", e.message);
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   // ── /api/snow/rag — Ollama RAG Knowledge Base API ────────────────────────
@@ -1487,6 +1895,7 @@ async function startServer() {
     console.log(`    Gemini key   : ${process.env.GEMINI_API_KEY ? "✅ set" : "❌ missing"}`);
     console.log(`    RAG Engine   : ✅ Ollama nomic-embed-text (${rs.total} chunks indexed)`);
     console.log(`    Brain Status : LV.${loadBrainState().level} (${loadMemories().length} Memories)\n`);
+    routineScheduler.startScheduler(process.env.GEMINI_API_KEY || "");
   });
 }
 

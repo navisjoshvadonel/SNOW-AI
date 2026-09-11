@@ -9,7 +9,7 @@ import {
   Keyboard, BarChart3, Play, Pause, X,
   CloudLightning, CloudFog, SunMedium, Moon, Wind,
   FolderOpen, FileText, FileCode, Paperclip, Upload, FilePlus,
-  Volume2, VolumeX
+  Volume2, VolumeX, Monitor, Eye, EyeOff, ChevronDown, ChevronUp, Terminal, ShieldAlert, ShieldCheck
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import NetworkGraph from "./components/NetworkGraph";
@@ -19,21 +19,41 @@ import CodeSandbox from "./components/CodeSandbox";
 import ModelStatus from "./components/ModelStatus";
 import MatrixSnowHUD from "./components/MatrixSnowHUD";
 import SnowfallBackground from "./components/SnowfallBackground";
+import AstraVisionOrb, { OrbState } from "./components/AstraVisionOrb";
+import VisualMemoryStore from "./components/VisualMemoryStore";
+import DailyBriefingModal from "./components/DailyBriefingModal";
+import ComputerUseDrawer from "./components/ComputerUseDrawer";
+import { snowAudio } from "./utils/snowAudio";
+import { AmbientWakeWordEngine } from "./utils/wakeWord";
 import { MemoryNode, CodeFile } from "./types";
 
 type WeatherType = "default" | "sunny" | "rain" | "cloudy" | "snow" | "storm";
-type ActiveTab = "hud" | "graph" | "vector" | "compiler" | "sandbox" | "models";
+type ActiveTab = "hud" | "graph" | "vector" | "visual" | "compiler" | "sandbox" | "models";
+
+export interface ToolStep {
+  id: string;
+  name: string;
+  inputSummary?: string;
+  outputSnippet?: string;
+  isError?: boolean;
+  durationMs?: number;
+}
 
 interface ChatItem {
   id: string;
   sender: "user" | "snow";
   text: string;
   timestamp: string;
+  visualContext?: {
+    source: string;
+    preview: string;
+  };
   widget?: {
-    type: "weather" | "news" | "stock" | "sport" | "time" | "music" | "system";
+    type: "weather" | "news" | "stock" | "sport" | "time" | "music" | "system" | "visual_memory";
     data: any;
   };
   toolActivity?: string[];
+  toolSteps?: ToolStep[];
   userPrompt?: string;
   feedbackGiven?: "thumbs_up" | "thumbs_down";
 }
@@ -66,6 +86,11 @@ interface SystemData {
   status: string;
   uptimeSeconds?: number;
   loadAvg?: string;
+  sentinel?: {
+    status: "OPTIMAL" | "WARNING" | "CRITICAL";
+    alerts: string[];
+    recommendations: string[];
+  };
 }
 
 const getWeatherVisual = (conditionStr: string, isDay: boolean = true, windSpeedKm: number = 0) => {
@@ -495,6 +520,84 @@ const TypewriterText = ({ text }: { text: string }) => {
   return <FormattedMessage text={displayedText} />;
 };
 
+const AgentTelemetryCard = ({ steps, tools }: { steps?: ToolStep[]; tools?: string[] }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const activeSteps: ToolStep[] = steps && steps.length > 0 ? steps : (tools || []).map((t, idx) => ({
+    id: `step-${idx}`,
+    name: t,
+    isError: false,
+    durationMs: 20
+  }));
+
+  if (activeSteps.length === 0) return null;
+
+  return (
+    <div className="mb-3 rounded-xl border border-cyan-500/30 bg-slate-900/90 backdrop-blur-md overflow-hidden text-xs shadow-lg">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full flex items-center justify-between px-3 py-2 bg-gradient-to-r from-cyan-950/80 via-slate-900/80 to-slate-950/90 hover:from-cyan-900/60 hover:to-slate-900/90 transition text-left cursor-pointer"
+      >
+        <div className="flex items-center gap-2">
+          <div className="flex items-center justify-center w-5 h-5 rounded-md bg-cyan-500/20 text-cyan-400 border border-cyan-500/40">
+            <Zap className="w-3 h-3 animate-pulse" />
+          </div>
+          <span className="font-mono text-[11px] font-bold tracking-wider text-cyan-300">
+            AGENT REASONING · {activeSteps.length} {activeSteps.length === 1 ? "STEP" : "STEPS"}
+          </span>
+          <div className="hidden sm:flex items-center gap-1 ml-1.5">
+            {activeSteps.slice(0, 3).map((st, i) => (
+              <span key={i} className="px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/30 text-[9px] font-mono text-cyan-200">
+                {st.name}
+              </span>
+            ))}
+            {activeSteps.length > 3 && (
+              <span className="text-[9px] text-slate-400 font-mono">+{activeSteps.length - 3}</span>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1.5 text-cyan-400 font-mono text-[10px]">
+          <span>{isOpen ? "COLLAPSE" : "TELEMETRY"}</span>
+          {isOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+        </div>
+      </button>
+
+      {isOpen && (
+        <div className="p-3 border-t border-cyan-500/20 space-y-2.5 bg-black/50">
+          {activeSteps.map((step, idx) => (
+            <div key={step.id || idx} className="rounded-lg border border-cyan-500/15 bg-slate-950/80 p-2 text-[11px]">
+              <div className="flex items-center justify-between font-mono mb-1">
+                <span className="flex items-center gap-1.5 font-bold text-cyan-300">
+                  <Terminal className="w-3 h-3 text-cyan-400" />
+                  <span>STEP {idx + 1}: {step.name.toUpperCase()}</span>
+                </span>
+                <div className="flex items-center gap-2 text-[9px]">
+                  {typeof step.durationMs === "number" && (
+                    <span className="text-slate-400 font-mono">{step.durationMs}ms</span>
+                  )}
+                  <span className={`px-1.5 py-0.5 rounded font-bold ${step.isError ? "bg-rose-950/80 border border-rose-600/80 text-rose-300" : "bg-emerald-950/80 border border-emerald-600/80 text-emerald-300"}`}>
+                    {step.isError ? "FAILED" : "SUCCESS"}
+                  </span>
+                </div>
+              </div>
+              {step.inputSummary && (
+                <div className="mt-1 p-1.5 rounded bg-black/90 font-mono text-[10px] text-amber-200/90 border border-slate-800 overflow-x-auto">
+                  <span className="text-slate-500 mr-1">$</span>
+                  {step.inputSummary}
+                </div>
+              )}
+              {step.outputSnippet && (
+                <div className="mt-1 p-1.5 rounded bg-black/70 font-mono text-[10px] text-slate-300 border border-slate-800/80 overflow-x-auto max-h-24">
+                  {step.outputSnippet}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Confetti = () => {
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden z-50 flex items-center justify-center">
@@ -518,11 +621,22 @@ export default function App() {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [wakeWordEnabled, setWakeWordEnabled] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("snow_wake_word") !== "false";
+    } catch {
+      return true;
+    }
+  });
+  const [wakeWordStatus, setWakeWordStatus] = useState<"idle" | "listening" | "awakened" | "error">("idle");
+  const wakeEngineRef = useRef<AmbientWakeWordEngine | null>(null);
   const silenceTimerRef = useRef<any>(null);
   const lastSpacePressRef = useRef<number>(0);
   const [showConfetti, setShowConfetti] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showDailyBriefing, setShowDailyBriefing] = useState(false);
+  const [showComputerUse, setShowComputerUse] = useState(false);
 
   // Live System Stats & Telemetry
   const [liveStats, setLiveStats] = useState<SystemData>({
@@ -552,11 +666,23 @@ export default function App() {
     feelsLike: "29.5°C"
   });
 
-  // Camera State
+  // Camera & Multimodal Vision State
   const [isCameraActive, setIsCameraActive] = useState(false);
+  const [isScreenActive, setIsScreenActive] = useState(false);
+  const [activeVisionSource, setActiveVisionSource] = useState<"camera" | "screen" | "none">("none");
+  const [autoObserve, setAutoObserve] = useState(false);
   const [snapshots, setSnapshots] = useState<string[]>([]);
+  const [attachedVisualContext, setAttachedVisualContext] = useState<{ source: string; dataUrl: string } | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // VAD Audio Barge-in State & Speech Queue Refs
+  const vadStreamRef = useRef<MediaStream | null>(null);
+  const vadAudioCtxRef = useRef<AudioContext | null>(null);
+  const vadAnalyserRef = useRef<AnalyserNode | null>(null);
+  const vadIntervalRef = useRef<any>(null);
+  const speechQueueRef = useRef<string[]>([]);
+  const isPlayingQueueRef = useRef<boolean>(false);
 
   // Workspace File Vault & Context Attachment State
   const [workspaceFiles, setWorkspaceFiles] = useState<Array<{ name: string; path: string; size: number; ext: string }>>([]);
@@ -901,7 +1027,7 @@ export default function App() {
     }
   }, []);
 
-  // Webcam Camera Toggle
+  // ─── Webcam Camera Toggle ──────────────────────────────────────────────────
   const toggleCamera = async () => {
     if (isCameraActive) {
       if (streamRef.current) {
@@ -909,16 +1035,24 @@ export default function App() {
         streamRef.current = null;
       }
       setIsCameraActive(false);
-      triggerToast("Camera disabled.");
+      setActiveVisionSource(isScreenActive ? "screen" : "none");
+      triggerToast("Webcam disabled.");
     } else {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480 } });
+        if (isScreenActive && streamRef.current) {
+          streamRef.current.getTracks().forEach(t => t.stop());
+          setIsScreenActive(false);
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 640 }, height: { ideal: 480 } }
+        });
         streamRef.current = stream;
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
         setIsCameraActive(true);
-        triggerToast("Camera stream activated.");
+        setActiveVisionSource("camera");
+        triggerToast("Astra Webcam stream activated.");
       } catch (e: any) {
         console.error("Camera access failed:", e);
         triggerToast("Webcam access restricted or unavailable.");
@@ -926,123 +1060,263 @@ export default function App() {
     }
   };
 
-  // Capture Snapshot
-  const captureSnapshot = () => {
-    if (!videoRef.current || !isCameraActive) return;
-    const canvas = document.createElement("canvas");
-    canvas.width = videoRef.current.videoWidth || 640;
-    canvas.height = videoRef.current.videoHeight || 480;
-    const ctx = canvas.getContext("2d");
-    if (ctx) {
-      ctx.drawImage(videoRef.current, 0, 0);
-      const dataUrl = canvas.toDataURL("image/png");
-      setSnapshots(prev => [dataUrl, ...prev.slice(0, 3)]);
-      triggerToast("Snapshot captured successfully.");
+  // ─── Screen Share Toggle (Desktop / Window / Tab) ─────────────────────────
+  const toggleScreen = async () => {
+    if (isScreenActive) {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
+      setIsScreenActive(false);
+      setActiveVisionSource(isCameraActive ? "camera" : "none");
+      triggerToast("Screen share disconnected.");
+    } else {
+      try {
+        if (isCameraActive && streamRef.current) {
+          streamRef.current.getTracks().forEach(t => t.stop());
+          setIsCameraActive(false);
+        }
+        const screenStream = await (navigator.mediaDevices as any).getDisplayMedia({
+          video: { cursor: "always" },
+          audio: false
+        });
+        streamRef.current = screenStream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = screenStream;
+        }
+        screenStream.getVideoTracks()[0].onended = () => {
+          setIsScreenActive(false);
+          setActiveVisionSource("none");
+          triggerToast("Screen share ended.");
+        };
+        setIsScreenActive(true);
+        setActiveVisionSource("screen");
+        triggerToast("Desktop screen share active.");
+      } catch (e: any) {
+        console.warn("Screen share cancelled or failed:", e);
+        triggerToast("Screen capture cancelled or unavailable.");
+      }
     }
   };
 
-  // ─── Jarvis Web Audio Futuristic Wake Chime ──────────────────────────────────
-  const playJarvisWakeChime = () => {
+  // ─── Capture Current Frame for AI Multimodal Ingest (Downscaled 512x512) ──
+  const captureCurrentFrame = (): string | null => {
+    if (!videoRef.current || (!isCameraActive && !isScreenActive)) return null;
     try {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioCtx) return;
-      const ctx = new AudioCtx();
-      const now = ctx.currentTime;
-      // High-tech Jarvis 4-tone ascending sweep: C5 (523Hz), E5 (659Hz), G5 (784Hz), C6 (1046Hz)
-      const notes = [523.25, 659.25, 783.99, 1046.50];
-      notes.forEach((freq, idx) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(freq, now + idx * 0.055);
-        gain.gain.setValueAtTime(0.001, now + idx * 0.055);
-        gain.gain.exponentialRampToValueAtTime(0.18, now + idx * 0.055 + 0.015);
-        gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.055 + 0.22);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start(now + idx * 0.055);
-        osc.stop(now + idx * 0.055 + 0.23);
-      });
+      const v = videoRef.current;
+      if (!v.videoWidth || !v.videoHeight) return null;
+      const canvas = document.createElement("canvas");
+      const maxDim = 512;
+      const scale = Math.min(1, maxDim / Math.max(v.videoWidth, v.videoHeight));
+      canvas.width = Math.round(v.videoWidth * scale);
+      canvas.height = Math.round(v.videoHeight * scale);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+      ctx.drawImage(v, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.72);
     } catch (e) {
-      console.warn("Jarvis chime error:", e);
+      console.warn("Frame capture error:", e);
+      return null;
     }
   };
+
+  // ─── Capture Manual Snapshot ──────────────────────────────────────────────
+  const captureSnapshot = (alsoIndex: boolean = true) => {
+    const frame = captureCurrentFrame();
+    if (frame) {
+      setSnapshots(prev => [frame, ...prev.slice(0, 4)]);
+      setAttachedVisualContext({ source: activeVisionSource, dataUrl: frame });
+      triggerToast(`Snapshot saved from ${activeVisionSource}. Attached to prompt.`);
+      if (alsoIndex) {
+        fetch("/api/snow/vision/index-scene", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: frame, source: activeVisionSource })
+        }).catch(() => {});
+      }
+    } else {
+      triggerToast("No active video feed to capture.");
+    }
+  };
+
+  // ─── Astra Episodic Memory Auto-Observation Loop (every 14s) ──────────────
+  useEffect(() => {
+    if (!autoObserve || (!isCameraActive && !isScreenActive)) return;
+    const interval = setInterval(() => {
+      const frame = captureCurrentFrame();
+      if (frame) {
+        fetch("/api/snow/vision/index-scene", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: frame, source: activeVisionSource })
+        }).catch(err => console.warn("Auto-observe failed:", err));
+      }
+    }, 14000);
+    return () => clearInterval(interval);
+  }, [autoObserve, isCameraActive, isScreenActive, activeVisionSource]);
 
   // ─── Speech Text Cleaner (Strips Markdown/Code/Tags for Crisp Voice) ─────────
   const cleanForSpeech = (rawText: string): string => {
     if (!rawText) return "";
     return rawText
-      // Strip markdown code blocks
-      .replace(/```[\s\S]*?```/g, "Code omitted for speech.")
-      // Strip inline code
+      .replace(/```[\s\S]*?```/g, "Code block omitted.")
       .replace(/`([^`]+)`/g, "$1")
-      // Strip markdown bold/italics/headers
       .replace(/[#*_~>]/g, "")
-      // Strip bracketed widgets/tags like [UI_WEATHER: ...] or [WEATHER: ...]
       .replace(/\[(?:WEATHER|UI_[A-Z_]+)\s*:?[^\]]*\]/gi, "")
       .replace(/\[[^\]]*\]/g, "")
-      // Strip URLs
       .replace(/https?:\/\/\S+/g, "")
-      // Strip raw JSON
       .replace(/\{[^{}]*\}/g, "")
-      // Collapse multiple whitespace
       .replace(/\s+/g, " ")
       .trim();
   };
 
-  // ─── Stop Ongoing Jarvis Speech (Barge-In) ───────────────────────────────────
-  const stopJarvisSpeech = () => {
+  // ─── Stop Ongoing Snow Speech (Barge-In) ────────────────────────────────────
+  const stopSnowSpeech = () => {
+    speechQueueRef.current = [];
+    isPlayingQueueRef.current = false;
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
     setIsSpeaking(false);
+    if (wakeWordEnabled) {
+      wakeEngineRef.current?.resume(600);
+    }
   };
 
-  // ─── Speak Response as Jarvis ────────────────────────────────────────────────
-  const speakJarvis = (textToSpeak: string) => {
+  // ─── Sentence-Level Speech Queue for Sub-Second Vocal Delivery ───────────────
+  const processNextSpeechQueueItem = () => {
+    if (isMuted || !("speechSynthesis" in window) || speechQueueRef.current.length === 0) {
+      isPlayingQueueRef.current = false;
+      setIsSpeaking(false);
+      if (wakeWordEnabled) {
+        wakeEngineRef.current?.resume(600);
+      }
+      return;
+    }
+
+    isPlayingQueueRef.current = true;
+    setIsSpeaking(true);
+    const nextSentence = speechQueueRef.current.shift()!;
+    const utterance = new SpeechSynthesisUtterance(nextSentence);
+    utterance.rate = 1.05;
+    utterance.pitch = 0.98;
+
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find(v => 
+      (v.name.includes("UK English") || v.name.includes("Daniel") || v.name.includes("Natural") || v.name.includes("Google UK English Male"))
+    ) || voices.find(v => v.lang.startsWith("en-GB")) 
+      || voices.find(v => v.lang.startsWith("en-US")) 
+      || voices.find(v => v.lang.startsWith("en"));
+
+    if (preferred) utterance.voice = preferred;
+
+    utterance.onend = () => {
+      processNextSpeechQueueItem();
+    };
+    utterance.onerror = () => {
+      processNextSpeechQueueItem();
+    };
+
+    window.speechSynthesis.speak(utterance);
+  };
+
+  // ─── Speak Response as Snow ──────────────────────────────────────────────────
+  const speakSnow = (textToSpeak: string) => {
     if (isMuted || !("speechSynthesis" in window)) return;
     try {
-      window.speechSynthesis.cancel();
+      stopSnowSpeech();
+      wakeEngineRef.current?.pause();
       const cleaned = cleanForSpeech(textToSpeak);
       if (!cleaned) return;
 
-      // Extract first 2-3 sentences for concise, crisp spoken delivery
       const sentenceMatches = cleaned.match(/[^.!?]+[.!?]+/g);
-      const spokenSummary = sentenceMatches && sentenceMatches.length > 0 
-        ? sentenceMatches.slice(0, 3).join(" ").trim() 
-        : cleaned.slice(0, 260).trim();
+      const sentences = sentenceMatches && sentenceMatches.length > 0 
+        ? sentenceMatches.slice(0, 3) 
+        : [cleaned.slice(0, 260)];
 
-      const utterance = new SpeechSynthesisUtterance(spokenSummary);
-      utterance.rate = 1.05; // Slightly brisk, intelligent cadence
-      utterance.pitch = 0.98; // Grounded, crisp Jarvis tone
-
-      const voices = window.speechSynthesis.getVoices();
-      const preferred = voices.find(v => 
-        (v.name.includes("UK English") || v.name.includes("Daniel") || v.name.includes("Natural") || v.name.includes("Google UK English Male"))
-      ) || voices.find(v => v.lang.startsWith("en-GB")) 
-        || voices.find(v => v.lang.startsWith("en-US")) 
-        || voices.find(v => v.lang.startsWith("en"));
-
-      if (preferred) utterance.voice = preferred;
-
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
-
-      window.speechSynthesis.speak(utterance);
+      speechQueueRef.current = sentences.map(s => s.trim()).filter(Boolean);
+      processNextSpeechQueueItem();
     } catch (e) {
       console.warn("Speech synthesis error:", e);
       setIsSpeaking(false);
+      if (wakeWordEnabled) {
+        wakeEngineRef.current?.resume(600);
+      }
     }
   };
+
+  // ─── Real-Time VAD Microphone Energy Monitor for True Hands-Free Barge-In ──
+  useEffect(() => {
+    if (!isSpeaking || isMuted) {
+      if (vadIntervalRef.current) {
+        clearInterval(vadIntervalRef.current);
+        vadIntervalRef.current = null;
+      }
+      return;
+    }
+
+    let isInterrupted = false;
+
+    const initVAD = async () => {
+      try {
+        if (!vadStreamRef.current) {
+          vadStreamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        }
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioCtx) return;
+        if (!vadAudioCtxRef.current || vadAudioCtxRef.current.state === "closed") {
+          vadAudioCtxRef.current = new AudioCtx();
+        } else if (vadAudioCtxRef.current.state === "suspended") {
+          await vadAudioCtxRef.current.resume();
+        }
+
+        const source = vadAudioCtxRef.current.createMediaStreamSource(vadStreamRef.current);
+        const analyser = vadAudioCtxRef.current.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        vadAnalyserRef.current = analyser;
+
+        const buffer = new Uint8Array(analyser.frequencyBinCount);
+
+        vadIntervalRef.current = setInterval(() => {
+          if (!isSpeaking || isInterrupted) return;
+          analyser.getByteFrequencyData(buffer);
+          let sum = 0;
+          for (let i = 0; i < buffer.length; i++) sum += buffer[i];
+          const averageVolume = sum / buffer.length;
+
+          // If sound level crosses conversational threshold (user speaking while AI speaks)
+          if (averageVolume > 38) {
+            isInterrupted = true;
+            console.log("[BARGE-IN] User speech detected -> Interrupting Snow");
+            stopSnowSpeech();
+            triggerToast("⚡ Interrupted: Snow paused.");
+            startSnowVoiceListening();
+          }
+        }, 80);
+      } catch (e) {
+        console.warn("VAD init notice:", e);
+      }
+    };
+
+    initVAD();
+
+    return () => {
+      if (vadIntervalRef.current) {
+        clearInterval(vadIntervalRef.current);
+        vadIntervalRef.current = null;
+      }
+    };
+  }, [isSpeaking, isMuted]);
 
   // Ref to handleSendMessage to avoid stale closures in voice timers
   const handleSendMessageRef = useRef<(text?: string) => Promise<void>>(async () => {});
 
   // ─── Continuous Voice Recognition with Auto-Submission ─────────────────────
-  const startJarvisVoiceListening = () => {
+  const startSnowVoiceListening = (initialCommand?: string) => {
     // Barge-in: interrupt ongoing speech if any
-    stopJarvisSpeech();
+    stopSnowSpeech();
+    wakeEngineRef.current?.pause();
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
@@ -1059,12 +1333,23 @@ export default function App() {
     recognition.interimResults = true;
     recognition.lang = "en-US";
 
-    let lastTranscript = "";
+    let lastTranscript = initialCommand || "";
+    if (initialCommand) {
+      setInputText(initialCommand);
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = setTimeout(() => {
+        if (lastTranscript.trim()) {
+          try { recognition.stop(); } catch {}
+          setIsListening(false);
+          handleSendMessageRef.current(lastTranscript.trim());
+        }
+      }, 1400);
+    }
 
     recognition.onstart = () => {
       setIsListening(true);
-      playJarvisWakeChime();
-      triggerToast("⚡ Jarvis Listening (Speak your command)...");
+      snowAudio.playWakeChime();
+      triggerToast("⚡ Snow Listening (Speak your command)...");
     };
 
     recognition.onresult = (event: any) => {
@@ -1100,11 +1385,15 @@ export default function App() {
       console.error("Speech recognition error:", event.error);
       if (event.error !== "no-speech") {
         setIsListening(false);
+        if (wakeWordEnabled) wakeEngineRef.current?.resume(600);
       }
     };
 
     recognition.onend = () => {
       setIsListening(false);
+      if (!isSpeaking && wakeWordEnabled) {
+        wakeEngineRef.current?.resume(600);
+      }
     };
 
     recognitionRef.current = recognition;
@@ -1113,6 +1402,7 @@ export default function App() {
     } catch (e) {
       console.warn("Failed to start speech recognition:", e);
       setIsListening(false);
+      if (wakeWordEnabled) wakeEngineRef.current?.resume(600);
     }
   };
 
@@ -1123,9 +1413,52 @@ export default function App() {
         try { recognitionRef.current.stop(); } catch {}
       }
       setIsListening(false);
+      snowAudio.playStandbySweep();
       triggerToast("Voice input paused.");
+      if (wakeWordEnabled) wakeEngineRef.current?.resume(600);
     } else {
-      startJarvisVoiceListening();
+      startSnowVoiceListening();
+    }
+  };
+
+  // ─── Ambient "Hey Snow" Wake Word Engine Lifecycle ──────────────────────────
+  useEffect(() => {
+    const engine = new AmbientWakeWordEngine({
+      onWake: (extractedCommand) => {
+        snowAudio.playWakeChime();
+        triggerToast("⚡ \"Hey Snow\" Awakened!");
+        startSnowVoiceListening(extractedCommand);
+      },
+      onStatusChange: (status) => {
+        setWakeWordStatus(status);
+      }
+    });
+
+    wakeEngineRef.current = engine;
+    if (wakeWordEnabled && !isSpeaking && !isListening) {
+      engine.setEnabled(true);
+    }
+
+    return () => {
+      engine.stopListening();
+    };
+  }, [wakeWordEnabled]);
+
+  const toggleWakeWord = () => {
+    const next = !wakeWordEnabled;
+    setWakeWordEnabled(next);
+    try {
+      localStorage.setItem("snow_wake_word", String(next));
+    } catch {}
+    if (wakeEngineRef.current) {
+      wakeEngineRef.current.setEnabled(next);
+    }
+    if (next) {
+      snowAudio.playConfirmationPing();
+      triggerToast("🎙️ Ambient Wake Word Active (Say 'Hey Snow')");
+    } else {
+      snowAudio.playStandbySweep();
+      triggerToast("Ambient Wake Word Disabled");
     }
   };
 
@@ -1157,7 +1490,7 @@ export default function App() {
           // Rapid Double-Space detected!
           e.preventDefault();
           lastSpacePressRef.current = 0;
-          startJarvisVoiceListening();
+          startSnowVoiceListening();
         }
       }
     };
@@ -1238,8 +1571,8 @@ export default function App() {
     const rawText = textToSend || inputText;
     if (!rawText.trim() || isLoading) return;
 
-    // Barge-in: immediately stop any active Jarvis speech
-    stopJarvisSpeech();
+    // Barge-in: immediately stop any active Snow speech
+    stopSnowSpeech();
 
     let promptForBackend = rawText.trim();
     if (attachedContextFiles.length > 0) {
@@ -1255,8 +1588,26 @@ export default function App() {
       setIsListening(false);
     }
 
+    // Grab visual frame if video stream is active or visual context is attached
+    let visualFrameToSend = attachedVisualContext?.dataUrl || null;
+    let visualSource = attachedVisualContext?.source || activeVisionSource;
+    if (!visualFrameToSend && (isCameraActive || isScreenActive)) {
+      visualFrameToSend = captureCurrentFrame();
+    }
+    const imagesPayload = visualFrameToSend ? [visualFrameToSend] : undefined;
+    setAttachedVisualContext(null);
+
     const now = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-    setChatHistory((prev) => [...prev, { id: `user-${Date.now()}`, sender: "user", text: rawText.trim(), timestamp: now }]);
+    setChatHistory((prev) => [
+      ...prev,
+      {
+        id: `user-${Date.now()}`,
+        sender: "user",
+        text: rawText.trim(),
+        timestamp: now,
+        visualContext: visualFrameToSend ? { source: visualSource, preview: visualFrameToSend } : undefined
+      }
+    ]);
     setInputText("");
     setIsLoading(true);
     setCommandCount(c => c + 1);
@@ -1270,6 +1621,7 @@ export default function App() {
         body: JSON.stringify({
           prompt: promptForBackend,
           model: selectedModel,
+          images: imagesPayload,
           history: chatHistory.slice(-10).map(m => ({
             role: m.sender === "snow" ? "model" : "user",
             text: m.text
@@ -1277,76 +1629,63 @@ export default function App() {
         })
       });
 
-      let data: any;
-      try {
-        data = await res.json();
-      } catch {
-        throw new Error(`Server returned HTTP ${res.status}`);
+      if (!res.ok) {
+        let errData: any;
+        try { errData = await res.json(); } catch {}
+        throw new Error(errData?.error || `Server returned HTTP ${res.status}: ${res.statusText}`);
       }
 
-      if (!res.ok) throw new Error(data.error || `Server error (${res.status})`);
-      
-      const aiText = data.text;
+      const data = await res.json();
+      const assistantText = data.text || "No response received.";
+      const assistantTime = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
       setGroundingInfo(data.grounding || null);
 
-      let widgetData: any = null;
-      let widgetType: "weather" | "news" | "stock" | "sport" | "time" | "system" | null = null;
+      // Strip widget tag artifacts before presentation
+      const cleanDisplay = stripTagArtifacts(assistantText);
 
-      const parseTagJson = (raw: string, tagName: string): any | null => {
-        const rx = new RegExp(`\\[${tagName}\\s*:?\\s*(\\{[\\s\\S]*?\\})\\s*\\]`, "i");
-        const m = raw.match(rx);
-        if (m?.[1]) { try { return JSON.parse(m[1]); } catch {} }
-        const jsonStr = extractJsonFromTag(raw, `[${tagName}:`);
-        if (jsonStr) { try { return JSON.parse(jsonStr); } catch {} }
-        return null;
-      };
-
-      const tryWidget = (tagName: string, setter: (v: any) => void, type: typeof widgetType) => {
-        const parsed = parseTagJson(aiText, tagName);
-        if (parsed) { setter(parsed); widgetData = parsed; widgetType = type; }
-      };
-
-      const wxStateM = aiText.match(/\[WEATHER\s*:?\s*([A-Z]+)\]/i);
-      if (wxStateM) setWeatherState(wxStateM[1].toLowerCase() as WeatherType);
-
-      tryWidget("UI_WEATHER", setWeatherWidget, "weather");
-      tryWidget("UI_NEWS",    setNewsWidget,    "news");
-      tryWidget("UI_STOCK",   setStockWidget,   "stock");
-      tryWidget("UI_SPORT",   setSportWidget,   "sport");
-      tryWidget("UI_TIME",    setTimeWidget,    "time");
-
-      if (/\[UI_JOKE/i.test(aiText)) {
-        setShowConfetti(true);
-        setTimeout(() => setShowConfetti(false), 3000);
-      }
-
-      let cleanDisplay = aiText
-        .replace(/\[(?:WEATHER|UI_[A-Z_]+)\s*:?[^\]]*\]/gi, "")
-        .replace(/\n{3,}/g, "\n\n")
-        .replace(/[ \t]{2,}/g, " ")
-        .trim();
+      // Extract interactive UI widgets
+      let dynamicWidget = tryWidget("WEATHER", assistantText, "weather");
+      if (!dynamicWidget) dynamicWidget = tryWidget("UI_NEWS", assistantText, "news");
+      if (!dynamicWidget) dynamicWidget = tryWidget("UI_STOCK", assistantText, "stock");
+      if (!dynamicWidget) dynamicWidget = tryWidget("UI_SPORT", assistantText, "sport");
+      if (!dynamicWidget) dynamicWidget = tryWidget("UI_TIME", assistantText, "time");
+      if (!dynamicWidget) dynamicWidget = tryWidget("UI_MUSIC", assistantText, "music");
+      if (!dynamicWidget) dynamicWidget = tryWidget("UI_SYSTEM", assistantText, "system");
+      if (!dynamicWidget) dynamicWidget = tryWidget("UI_VISUAL_MEMORY", assistantText, "visual_memory");
 
       setResponseStats({ time: ((Date.now() - startTime) / 1000).toFixed(2) + "s", network: "Optimal", model: data.model || selectedModel });
 
-      const replyTime = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
       setChatHistory((prev) => [
         ...prev,
         {
-          id: `snow-${Date.now()}`,
+          id: `reply-${Date.now()}`,
           sender: "snow",
           text: cleanDisplay,
-          timestamp: replyTime,
-          widget: widgetType ? { type: widgetType, data: widgetData } : undefined,
-          toolActivity: data.toolActivity || []
+          timestamp: assistantTime,
+          widget: dynamicWidget,
+          toolActivity: data.toolActivity,
+          toolSteps: data.toolSteps,
+          userPrompt: rawText
         }
       ]);
+
+      if (data.sentinel) {
+        setLiveStats(prev => ({ ...prev, sentinel: data.sentinel }));
+        if (data.sentinel.alerts?.length > 0) {
+          snowAudio.playSentinelAlert();
+        }
+      }
+
+      if (data.toolSteps?.length > 0) {
+        snowAudio.playConfirmationPing();
+      }
 
       fetchMemories();
       fetchBrainStatus();
 
       // Verbal speech delivery
       if (!data.error && cleanDisplay) {
-        speakJarvis(cleanDisplay);
+        speakSnow(cleanDisplay);
       }
     } catch (err: any) {
       console.error("[Snow Chat Error]", err);
@@ -1368,7 +1707,7 @@ export default function App() {
       
       const errTime = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
       setChatHistory((prev) => [...prev, { id: `err-${Date.now()}`, sender: "snow", text: friendlyMsg, timestamp: errTime }]);
-      speakJarvis(friendlyMsg);
+      speakSnow(friendlyMsg);
     } finally {
       setIsLoading(false);
     }
@@ -1446,6 +1785,36 @@ export default function App() {
           <span className="text-xs text-slate-300 font-medium">{currentDateTime.date}</span>
         </div>
 
+        {/* Center-Right Navigation Tabs Bar */}
+        <div className="hidden xl:flex items-center gap-1 bg-slate-950/80 border border-cyan-500/25 p-1 rounded-xl">
+          {[
+            { id: "hud", label: "HUD", icon: Layers },
+            { id: "visual", label: "Visual Memory", icon: Eye },
+            { id: "graph", label: "Graph", icon: BrainCircuit },
+            { id: "vector", label: "Vector", icon: Database },
+            { id: "compiler", label: "Compiler", icon: Sparkles },
+            { id: "sandbox", label: "Sandbox", icon: Code },
+            { id: "models", label: "Models", icon: Cpu },
+          ].map(tab => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as ActiveTab)}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
+                  isActive
+                    ? "bg-cyan-500/25 text-cyan-300 border border-cyan-400/50 shadow-[0_0_12px_rgba(6,182,212,0.3)]"
+                    : "text-slate-400 hover:text-cyan-200 hover:bg-slate-900/60"
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
+        </div>
+
         {/* Right Info Badges & Navigation Tabs */}
         <div className="flex items-center gap-3">
           {/* Quick Weather Badge */}
@@ -1460,6 +1829,26 @@ export default function App() {
             );
           })()}
 
+          {/* Daily Briefing Trigger Button */}
+          <button
+            onClick={() => setShowDailyBriefing(true)}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-xl border bg-amber-950/40 border-amber-400/50 text-amber-300 text-xs font-mono font-bold shadow-[0_0_15px_rgba(245,158,11,0.25)] hover:bg-amber-900/60 transition cursor-pointer"
+            title="Open 100% Live Daily Intelligence Briefing"
+          >
+            <Sun className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden sm:inline">Briefing</span>
+          </button>
+
+          {/* Computer Use Trigger Button */}
+          <button
+            onClick={() => setShowComputerUse(true)}
+            className="flex items-center gap-1.5 px-3 py-1 rounded-xl border bg-cyan-950/40 border-cyan-400/50 text-cyan-300 text-xs font-mono font-bold shadow-[0_0_15px_rgba(6,182,212,0.25)] hover:bg-cyan-900/60 transition cursor-pointer"
+            title="Open Autonomous Linux Computer Use & Screen Actuator"
+          >
+            <Monitor className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden sm:inline">Computer Use</span>
+          </button>
+
           <button
             onClick={() => setShowSettings(!showSettings)}
             className="p-2 rounded-xl border border-cyan-500/20 bg-slate-900/80 hover:bg-cyan-500/10 text-cyan-400 transition cursor-pointer"
@@ -1469,6 +1858,25 @@ export default function App() {
           </button>
         </div>
       </header>
+
+      {/* Daily Briefing Modal */}
+      <DailyBriefingModal
+        isOpen={showDailyBriefing}
+        onClose={() => setShowDailyBriefing(false)}
+        onPlayAudio={(script) => {
+          snowAudio.playWakeChime();
+          speakSnow(script);
+        }}
+        isSpeaking={isSpeaking}
+        onOpenVisualMemory={() => setActiveTab("visual")}
+      />
+
+      {/* Computer Use Drawer */}
+      <ComputerUseDrawer
+        isOpen={showComputerUse}
+        onClose={() => setShowComputerUse(false)}
+        onToast={triggerToast}
+      />
 
       {/* Settings Modal */}
       <AnimatePresence>
@@ -1492,11 +1900,11 @@ export default function App() {
                 <select
                   value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
-                  className="w-full bg-slate-950 border border-cyan-500/30 rounded-lg p-2 text-cyan-200 outline-none focus:border-cyan-400"
+                  className="w-full bg-slate-950 border border-cyan-500/30 rounded-lg p-2 text-cyan-200 outline-none focus:border-cyan-400 font-mono"
                 >
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Fast & Smart)</option>
-                  <option value="gemini-1.5-pro">Gemini 1.5 Pro (Deep Logic)</option>
-                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Lightweight)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Astra Multimodal Real-Time)</option>
+                  <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+                  <option value="gemini-2.5-pro">Gemini 2.5 Pro (Deep Logic)</option>
                   <option value="ollama">Ollama Local Engine (Offline)</option>
                 </select>
               </div>
@@ -1543,6 +1951,17 @@ export default function App() {
               onAddDocument={handleAddVectorDoc}
               onRemoveDocument={handleRemoveVectorDoc}
               onClearDocuments={() => setVectorDocs([])}
+            />
+          </div>
+        )}
+        {activeTab === "visual" && (
+          <div className="w-full h-full p-2">
+            <VisualMemoryStore
+              autoObserve={autoObserve}
+              onToggleAutoObserve={() => setAutoObserve(!autoObserve)}
+              onCaptureSnapshot={captureSnapshot}
+              isCameraActive={isCameraActive}
+              isScreenActive={isScreenActive}
             />
           </div>
         )}
@@ -1624,20 +2043,50 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 3 Metric Mini Cards */}
-                <div className="grid grid-cols-3 gap-2 pt-1">
-                  <div className="p-2 rounded-xl bg-slate-950/70 border border-cyan-500/15 text-center">
-                    <span className="text-[9px] text-slate-400 uppercase font-bold block">CPU</span>
+                {/* 4 Metric Mini Cards */}
+                <div className="grid grid-cols-4 gap-1.5 pt-1">
+                  <div className="p-1.5 rounded-xl bg-slate-950/70 border border-cyan-500/15 text-center">
+                    <span className="text-[8.5px] text-slate-400 uppercase font-bold block">CPU</span>
                     <span className="text-xs font-mono font-bold text-cyan-300">{liveStats.cpu}</span>
                   </div>
-                  <div className="p-2 rounded-xl bg-slate-950/70 border border-cyan-500/15 text-center">
-                    <span className="text-[9px] text-slate-400 uppercase font-bold block">Memory</span>
+                  <div className="p-1.5 rounded-xl bg-slate-950/70 border border-cyan-500/15 text-center">
+                    <span className="text-[8.5px] text-slate-400 uppercase font-bold block">Memory</span>
                     <span className="text-xs font-mono font-bold text-cyan-300">{liveStats.ramPct || 36}%</span>
                   </div>
-                  <div className="p-2 rounded-xl bg-slate-950/70 border border-cyan-500/15 text-center">
-                    <span className="text-[9px] text-slate-400 uppercase font-bold block">Disk</span>
-                    <span className="text-[10px] font-mono font-bold text-cyan-300">{liveStats.disk || "69.3/157.5 GB"}</span>
+                  <div className="p-1.5 rounded-xl bg-slate-950/70 border border-cyan-500/15 text-center">
+                    <span className="text-[8.5px] text-slate-400 uppercase font-bold block">Thermal</span>
+                    <span className="text-xs font-mono font-bold text-amber-300">{liveStats.temp || "40°C"}</span>
                   </div>
+                  <div className="p-1.5 rounded-xl bg-slate-950/70 border border-cyan-500/15 text-center">
+                    <span className="text-[8.5px] text-slate-400 uppercase font-bold block">Disk</span>
+                    <span className="text-[10px] font-mono font-bold text-cyan-300">{liveStats.disk?.split("/")[0] || "69GB"}</span>
+                  </div>
+                </div>
+
+                {/* Sentinel Autonomous OS Watchdog Badge */}
+                <div className={`p-2 rounded-xl border text-[10.5px] flex flex-col gap-1 transition-all duration-300 ${
+                  liveStats.sentinel?.status === "CRITICAL"
+                    ? "bg-rose-950/40 border-rose-500/50 text-rose-200"
+                    : liveStats.sentinel?.status === "WARNING"
+                    ? "bg-amber-950/40 border-amber-500/50 text-amber-200"
+                    : "bg-emerald-950/30 border-emerald-500/40 text-emerald-200"
+                }`}>
+                  <div className="flex items-center justify-between font-mono font-bold text-[10px]">
+                    <span className="flex items-center gap-1.5">
+                      {liveStats.sentinel?.status === "CRITICAL" || liveStats.sentinel?.status === "WARNING" ? (
+                        <ShieldAlert className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                      ) : (
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                      )}
+                      <span>SENTINEL: {liveStats.sentinel?.status || "OPTIMAL"}</span>
+                    </span>
+                    <span className="text-[9px] opacity-75">AUTONOMOUS</span>
+                  </div>
+                  {liveStats.sentinel?.alerts && liveStats.sentinel.alerts.length > 0 && (
+                    <div className="text-[9.5px] text-amber-300/90 pl-1 font-mono">
+                      • {liveStats.sentinel.alerts[0]}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1846,9 +2295,33 @@ export default function App() {
               <div className="absolute inset-0 hologram-bg opacity-30 pointer-events-none" />
               <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-400/80 to-transparent animate-pulse" />
 
-              {/* Arc Reactor Center Core */}
+              {/* Arc Reactor Center Core & Astra Holographic Vision Orb */}
               <div className="z-10 flex flex-col items-center gap-3">
-                <SnowArcCore state={isLoading ? "thinking" : isListening ? "listening" : isSpeaking ? "speaking" : "standby"} />
+                <AstraVisionOrb
+                  state={
+                    isSpeaking ? "speaking" :
+                    isLoading ? "thinking" :
+                    isListening ? "listening" :
+                    (isCameraActive || isScreenActive) ? "observing" : "idle"
+                  }
+                  isCameraActive={isCameraActive}
+                  isScreenActive={isScreenActive}
+                  activeVisionSource={activeVisionSource}
+                  videoRef={videoRef}
+                  onToggleCamera={toggleCamera}
+                  onToggleScreen={toggleScreen}
+                  onCaptureSnapshot={captureSnapshot}
+                  autoObserve={autoObserve}
+                  onToggleAutoObserve={() => setAutoObserve(!autoObserve)}
+                  latestSnapshot={snapshots[0] || null}
+                  onOrbClick={() => {
+                    if (isSpeaking) {
+                      stopSnowSpeech();
+                    } else {
+                      toggleSpeechRecognition();
+                    }
+                  }}
+                />
 
                 {/* S N O W Title */}
                 <div className="flex flex-col items-center gap-1.5">
@@ -1866,7 +2339,17 @@ export default function App() {
                       className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-400/50 text-emerald-300 text-[10px] font-mono tracking-wider shadow-[0_0_15px_rgba(16,185,129,0.3)] mt-1"
                     >
                       <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                      <span>JARVIS AUDIO ACTIVE</span>
+                      <span>SNOW AUDIO ACTIVE</span>
+                    </motion.div>
+                  )}
+                  {wakeWordEnabled && !isSpeaking && !isListening && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-cyan-950/70 border border-cyan-400/40 text-cyan-300 text-[10px] font-mono tracking-wider shadow-[0_0_12px_rgba(6,182,212,0.25)] mt-1"
+                    >
+                      <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
+                      <span>WAKE WORD READY ("HEY SNOW")</span>
                     </motion.div>
                   )}
                   {isListening && (
@@ -1939,6 +2422,28 @@ export default function App() {
                           : "bg-slate-950/90 border border-cyan-500/25 text-slate-100 rounded-tl-none shadow-[0_0_20px_rgba(0,0,0,0.5)] hover:border-cyan-500/40"
                       }`}
                     >
+                      {/* Render Visual Input Frame if attached */}
+                      {msg.visualContext && (
+                        <div className="mb-2 overflow-hidden rounded-xl border border-cyan-400/40 bg-black/60 p-1.5 shadow-lg">
+                          <img
+                            src={msg.visualContext.preview}
+                            alt="Visual Context"
+                            className="max-h-44 w-full rounded-lg object-contain bg-black"
+                          />
+                          <div className="flex items-center justify-between px-1 pt-1 text-[9px] font-mono text-cyan-300">
+                            <span className="flex items-center gap-1">
+                              <Eye className="w-2.5 h-2.5 text-cyan-400" />
+                              <span>INPUT: {msg.visualContext.source.toUpperCase()}</span>
+                            </span>
+                            <span className="text-slate-400">512×512 WebP</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {msg.sender === "snow" && (
+                        <AgentTelemetryCard steps={msg.toolSteps} tools={msg.toolActivity} />
+                      )}
+
                       {msg.sender === "snow" ? (
                         <TypewriterText text={msg.text} />
                       ) : (
@@ -2006,6 +2511,47 @@ export default function App() {
                             <div className="text-2xl font-bold text-white">{msg.widget.data.price} <span className="text-xs text-emerald-400">{msg.widget.data.change}</span></div>
                           </div>
                         )}
+                        {msg.widget.type === "visual_memory" && (
+                          <div className="p-3.5 rounded-2xl border border-cyan-500/30 bg-slate-950/95 text-xs space-y-2.5 shadow-[0_0_25px_rgba(6,182,212,0.15)]">
+                            <div className="flex items-center justify-between border-b border-cyan-500/20 pb-1.5 font-mono">
+                              <span className="flex items-center gap-1.5 text-cyan-300 font-bold text-[11px]">
+                                <Eye className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+                                <span>ASTRA VISUAL RECALL · {msg.widget.data.episodes?.length || 0} MATCHES</span>
+                              </span>
+                              <span className="text-[10px] text-slate-400">SPATIAL TIMELINE</span>
+                            </div>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {msg.widget.data.episodes?.map((ep: any) => (
+                                <div key={ep.id} className="rounded-xl bg-slate-900/90 border border-cyan-500/20 p-2.5 space-y-1.5 hover:border-cyan-400/50 transition">
+                                  {ep.thumbnail && (
+                                    <div className="w-full h-28 rounded-lg bg-black overflow-hidden border border-cyan-500/25 relative group">
+                                      <img src={ep.thumbnail} alt={ep.scene} className="w-full h-full object-cover" />
+                                      <div className="absolute top-1.5 right-1.5 px-2 py-0.5 rounded-full bg-black/75 backdrop-blur-md text-[9px] font-mono text-cyan-300 font-bold border border-cyan-500/30">
+                                        {new Date(ep.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                      </div>
+                                    </div>
+                                  )}
+                                  <div className="flex items-center justify-between font-mono text-[9px] text-slate-400">
+                                    <span className="uppercase text-cyan-300 font-bold flex items-center gap-1">
+                                      {ep.source === "screen" ? <Monitor className="w-2.5 h-2.5" /> : <Camera className="w-2.5 h-2.5" />}
+                                      {ep.source}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-200 line-clamp-2 leading-relaxed font-sans">{ep.scene}</p>
+                                  {ep.objects && (
+                                    <div className="flex flex-wrap gap-1 pt-1">
+                                      {ep.objects.split(",").slice(0, 3).map((obj: string, i: number) => (
+                                        <span key={i} className="px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-500/30 text-[9px] font-mono text-cyan-200">
+                                          {obj.trim()}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -2022,18 +2568,20 @@ export default function App() {
 
               {/* Chat Input Container */}
               <div className="p-3.5 border-t border-cyan-500/20 bg-slate-950/95 relative space-y-2">
-                {/* Jarvis Voice & Telemetry Status Bar */}
+                {/* Snow Voice & Telemetry Status Bar */}
                 <div className="flex items-center justify-between px-1 text-[11px] font-mono">
                   <div className="flex items-center gap-2">
                     <div className={`w-2 h-2 rounded-full ${
                       isSpeaking ? "bg-emerald-400 animate-ping" :
                       isListening ? "bg-rose-400 animate-ping" :
-                      isLoading ? "bg-cyan-400 animate-spin" : "bg-slate-500"
+                      isLoading ? "bg-cyan-400 animate-spin" :
+                      wakeWordEnabled ? "bg-cyan-400/80 animate-pulse" : "bg-slate-500"
                     }`} />
                     <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
-                      {isSpeaking ? "Jarvis Speaking..." :
+                      {isSpeaking ? "Snow Speaking..." :
                        isListening ? "Listening (Speak Now)..." :
-                       isLoading ? "Processing Directive..." : "Jarvis Standby"}
+                       isLoading ? "Processing Directive..." :
+                       wakeWordEnabled ? "Snow Standby (Listening for 'Hey Snow')" : "Snow Standby"}
                     </span>
                     <span className="px-1.5 py-0.5 rounded bg-slate-800/80 border border-cyan-500/20 text-cyan-300 text-[10px] hidden sm:inline" title="Double tap Space anywhere to wake">
                       Space ×2 to Wake
@@ -2041,11 +2589,25 @@ export default function App() {
                   </div>
 
                   <div className="flex items-center gap-2">
+                    {/* Ambient Wake Word Toggle Button */}
+                    <button
+                      onClick={toggleWakeWord}
+                      className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg border text-[10px] transition cursor-pointer font-mono ${
+                        wakeWordEnabled
+                          ? "bg-cyan-950/80 border-cyan-400/60 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.25)] hover:bg-cyan-900/80"
+                          : "bg-slate-900/80 border-slate-700/50 text-slate-400 hover:bg-slate-800/80"
+                      }`}
+                      title={wakeWordEnabled ? "Ambient Wake Active: Say 'Hey Snow' anytime hands-free" : "Click to enable hands-free 'Hey Snow' wake detection"}
+                    >
+                      <Mic className={`w-3 h-3 ${wakeWordEnabled ? "text-cyan-400 animate-pulse" : "text-slate-500"}`} />
+                      <span>{wakeWordEnabled ? "Wake: Hey Snow" : "Wake: Off"}</span>
+                    </button>
+
                     <button
                       onClick={() => {
-                        if (!isMuted) stopJarvisSpeech();
+                        if (!isMuted) stopSnowSpeech();
                         setIsMuted(!isMuted);
-                        triggerToast(!isMuted ? "Jarvis Voice Muted." : "Jarvis Voice Unmuted.");
+                        triggerToast(!isMuted ? "Snow Voice Muted." : "Snow Voice Unmuted.");
                       }}
                       className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] transition cursor-pointer font-mono ${
                         isMuted 
@@ -2079,16 +2641,91 @@ export default function App() {
                   </div>
                 )}
 
+                {/* Visual Context Attachment Pill */}
+                {(attachedVisualContext || isCameraActive || isScreenActive) && (
+                  <div className="flex items-center gap-2 pb-1 font-mono text-[11px]">
+                    <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-cyan-950/90 border border-cyan-400/40 text-cyan-300 shadow-md">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                      <span className="font-bold uppercase tracking-wider">
+                        {attachedVisualContext
+                          ? `Visual Context: ${attachedVisualContext.source}`
+                          : isScreenActive
+                          ? "Desktop Screen Live"
+                          : "Webcam Eye Live"}
+                      </span>
+                      {attachedVisualContext?.dataUrl && (
+                        <img
+                          src={attachedVisualContext.dataUrl}
+                          alt="Thumbnail"
+                          className="w-5 h-5 rounded object-cover border border-cyan-500/50 ml-1"
+                        />
+                      )}
+                      <button
+                        onClick={captureSnapshot}
+                        className="ml-1 text-cyan-300 hover:text-white px-1.5 py-0.5 rounded bg-cyan-500/20 text-[9px] font-bold border border-cyan-400/30 cursor-pointer"
+                        title="Capture current video frame into prompt"
+                      >
+                        SNAP
+                      </button>
+                      {attachedVisualContext && (
+                        <button
+                          onClick={() => setAttachedVisualContext(null)}
+                          className="text-cyan-400/60 hover:text-rose-400 ml-0.5 cursor-pointer"
+                          title="Detach image"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-2 rounded-2xl bg-slate-900 border border-cyan-500/35 p-2 px-3 shadow-[inset_0_0_15px_rgba(6,182,212,0.05)] focus-within:border-cyan-400 focus-within:shadow-[0_0_25px_rgba(34,211,238,0.25)] transition-all">
                   <label htmlFor="chat-file-attachment" className="p-1.5 text-cyan-400/70 hover:text-cyan-300 transition cursor-pointer" title="Attach Workspace / Local File">
                     <Paperclip className="w-4 h-4" />
                     <input id="chat-file-attachment" type="file" onChange={handleCustomFileUpload} className="hidden" />
                   </label>
 
+                  {/* Astra Webcam Button */}
+                  <button
+                    type="button"
+                    onClick={toggleCamera}
+                    className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                      isCameraActive
+                        ? "bg-emerald-500/20 border-emerald-400 text-emerald-300 shadow-[0_0_12px_rgba(16,185,129,0.4)] animate-pulse"
+                        : "text-cyan-400/70 hover:text-cyan-300 hover:bg-cyan-500/10 border-transparent"
+                    }`}
+                    title={isCameraActive ? "Turn Off Webcam" : "Turn On Astra Webcam Vision"}
+                  >
+                    <Camera className="w-4 h-4" />
+                  </button>
+
+                  {/* Astra Screen Share Button */}
+                  <button
+                    type="button"
+                    onClick={toggleScreen}
+                    className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                      isScreenActive
+                        ? "bg-cyan-500/20 border-cyan-400 text-cyan-300 shadow-[0_0_12px_rgba(6,182,212,0.4)] animate-pulse"
+                        : "text-cyan-400/70 hover:text-cyan-300 hover:bg-cyan-500/10 border-transparent"
+                    }`}
+                    title={isScreenActive ? "Disconnect Desktop Screen Share" : "Share Desktop Screen with Snow"}
+                  >
+                    <Monitor className="w-4 h-4" />
+                  </button>
+
                   <input
                     id="chat-input-field"
                     type="text"
-                    placeholder={isListening ? "Listening to your voice..." : attachedContextFiles.length > 0 ? "Ask SNOW about attached files..." : "Ask SNOW anything or double-tap Space..."}
+                    placeholder={
+                      isListening
+                        ? "Listening to your voice..."
+                        : (isCameraActive || isScreenActive)
+                        ? `Astra Vision active (${activeVisionSource}) — Ask what Snow sees...`
+                        : attachedContextFiles.length > 0
+                        ? "Ask SNOW about attached files..."
+                        : "Ask SNOW anything or double-tap Space..."
+                    }
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}

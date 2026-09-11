@@ -26,6 +26,16 @@ export interface ChromaVectorDocument {
   timestamp: string;
 }
 
+export interface VisualEpisode {
+  id: string;
+  source: string;
+  scene: string;
+  objects: string;
+  activity?: string;
+  thumbnail?: string;
+  timestamp: string;
+}
+
 export interface FeedbackEntry {
   id: string;
   prompt: string;
@@ -126,7 +136,21 @@ function getDb(): Database.Database {
         notes TEXT,
         timestamp TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS visual_episodes (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        scene TEXT NOT NULL,
+        objects TEXT NOT NULL,
+        activity TEXT,
+        thumbnail TEXT,
+        timestamp TEXT NOT NULL
+      );
     `);
+
+    try {
+      dbInstance.exec(`ALTER TABLE visual_episodes ADD COLUMN thumbnail TEXT;`);
+    } catch { /* column already exists */ }
 
     autoMigrateJsonToSqlite(dbInstance);
   }
@@ -726,4 +750,58 @@ export async function trainBrain(customInstructions?: string): Promise<{
     report: trainingSummary,
     newMemoriesCount: memories.length
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// EPISODIC VISUAL MEMORY (ASTRA-STYLE SPATIAL & VISUAL RECALL)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function addVisualEpisode(
+  source: string,
+  scene: string,
+  objects: string[] | string,
+  activity?: string,
+  thumbnail?: string
+): VisualEpisode {
+  const db = getDb();
+  const id = `vis-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const timestamp = new Date().toISOString();
+  const objectsStr = Array.isArray(objects) ? objects.join(", ") : String(objects || "");
+  const stmt = db.prepare(`
+    INSERT INTO visual_episodes (id, source, scene, objects, activity, thumbnail, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(id, source, scene, objectsStr, activity || "", thumbnail || "", timestamp);
+  ragIngestFact(source, "observed_scene", `${scene} with items [${objectsStr}] during activity: ${activity || "observed"}`).catch(() => {});
+  return { id, source, scene, objects: objectsStr, activity, thumbnail, timestamp };
+}
+
+export function searchVisualEpisodes(query: string, limit: number = 5): VisualEpisode[] {
+  const db = getDb();
+  const q = `%${query.toLowerCase()}%`;
+  const stmt = db.prepare(`
+    SELECT * FROM visual_episodes
+    WHERE LOWER(scene) LIKE ? OR LOWER(objects) LIKE ? OR LOWER(activity) LIKE ?
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `);
+  return stmt.all(q, q, q, limit) as VisualEpisode[];
+}
+
+export function loadRecentVisualEpisodes(limit: number = 10): VisualEpisode[] {
+  const db = getDb();
+  const stmt = db.prepare(`SELECT * FROM visual_episodes ORDER BY timestamp DESC LIMIT ?`);
+  return stmt.all(limit) as VisualEpisode[];
+}
+
+export function deleteVisualEpisode(id: string): boolean {
+  const db = getDb();
+  const stmt = db.prepare(`DELETE FROM visual_episodes WHERE id = ?`);
+  const res = stmt.run(id);
+  return res.changes > 0;
+}
+
+export function clearVisualEpisodes(): void {
+  const db = getDb();
+  db.exec(`DELETE FROM visual_episodes`);
 }

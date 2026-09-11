@@ -77,7 +77,7 @@ export class McpClient {
     await this.sendRequest("initialize", {
       protocolVersion: "2024-11-05",
       capabilities: {},
-      clientInfo: { name: "snow-jarvis", version: "1.0.0" },
+      clientInfo: { name: "snow", version: "1.0.0" },
     });
 
     // Step 2: notifications/initialized is a one-way notification — NO response expected.

@@ -103,11 +103,29 @@ export class QueryEngine {
   async *submitMessage(
     userContent: string,
     signal: AbortSignal,
+    images?: string[],
   ): AsyncGenerator<QueryEvent> {
+    const contentBlocks: ContentBlock[] = [{ type: "text", text: userContent }];
+    if (images && images.length > 0) {
+      for (const img of images) {
+        const match = img.match(/^data:([^;]+);base64,(.+)$/);
+        if (match) {
+          contentBlocks.push({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: match[1],
+              data: match[2],
+            }
+          });
+        }
+      }
+    }
+
     // 1. Append the user message
     this.messages.push({
       role: "user",
-      content: [{ type: "text", text: userContent }],
+      content: contentBlocks,
       metadata: { timestamp: Date.now() },
     });
 

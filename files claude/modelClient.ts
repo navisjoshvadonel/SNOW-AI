@@ -20,6 +20,7 @@ export type ModelCallParams = {
 };
 
 export const COST_PER_1K: Record<string, [number, number]> = {
+  "gemini-2.0-flash": [0.000075, 0.0003],
   "gemini-2.5-flash": [0.000075, 0.0003],
   "gemini-2.5-pro": [0.00125, 0.005],
   default: [0.000075, 0.0003],
@@ -59,7 +60,7 @@ async function* callModelOnce(params: ModelCallParams): AsyncGenerator<QueryEven
 
   if (!isOffline) {
     const requested = params.model && params.model.startsWith("gemini-") ? params.model : "gemini-2.5-flash";
-    const modelsToTry = [requested, "gemini-2.5-flash", "gemini-1.5-flash"];
+    const modelsToTry = [requested, "gemini-2.5-flash", "gemini-2.0-flash"];
     for (const m of Array.from(new Set(modelsToTry))) {
       try {
         yield* callGeminiOnce({ ...params, model: m }, apiKey!);
@@ -89,6 +90,13 @@ async function* callGeminiOnce(params: ModelCallParams, apiKey: string): AsyncGe
     for (const block of msg.content) {
       if ("text" in block && typeof block.text === "string" && block.text.trim()) {
         parts.push({ text: block.text });
+      } else if ("type" in block && block.type === "image" && (block as any).source) {
+        parts.push({
+          inlineData: {
+            mimeType: (block as any).source.media_type || "image/webp",
+            data: (block as any).source.data
+          }
+        });
       } else if ("type" in block && block.type === "tool_result") {
         let responseObj: any;
         try {
@@ -202,8 +210,12 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
   for (const msg of messages) {
     if (msg.role === "user") {
       let text = "";
+      const images: string[] = [];
       for (const b of msg.content) {
         if ("text" in b) text += b.text + "\n";
+        if ("type" in b && b.type === "image" && (b as any).source?.data) {
+          images.push((b as any).source.data);
+        }
         if ("type" in b && b.type === "tool_result") {
           const toolContent = typeof b.content === "string" ? b.content : JSON.stringify(b.content);
           ollamaMessages.push({
@@ -215,7 +227,11 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
           } as any);
         }
       }
-      if (text) ollamaMessages.push({ role: "user", content: text });
+      if (text || images.length > 0) {
+        const userMsg: any = { role: "user", content: text || "Analyze visual input" };
+        if (images.length > 0) userMsg.images = images;
+        ollamaMessages.push(userMsg);
+      }
     } else if (msg.role === "assistant") {
       let text = "";
       const tool_calls: any[] = [];

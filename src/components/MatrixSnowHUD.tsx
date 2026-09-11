@@ -21,7 +21,7 @@ export const MatrixSnowHUD: React.FC = () => {
     window.addEventListener("resize", resize);
 
     // Matrix Snowfall Rain glyph pool
-    const chars = ["0", "1", "❄", "❅", "❆", "⚡", "JARVIS", "SNOW", "AI", "0x9F", "λ", "Ω", "9", "4", "E", "C"];
+    const chars = ["0", "1", "❄", "❅", "❆", "⚡", "SNOW", "AI", "CORE", "0x9F", "λ", "Ω", "9", "4", "E", "C"];
     
     // Create columns along the corners (left 30% and right 30%)
     const fontSize = 12;

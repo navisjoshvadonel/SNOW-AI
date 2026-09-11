@@ -17,7 +17,7 @@ export default function PromptCompiler({
 }: PromptCompilerProps) {
   // Compute what the compiled prompt looks like in real time!
   const compiledText = React.useMemo(() => {
-    let systemInstruction = `You are JARVIS / SNOW, a highly adaptive, hyper-intelligent digital companion for the Snow AI agent project. Your tone is efficient, slightly witty, and deeply collaborative.
+    let systemInstruction = `You are SNOW, a highly adaptive, hyper-intelligent digital companion for the Snow AI agent project. Your tone is efficient, slightly witty, and deeply collaborative.
 
 OPERATIONAL PROTOCOLS currently loaded:
 `;
