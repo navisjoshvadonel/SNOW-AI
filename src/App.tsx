@@ -9,7 +9,7 @@ import {
   Keyboard, BarChart3, Play, Pause, X,
   CloudLightning, CloudFog, SunMedium, Moon, Wind,
   FolderOpen, FileText, FileCode, Paperclip, Upload, FilePlus,
-  Volume2, VolumeX
+  Volume2, VolumeX, ShieldCheck, Compass, Radio
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import NetworkGraph from "./components/NetworkGraph";
@@ -18,6 +18,9 @@ import PromptCompiler from "./components/PromptCompiler";
 import CodeSandbox from "./components/CodeSandbox";
 import ModelStatus from "./components/ModelStatus";
 import MatrixSnowHUD from "./components/MatrixSnowHUD";
+import QuantumArcCore from "./components/QuantumArcCore";
+import TacticalTelemetryHUD from "./components/TacticalTelemetryHUD";
+import HolographicMissionLog from "./components/HolographicMissionLog";
 import SnowfallBackground from "./components/SnowfallBackground";
 import { MemoryNode, CodeFile } from "./types";
 
@@ -197,157 +200,7 @@ const Snowflake3D = () => (
   </div>
 );
 
-// Cyber Arc Reactor Core Visualizer with Rotating Snowflake Engine
-const SnowArcCore = ({ state }: { state: "standby" | "thinking" | "listening" | "speaking" }) => {
-  return (
-    <div className="relative flex items-center justify-center w-64 h-64 select-none">
-      {/* Outer Glow Ring */}
-      <div className={`absolute inset-0 rounded-full blur-2xl transition-all duration-700 ${
-        state === "thinking" ? "bg-cyan-500/40 scale-110" :
-        state === "listening" ? "bg-rose-500/40 scale-110" :
-        state === "speaking" ? "bg-emerald-500/45 scale-110 shadow-[0_0_45px_rgba(16,185,129,0.5)]" :
-        "bg-cyan-500/20 opacity-70"
-      }`} />
 
-      {/* Rotating Outer Tech Dash Ring */}
-      <motion.div
-        animate={{ rotate: 360 }}
-        transition={{ duration: state === "thinking" ? 4 : state === "speaking" ? 5 : 20, repeat: Infinity, ease: "linear" }}
-        className="absolute inset-0 rounded-full border border-dashed border-cyan-500/30 shadow-[0_0_15px_rgba(6,182,212,0.15)]"
-      />
-
-      {/* Counter-Rotating Mid Tech Ring */}
-      <motion.div
-        animate={{ rotate: -360 }}
-        transition={{ duration: state === "thinking" ? 6 : state === "speaking" ? 7 : 25, repeat: Infinity, ease: "linear" }}
-        className={`absolute inset-3 rounded-full border ${
-          state === "speaking" ? "border-emerald-400/30 border-t-emerald-400/90 border-b-emerald-400/90" :
-          "border-cyan-400/20 border-t-cyan-400/80 border-b-cyan-400/80"
-        }`}
-      />
-
-      {/* Radar Sweep Circle */}
-      <div className="absolute inset-6 rounded-full border border-cyan-500/15 overflow-hidden">
-        <div className="w-full h-full radar-sweep opacity-40" />
-      </div>
-
-      {/* Listening Pulse Rings */}
-      {state === "listening" && (
-        <>
-          <div className="absolute inset-0 border border-rose-500/50 rounded-full animate-ping [animation-duration:1.8s]" />
-          <div className="absolute inset-4 border border-rose-500/30 rounded-full animate-ping [animation-duration:1.8s] [animation-delay:0.4s]" />
-        </>
-      )}
-
-      {/* Speaking Pulse Rings */}
-      {state === "speaking" && (
-        <>
-          <div className="absolute inset-0 border border-emerald-400/60 rounded-full animate-ping [animation-duration:1.3s]" />
-          <div className="absolute inset-4 border border-cyan-400/40 rounded-full animate-ping [animation-duration:1.3s] [animation-delay:0.3s]" />
-        </>
-      )}
-
-      {/* Thinking Pulse Rings */}
-      {state === "thinking" && (
-        <>
-          <div className="absolute inset-0 border border-cyan-400/50 rounded-full animate-ping [animation-duration:2s]" />
-          <div className="absolute inset-4 border border-cyan-400/30 rounded-full animate-ping [animation-duration:2s] [animation-delay:0.5s]" />
-        </>
-      )}
-
-      {/* Inner Glowing Reactor Rings */}
-      <div className="relative w-44 h-44 rounded-full bg-gradient-to-b from-cyan-950/90 to-slate-950 border border-cyan-500/50 flex items-center justify-center shadow-[inset_0_0_35px_rgba(6,182,212,0.4)] overflow-hidden">
-        
-        {/* 3D Holographic Rotating Snowflake Visualizer */}
-        <div className="relative w-36 h-36 flex items-center justify-center pointer-events-none">
-          <motion.div
-            animate={{
-              rotateY: 360,
-              rotateZ: state === "thinking" ? [0, 180, 360] : state === "speaking" ? [-10, 10, -10] : [0, 15, -15, 0],
-              scale: state === "thinking" ? [0.95, 1.08, 0.95] : state === "listening" ? [1, 1.1, 1] : state === "speaking" ? [1.02, 1.14, 1.02] : 1
-            }}
-            transition={{
-              rotateY: { duration: state === "thinking" ? 4 : state === "speaking" ? 6 : 8, repeat: Infinity, ease: "linear" },
-              rotateZ: { duration: state === "thinking" ? 3 : state === "speaking" ? 1.5 : 10, repeat: Infinity, ease: "easeInOut" },
-              scale: { duration: state === "speaking" ? 1.2 : 2, repeat: Infinity, ease: "easeInOut" }
-            }}
-            className="relative flex items-center justify-center w-full h-full"
-          >
-            {/* Primary Glowing Snowflake */}
-            <Snowflake
-              className={`w-20 h-20 transition-all duration-500 ${
-                state === "listening" ? "text-rose-400 drop-shadow-[0_0_25px_rgba(244,63,94,0.9)]" :
-                state === "thinking" ? "text-cyan-200 drop-shadow-[0_0_30px_rgba(34,211,238,0.95)] scale-110" :
-                state === "speaking" ? "text-emerald-300 drop-shadow-[0_0_30px_rgba(16,185,129,0.95)] scale-110" :
-                "text-cyan-300 drop-shadow-[0_0_20px_rgba(34,211,238,0.7)]"
-              }`}
-            />
-
-            {/* Layer 2: Counter-Rotated Crystal Snowflake */}
-            <motion.div
-              animate={{ rotate: -360 }}
-              transition={{ duration: 12, repeat: Infinity, ease: "linear" }}
-              className="absolute"
-            >
-              <Snowflake
-                className={`w-24 h-24 opacity-60 transition-colors duration-500 ${
-                  state === "listening" ? "text-rose-300 drop-shadow-[0_0_15px_rgba(251,113,133,0.6)]" :
-                  state === "speaking" ? "text-emerald-200 drop-shadow-[0_0_20px_rgba(167,243,208,0.7)]" :
-                  "text-blue-300 drop-shadow-[0_0_15px_rgba(147,197,253,0.6)]"
-                }`}
-              />
-            </motion.div>
-
-            {/* Layer 3: Outer Geometric Sparkle Ring */}
-            <motion.div
-              animate={{ rotate: 360, scale: [0.9, 1.05, 0.9] }}
-              transition={{
-                rotate: { duration: 16, repeat: Infinity, ease: "linear" },
-                scale: { duration: 3, repeat: Infinity, ease: "easeInOut" }
-              }}
-              className="absolute"
-            >
-              <Sparkles
-                className={`w-28 h-28 opacity-40 ${
-                  state === "listening" ? "text-rose-400" :
-                  state === "speaking" ? "text-emerald-400" : "text-cyan-400"
-                }`}
-              />
-            </motion.div>
-          </motion.div>
-
-          {/* Central Waveform Overlay */}
-          <div className="absolute inset-0 flex items-center justify-center gap-1 z-20 pointer-events-none opacity-85">
-            {[...Array(7)].map((_, i) => (
-              <motion.div
-                key={i}
-                animate={{
-                  height: state === "thinking" ? [4, 20, 4] :
-                          state === "listening" ? [6, 26, 6] :
-                          state === "speaking" ? [8, 38, 8] : [4, 12, 4]
-                }}
-                transition={{
-                  duration: state === "speaking" ? 0.35 + (i % 3) * 0.1 : 0.6 + (i % 3) * 0.15,
-                  repeat: Infinity,
-                  repeatType: "reverse",
-                  delay: i * 0.04
-                }}
-                className={`w-1 rounded-full ${
-                  state === "listening" ? "bg-rose-200 shadow-[0_0_8px_#fecdd3]" :
-                  state === "speaking" ? "bg-emerald-300 shadow-[0_0_12px_#6ee7b7]" :
-                  state === "thinking" ? "bg-white shadow-[0_0_8px_#ffffff]" : "bg-cyan-100/90 shadow-[0_0_6px_#cff4fc]"
-                }`}
-              />
-            ))}
-          </div>
-        </div>
-
-        {/* Central Core Glowing Overlay */}
-        <div className="absolute inset-4 rounded-full border border-cyan-400/20 bg-cyan-500/5 pointer-events-none" />
-      </div>
-    </div>
-  );
-};
 
 const FormattedMessage = ({ text }: { text: string }) => {
   if (!text) return null;
@@ -1445,8 +1298,82 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
+  const renderWidgetContent = (widget: { type: string; data: any }) => {
+    return (
+      <div className="mt-2.5 p-3 rounded-xl bg-slate-950/80 border border-cyan-500/25 shadow-inner">
+        {widget.type === "weather" && (() => {
+          const isDay = widget.data.isDay !== undefined ? widget.data.isDay : true;
+          const windSpeed = widget.data.windSpeedKm || 0;
+          const visual = getWeatherVisual(widget.data.condition || "Clear", isDay, windSpeed);
+          return (
+            <div className="space-y-2 font-mono">
+              <div className="flex items-center justify-between border-b border-cyan-500/15 pb-1">
+                <span className="font-bold uppercase tracking-wider text-slate-300 text-[11px]">{widget.data.location}</span>
+                <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${visual.badgeColor} border`}>
+                  {visual.tag}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xl font-bold text-white tracking-tight">{widget.data.temp}</div>
+                  <div className={`text-xs capitalize font-semibold ${visual.accentText}`}>{widget.data.condition}</div>
+                </div>
+                <div className="p-2 rounded-xl bg-slate-900 border border-white/10 shadow-inner">
+                  {visual.smallIcon}
+                </div>
+              </div>
+              {(widget.data.humidity || widget.data.wind) && (
+                <div className="grid grid-cols-2 gap-2 pt-1 border-t border-cyan-500/10 text-[10px]">
+                  {widget.data.humidity && <div><span className="text-slate-400">Humidity:</span> <span className="font-bold text-white">{widget.data.humidity}</span></div>}
+                  {widget.data.wind && <div><span className="text-slate-400">Wind:</span> <span className="font-bold text-white">{widget.data.wind}</span></div>}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+        {widget.type === "stock" && (
+          <div className="font-mono">
+            <div className="font-bold border-b border-emerald-500/20 pb-1 mb-1 text-xs text-slate-300">{widget.data.symbol}</div>
+            <div className="text-xl font-bold text-white">{widget.data.price} <span className="text-xs text-emerald-400">{widget.data.change}</span></div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   return (
     <div className={`w-full h-screen flex flex-col transition-colors duration-1000 bg-weather-${weatherState} overflow-hidden font-sans text-white relative bg-slate-950`}>
+      {/* Dynamic Cognitive State Ambient Aura */}
+      <div
+        className={`absolute inset-0 pointer-events-none transition-all duration-1000 z-0 ${
+          isLoading
+            ? "bg-[radial-gradient(ellipse_at_50%_40%,_rgba(6,182,212,0.14)_0%,_rgba(15,23,42,0.6)_50%,_rgba(2,6,23,0.95)_100%)]"
+            : isListening
+            ? "bg-[radial-gradient(ellipse_at_50%_40%,_rgba(244,63,94,0.14)_0%,_rgba(15,23,42,0.6)_50%,_rgba(2,6,23,0.95)_100%)]"
+            : isSpeaking
+            ? "bg-[radial-gradient(ellipse_at_50%_40%,_rgba(16,185,129,0.14)_0%,_rgba(15,23,42,0.6)_50%,_rgba(2,6,23,0.95)_100%)]"
+            : "bg-[radial-gradient(ellipse_at_50%_40%,_rgba(14,165,233,0.06)_0%,_rgba(15,23,42,0.4)_60%,_rgba(2,6,23,0.95)_100%)]"
+        }`}
+      />
+
+      {/* Sci-Fi Global Viewport Corner Reticles */}
+      <div className="absolute top-1 left-2 pointer-events-none z-40 text-[9px] font-mono text-cyan-500/40 tracking-widest hidden md:flex items-center gap-1.5 select-none">
+        <span className="text-cyan-400 font-bold">┌</span>
+        <span>SEC-PERIMETER // NODE-ALPHA</span>
+      </div>
+      <div className="absolute top-1 right-2 pointer-events-none z-40 text-[9px] font-mono text-cyan-500/40 tracking-widest hidden md:flex items-center gap-1.5 select-none">
+        <span>AGI-DECK // 09°55'N 78°07'E</span>
+        <span className="text-cyan-400 font-bold">┐</span>
+      </div>
+      <div className="absolute bottom-1 left-2 pointer-events-none z-40 text-[9px] font-mono text-cyan-500/40 tracking-widest hidden md:flex items-center gap-1.5 select-none">
+        <span className="text-cyan-400 font-bold">└</span>
+        <span>ZERO-TRUST CONTAINMENT ACTIVE</span>
+      </div>
+      <div className="absolute bottom-1 right-2 pointer-events-none z-40 text-[9px] font-mono text-cyan-500/40 tracking-widest hidden md:flex items-center gap-1.5 select-none">
+        <span>QUANTUM CORE MK-V // PROTOTYPE</span>
+        <span className="text-cyan-400 font-bold">┘</span>
+      </div>
+
       <SnowfallBackground />
       {showConfetti && <Confetti />}
 
@@ -1468,37 +1395,87 @@ export default function App() {
       {/* ─────────────────────────────────────────────────────────────────────────────
           TOP CYBER HEADER BAR
       ───────────────────────────────────────────────────────────────────────────── */}
-      <header className="h-14 border-b border-cyan-500/20 flex items-center justify-between px-6 bg-slate-950/80 backdrop-blur-md z-30 select-none">
-        {/* Left Logo + Status */}
+      <header className="h-14 border-b border-cyan-500/25 flex items-center justify-between px-6 bg-slate-950/85 backdrop-blur-xl z-30 select-none relative shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
+        {/* Subtle Top Glowing Line */}
+        <div className="absolute top-0 inset-x-0 h-[1px] bg-gradient-to-r from-transparent via-cyan-400/60 to-transparent" />
+
+        {/* Left Logo + Tactical Coordinates */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2.5">
             <div className="relative flex items-center justify-center">
-              <div className="w-3 h-3 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_12px_#34d399]" />
-              <div className="absolute inset-0 rounded-full border border-emerald-400 animate-ping opacity-75" />
+              <div className="w-3 h-3 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_12px_#22d3ee]" />
+              <div className="absolute inset-0 rounded-full border border-cyan-400 animate-ping opacity-60" />
             </div>
-            <span className="font-extrabold text-xl tracking-[0.3em] text-cyan-400 drop-shadow-[0_0_10px_rgba(34,211,238,0.7)] font-mono">
+            <span className="font-extrabold text-xl tracking-[0.35em] text-cyan-400 drop-shadow-[0_0_12px_rgba(34,211,238,0.7)] font-mono">
               S N O W
+            </span>
+            <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-400/30 text-cyan-300">
+              MK-V
             </span>
           </div>
 
           <div className="h-4 w-[1px] bg-cyan-500/20" />
 
-          <div className="flex items-center gap-2 bg-cyan-500/10 border border-cyan-500/30 px-2.5 py-0.5 rounded-full text-[11px] text-cyan-300 font-semibold">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-            <span>Online</span>
+          <div className="hidden lg:flex items-center gap-2 text-[10px] font-mono text-slate-400">
+            <Compass className="w-3.5 h-3.5 text-cyan-400" />
+            <span>MADURAI NODE // 09°55'N 78°07'E</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 rounded-full text-[10px] text-emerald-300 font-mono font-semibold">
+            <ShieldCheck className="w-3 h-3 text-emerald-400" />
+            <span>CONTAINMENT ACTIVE</span>
           </div>
         </div>
 
-        {/* Center Digital Clock & Date */}
-        <div className="flex items-center gap-3 bg-slate-900/90 border border-cyan-500/20 px-5 py-1 rounded-xl shadow-[0_0_15px_rgba(6,182,212,0.1)]">
-          <Clock className="w-4 h-4 text-cyan-400" />
-          <span className="font-mono text-sm font-bold tracking-wider text-cyan-100">{currentDateTime.time}</span>
-          <span className="text-cyan-500/40">|</span>
-          <span className="text-xs text-slate-300 font-medium">{currentDateTime.date}</span>
+        {/* Center Digital Clock, Date & Dynamic Cognitive Mode Pill */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 bg-slate-900/90 border border-cyan-500/25 px-4 py-1 rounded-xl shadow-[0_0_15px_rgba(6,182,212,0.12)]">
+            <Clock className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="font-mono text-sm font-bold tracking-wider text-cyan-100">{currentDateTime.time}</span>
+            <span className="text-cyan-500/40 font-mono text-xs">|</span>
+            <span className="text-xs text-slate-300 font-medium">{currentDateTime.date}</span>
+          </div>
+
+          {/* Cognitive State Pill */}
+          <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-xl border text-[10px] font-mono font-bold tracking-wider transition-colors duration-500 backdrop-blur-md">
+            {isLoading ? (
+              <span className="flex items-center gap-1.5 text-cyan-300 border-cyan-500/40 bg-cyan-500/15">
+                <RefreshCw className="w-3 h-3 text-cyan-400 animate-spin" />
+                <span>PROCESSING // NEURAL MATRIX</span>
+              </span>
+            ) : isListening ? (
+              <span className="flex items-center gap-1.5 text-rose-300 border-rose-500/40 bg-rose-500/15">
+                <Radio className="w-3 h-3 text-rose-400 animate-pulse" />
+                <span>ACOUSTIC BEAM // LISTENING</span>
+              </span>
+            ) : isSpeaking ? (
+              <span className="flex items-center gap-1.5 text-emerald-300 border-emerald-500/40 bg-emerald-500/15">
+                <Activity className="w-3 h-3 text-emerald-400 animate-pulse" />
+                <span>DUPLEX SYNTH // ACTIVE</span>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 text-slate-400 border-slate-700/40 bg-slate-900/60">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/80" />
+                <span>STANDBY // EXECUTIVE READY</span>
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Right Info Badges */}
         <div className="flex items-center gap-3">
+          {/* Audio Mic State Pill */}
+          <div
+            className={`hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-[10px] font-mono font-bold ${
+              isMuted
+                ? "border-amber-500/30 bg-amber-500/10 text-amber-300"
+                : "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+            }`}
+          >
+            {isMuted ? <VolumeX className="w-3 h-3 text-amber-400" /> : <Volume2 className="w-3 h-3 text-cyan-400" />}
+            <span>{isMuted ? "VOICE MUTED" : "VOICE ACTIVE"}</span>
+          </div>
+
           {/* Quick Weather Badge */}
           {(() => {
             const wxVisual = getWeatherVisual(liveWeather.condition, liveWeather.isDay, liveWeather.windSpeedKm);
@@ -1506,15 +1483,15 @@ export default function App() {
               <div className="flex items-center gap-2 bg-slate-900/80 border border-cyan-500/20 px-3 py-1 rounded-xl text-xs">
                 {wxVisual.smallIcon}
                 <span className="font-bold text-white">{liveWeather.temp}</span>
-                <span className="text-slate-400 text-[11px]">{liveWeather.location.split(",")[0]}</span>
+                <span className="text-slate-400 text-[11px] hidden sm:inline">{liveWeather.location.split(",")[0]}</span>
               </div>
             );
           })()}
 
           <button
             onClick={() => setShowSettings(!showSettings)}
-            className="p-2 rounded-xl border border-cyan-500/20 bg-slate-900/80 hover:bg-cyan-500/10 text-cyan-400 transition cursor-pointer"
-            title="Settings"
+            className="p-2 rounded-xl border border-cyan-500/30 bg-slate-900/80 hover:bg-cyan-500/15 text-cyan-400 hover:text-cyan-300 transition-all cursor-pointer shadow-[0_0_10px_rgba(6,182,212,0.1)] hover:shadow-[0_0_15px_rgba(6,182,212,0.25)]"
+            title="Settings & System Configuration"
           >
             <Settings className="w-4 h-4" />
           </button>
@@ -1580,259 +1557,41 @@ export default function App() {
         <div className="w-full h-full grid grid-cols-12 gap-4 p-4">
             
             {/* ─────────────────────────────────────────────────────────────────────────────
-                LEFT COLUMN: WIDGET PANELS (4 Cols)
+                LEFT COLUMN: TACTICAL TELEMETRY & SENTINEL RADAR (3 Cols)
             ───────────────────────────────────────────────────────────────────────────── */}
-            <div className="col-span-3 flex flex-col gap-3.5 overflow-y-auto pr-1">
-              
-              {/* WIDGET 1: System Stats */}
-              <div className="p-4 rounded-2xl bg-slate-900/70 border border-cyan-500/20 shadow-[0_0_20px_rgba(6,182,212,0.05)] space-y-3">
-                <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2">
-                  <div className="flex items-center gap-2 text-cyan-300 font-bold text-xs uppercase tracking-wider">
-                    <Activity className="w-4 h-4 text-cyan-400" />
-                    <span>System Stats</span>
-                  </div>
-                  <button onClick={() => triggerToast("System stats updated.")} className="text-cyan-400/60 hover:text-cyan-300 transition">
-                    <RefreshCw className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Progress Bar 1: CPU */}
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[11px]">
-                    <span className="text-slate-400">CPU Usage</span>
-                    <span className="font-mono text-cyan-300 font-bold">{liveStats.cpu}</span>
-                  </div>
-                  <div className="w-full h-2 rounded-full bg-slate-950 border border-cyan-500/20 overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-cyan-500 to-blue-400 transition-all duration-1000 shadow-[0_0_8px_#22d3ee]"
-                      style={{ width: `${systemLoadPct}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* Progress Bar 2: RAM */}
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[11px]">
-                    <span className="text-slate-400">RAM Usage</span>
-                    <span className="font-mono text-cyan-300 font-bold">{liveStats.ram.split("/")[0]}</span>
-                  </div>
-                  <div className="w-full h-2 rounded-full bg-slate-950 border border-cyan-500/20 overflow-hidden">
-                    <div
-                      className="h-full bg-gradient-to-r from-blue-500 to-indigo-400 transition-all duration-1000 shadow-[0_0_8px_#60a5fa]"
-                      style={{ width: `${liveStats.ramPct || 36}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* 3 Metric Mini Cards */}
-                <div className="grid grid-cols-3 gap-2 pt-1">
-                  <div className="p-2 rounded-xl bg-slate-950/70 border border-cyan-500/15 text-center">
-                    <span className="text-[9px] text-slate-400 uppercase font-bold block">CPU</span>
-                    <span className="text-xs font-mono font-bold text-cyan-300">{liveStats.cpu}</span>
-                  </div>
-                  <div className="p-2 rounded-xl bg-slate-950/70 border border-cyan-500/15 text-center">
-                    <span className="text-[9px] text-slate-400 uppercase font-bold block">Memory</span>
-                    <span className="text-xs font-mono font-bold text-cyan-300">{liveStats.ramPct || 36}%</span>
-                  </div>
-                  <div className="p-2 rounded-xl bg-slate-950/70 border border-cyan-500/15 text-center">
-                    <span className="text-[9px] text-slate-400 uppercase font-bold block">Disk</span>
-                    <span className="text-[10px] font-mono font-bold text-cyan-300">{liveStats.disk || "69.3/157.5 GB"}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* WIDGET 2: Weather */}
-              {(() => {
-                const wxVisual = getWeatherVisual(liveWeather.condition, liveWeather.isDay, liveWeather.windSpeedKm);
-                return (
-                  <div className={`p-4 rounded-2xl ${wxVisual.bgGradient} space-y-3 transition-all duration-700`}>
-                    <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2">
-                      <div className={`flex items-center gap-2 font-bold text-xs uppercase tracking-wider ${wxVisual.accentText}`}>
-                        {wxVisual.smallIcon}
-                        <span>Weather</span>
-                        <span className={`text-[9px] px-2 py-0.5 rounded-full font-mono font-extrabold ${wxVisual.badgeColor} border`}>
-                          {wxVisual.tag}
-                        </span>
-                      </div>
-                      <button onClick={() => fetchLiveWeather()} className="text-cyan-400/60 hover:text-cyan-300 transition">
-                        <RefreshCw className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <div className="flex items-center justify-between py-1">
-                      <div>
-                        <div className="text-3xl font-extrabold text-white tracking-tight font-mono drop-shadow-[0_0_10px_rgba(255,255,255,0.3)]">
-                          {liveWeather.temp}
-                        </div>
-                        <div className="text-xs font-medium text-cyan-200 mt-0.5">{liveWeather.location}</div>
-                        <div className={`text-[11px] font-bold capitalize mt-0.5 ${wxVisual.accentText}`}>{liveWeather.condition}</div>
-                      </div>
-
-                      <div className={`p-3.5 rounded-2xl ${wxVisual.badgeColor} border flex items-center justify-center shadow-lg`}>
-                        {wxVisual.icon}
-                      </div>
-                    </div>
-
-                    {/* Weather Details */}
-                    <div className="grid grid-cols-3 gap-2 pt-1 border-t border-cyan-500/15 text-center">
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase block font-semibold">Humidity</span>
-                        <span className="text-xs font-mono font-bold text-cyan-200">{liveWeather.humidity}</span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase block font-semibold">Wind</span>
-                        <span className="text-xs font-mono font-bold text-cyan-200">{liveWeather.wind}</span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-slate-400 uppercase block font-semibold">Feels Like</span>
-                        <span className="text-xs font-mono font-bold text-cyan-200">{liveWeather.feelsLike}</span>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              {/* WIDGET 3: File Vault & AI Context Explorer */}
-              <div className="p-4 rounded-2xl bg-slate-900/70 border border-cyan-500/20 shadow-[0_0_20px_rgba(6,182,212,0.05)] space-y-3">
-                <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2">
-                  <div className="flex items-center gap-2 text-cyan-300 font-bold text-xs uppercase tracking-wider">
-                    <FolderOpen className="w-4 h-4 text-cyan-400" />
-                    <span>Workspace Vault</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <label htmlFor="widget-file-upload" className="text-cyan-400/70 hover:text-cyan-300 transition cursor-pointer p-1" title="Upload Local File">
-                      <Upload className="w-3.5 h-3.5" />
-                      <input id="widget-file-upload" type="file" onChange={handleCustomFileUpload} className="hidden" />
-                    </label>
-                    <button onClick={fetchWorkspaceFiles} className="text-cyan-400/70 hover:text-cyan-300 transition p-1" title="Refresh Workspace Files">
-                      <RefreshCw className={`w-3.5 h-3.5 ${isLoadingFiles ? 'animate-spin' : ''}`} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Search Bar & File Selector */}
-                <div className="space-y-2">
-                  <input
-                    type="text"
-                    placeholder="Search files (e.g. App.tsx)..."
-                    value={fileSearchQuery}
-                    onChange={(e) => setFileSearchQuery(e.target.value)}
-                    className="w-full bg-slate-950/80 border border-cyan-500/20 rounded-xl px-3 py-1 text-xs text-white placeholder-slate-500 outline-none focus:border-cyan-400 transition"
-                  />
-
-                  {/* Scrollable File List */}
-                  <div className="h-28 overflow-y-auto space-y-1 pr-1 font-mono text-[11px] scrollbar-none">
-                    {workspaceFiles
-                      .filter(f => f.name.toLowerCase().includes(fileSearchQuery.toLowerCase()) || f.path.toLowerCase().includes(fileSearchQuery.toLowerCase()))
-                      .map((file) => {
-                        const isSelected = selectedVaultPath === file.path;
-                        const isAttached = attachedContextFiles.some(af => af.path === file.path);
-                        return (
-                          <div
-                            key={file.path}
-                            onClick={() => handleSelectVaultFile(file.path)}
-                            className={`flex items-center justify-between p-1.5 rounded-lg border transition cursor-pointer ${
-                              isSelected
-                                ? "bg-cyan-950/80 border-cyan-500/50 text-cyan-200"
-                                : "bg-slate-950/40 border-cyan-500/10 hover:bg-slate-900 text-slate-300"
-                            }`}
-                          >
-                            <div className="flex items-center gap-1.5 truncate">
-                              <FileCode className="w-3.5 h-3.5 text-cyan-400 flex-shrink-0" />
-                              <span className="truncate">{file.name}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-[9px] uppercase px-1.5 py-0.2 rounded bg-slate-900 text-cyan-400/70 border border-cyan-500/20 font-sans font-bold">
-                                {file.ext}
-                              </span>
-                              {isAttached && <Paperclip className="w-3 h-3 text-cyan-400" />}
-                            </div>
-                          </div>
-                        );
-                      })}
-                  </div>
-                </div>
-
-                {/* Selected File Action Panel */}
-                {selectedVaultPath && (
-                  <div className="pt-2 border-t border-cyan-500/15 space-y-2">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-mono text-cyan-300 font-bold truncate max-w-[150px]">{selectedVaultPath.split('/').pop()}</span>
-                      <span className="text-[10px] text-slate-400">{activeFileContent.length} chars</span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-1.5">
-                      <button
-                        onClick={() => handleAttachFileToContext(selectedVaultPath.split('/').pop() || selectedVaultPath, selectedVaultPath, activeFileContent)}
-                        className="p-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 hover:bg-cyan-500/20 text-cyan-300 text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
-                        title="Attach file to prompt context"
-                      >
-                        <Paperclip className="w-3 h-3" />
-                        <span>Attach</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleAskSnowAboutFile(selectedVaultPath.split('/').pop() || selectedVaultPath, selectedVaultPath, activeFileContent)}
-                        className="p-1.5 rounded-xl border border-blue-500/30 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
-                        title="Ask Snow for code suggestions & audit"
-                      >
-                        <Sparkles className="w-3 h-3" />
-                        <span>Suggest</span>
-                      </button>
-
-                      <button
-                        onClick={() => handleIngestFileToRAG(selectedVaultPath, activeFileContent)}
-                        className="p-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 text-[10px] font-bold transition flex items-center justify-center gap-1 cursor-pointer"
-                        title="Index into RAG vector memory"
-                      >
-                        <Database className="w-3 h-3" />
-                        <span>RAG</span>
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* WIDGET 4: System Uptime */}
-              <div className="p-4 rounded-2xl bg-slate-900/70 border border-cyan-500/20 shadow-[0_0_20px_rgba(6,182,212,0.05)] space-y-3">
-                <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2">
-                  <div className="flex items-center gap-2 text-cyan-300 font-bold text-xs uppercase tracking-wider">
-                    <Clock className="w-4 h-4 text-cyan-400" />
-                    <span>System Uptime</span>
-                  </div>
-                  <span className="font-mono text-xs font-bold text-cyan-300">{formatUptime(uptimeSeconds)}</span>
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-slate-400">System Running For:</span>
-                    <span className="font-mono font-bold text-white">{formatUptime(uptimeSeconds)}</span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <div className="p-2 rounded-xl bg-slate-950 border border-cyan-500/15 text-center">
-                      <span className="text-[9px] text-slate-400 uppercase block">Session</span>
-                      <span className="text-xs font-bold text-cyan-300">1</span>
-                    </div>
-                    <div className="p-2 rounded-xl bg-slate-950 border border-cyan-500/15 text-center">
-                      <span className="text-[9px] text-slate-400 uppercase block">Commands</span>
-                      <span className="text-xs font-bold text-cyan-300">{commandCount}</span>
-                    </div>
-                  </div>
-
-                  <div className="pt-2 border-t border-cyan-500/15">
-                    <div className="flex justify-between text-[11px] mb-1">
-                      <span className="text-slate-400">System Load</span>
-                      <span className="text-cyan-400 font-bold font-mono">{liveStats.loadAvg || `Optimal ${systemLoadPct}%`}</span>
-                    </div>
-                    <div className="w-full h-1.5 rounded-full bg-slate-950 border border-cyan-500/20 overflow-hidden">
-                      <div className="h-full bg-cyan-400 transition-all duration-700" style={{ width: `${systemLoadPct}%` }} />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-            </div>
+            <TacticalTelemetryHUD
+              cpuPct={systemLoadPct}
+              ramPct={liveStats.ramPct || 36}
+              ramUsed={liveStats.ramUsed || "5.5 GB"}
+              ramTotal={liveStats.ramTotal || "15.3 GB"}
+              diskUsage={liveStats.disk || "84.1/157.5 GB"}
+              uptimeFormatted={formatUptime(uptimeSeconds)}
+              commandCount={commandCount}
+              weather={{
+                temp: liveWeather.temp,
+                condition: liveWeather.condition,
+                location: liveWeather.location,
+                humidity: liveWeather.humidity,
+                wind: liveWeather.wind,
+                feelsLike: liveWeather.feelsLike,
+                visualIcon: getWeatherVisual(liveWeather.condition, liveWeather.isDay, liveWeather.windSpeedKm).smallIcon,
+              }}
+              workspaceFiles={workspaceFiles}
+              selectedVaultPath={selectedVaultPath}
+              activeFileContent={activeFileContent}
+              vaultSearchQuery={fileSearchQuery}
+              attachedContextFiles={attachedContextFiles}
+              onSelectVaultFile={handleSelectVaultFile}
+              onVaultSearchChange={setFileSearchQuery}
+              onAttachFile={handleAttachFileToContext}
+              onAskSnowAboutFile={handleAskSnowAboutFile}
+              onIngestFileToRAG={handleIngestFileToRAG}
+              onRefreshStats={() => {
+                triggerToast("Tactical telemetry updated.");
+                fetchLiveWeather();
+                fetchBrainStatus();
+              }}
+            />
 
             {/* ─────────────────────────────────────────────────────────────────────────────
                 CENTER COLUMN: HERO CORE VISUALIZER & MATRIX SNOW HUD (5 Cols)
@@ -1846,280 +1605,55 @@ export default function App() {
               <div className="absolute inset-0 hologram-bg opacity-30 pointer-events-none" />
               <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-400/80 to-transparent animate-pulse" />
 
-              {/* Arc Reactor Center Core */}
-              <div className="z-10 flex flex-col items-center gap-3">
-                <SnowArcCore state={isLoading ? "thinking" : isListening ? "listening" : isSpeaking ? "speaking" : "standby"} />
+              {/* Sci-Fi HUD Corner Targeting Reticles */}
+              <div className="absolute top-3 left-3 w-4 h-4 border-t-2 border-l-2 border-cyan-400/70 pointer-events-none" />
+              <div className="absolute top-3 right-3 w-4 h-4 border-t-2 border-r-2 border-cyan-400/70 pointer-events-none" />
+              <div className="absolute bottom-3 left-3 w-4 h-4 border-b-2 border-l-2 border-cyan-400/70 pointer-events-none" />
+              <div className="absolute bottom-3 right-3 w-4 h-4 border-b-2 border-r-2 border-cyan-400/70 pointer-events-none" />
 
-                {/* S N O W Title */}
-                <div className="flex flex-col items-center gap-1.5">
-                  <h1 className="text-4xl font-black tracking-[0.4em] text-white drop-shadow-[0_0_30px_rgba(34,211,238,0.9)] font-mono">
-                    S N O W
-                  </h1>
-                  <span className="text-[11px] font-mono tracking-widest text-cyan-400/70 font-semibold uppercase">
-                    Your Friend Here
-                  </span>
-
-                  {isSpeaking && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-emerald-950/80 border border-emerald-400/50 text-emerald-300 text-[10px] font-mono tracking-wider shadow-[0_0_15px_rgba(16,185,129,0.3)] mt-1"
-                    >
-                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                      <span>SNOW AUDIO ACTIVE</span>
-                    </motion.div>
-                  )}
-                  {isListening && (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-rose-950/80 border border-rose-400/50 text-rose-300 text-[10px] font-mono tracking-wider shadow-[0_0_15px_rgba(244,63,94,0.3)] mt-1"
-                    >
-                      <span className="w-2 h-2 rounded-full bg-rose-400 animate-ping" />
-                      <span>LISTENING (SPEAK NOW)</span>
-                    </motion.div>
-                  )}
-                </div>
+              {/* Quantum Cognitive Core Centerpiece */}
+              <div className="z-10 w-full flex flex-col items-center justify-center">
+                <QuantumArcCore
+                  state={isLoading ? "thinking" : isListening ? "listening" : isSpeaking ? "speaking" : "standby"}
+                  cpuPct={liveStats.cpuPct || 12}
+                  isMuted={isMuted}
+                />
               </div>
 
             </div>
 
             {/* ─────────────────────────────────────────────────────────────────────────────
-                RIGHT COLUMN: CONVERSATION PANEL (4 Cols)
+                RIGHT COLUMN: HOLOGRAPHIC MISSION LOG & DIRECTIVE STREAM (4 Cols)
             ───────────────────────────────────────────────────────────────────────────── */}
-            <div className="col-span-4 flex flex-col rounded-3xl bg-slate-900/80 border border-cyan-500/30 shadow-[0_0_35px_rgba(6,182,212,0.1)] overflow-hidden relative group">
-              
-              {/* Top Cyber Animated Glow Accent Line */}
-              <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-pulse" />
-
-              {/* Conversation Top Header */}
-              <div className="p-4 border-b border-cyan-500/20 flex items-center justify-between bg-slate-950/80 backdrop-blur-md">
-                <div className="flex items-center gap-2">
-                  <span className="relative flex h-2.5 w-2.5">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
-                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-cyan-500"></span>
-                  </span>
-                  <span className="font-extrabold text-sm text-cyan-200 tracking-wider uppercase font-mono">Conversation Log</span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => { setChatHistory([]); clearWidgets(); setInputText(""); }}
-                    className="px-3 py-1.5 rounded-xl border border-cyan-500/20 bg-slate-900 text-xs font-semibold text-slate-300 hover:text-white hover:border-cyan-400/40 transition cursor-pointer"
-                  >
-                    Clear
-                  </button>
-
-                  <button
-                    onClick={handleExtractConversation}
-                    className="px-3 py-1.5 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-xs font-semibold text-cyan-300 hover:bg-cyan-500/20 transition cursor-pointer flex items-center gap-1.5"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Extract</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Chat Message Scrollable Feed */}
-              <div className="flex-1 p-4 overflow-y-auto space-y-4 font-sans scrollbar-none">
-                {chatHistory.map((msg) => (
-                  <div key={msg.id} className={`w-full flex flex-col gap-1.5 ${msg.sender === "user" ? "items-end" : "items-start"}`}>
-                    <div className="text-xs text-slate-400 px-1 font-mono flex items-center gap-1.5">
-                      <span className={`w-1.5 h-1.5 rounded-full ${msg.sender === "user" ? "bg-cyan-400" : "bg-emerald-400"}`} />
-                      <span>{msg.timestamp}</span>
-                    </div>
-
-                    <motion.div
-                      initial={{ opacity: 0, y: 15, scale: 0.97 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      transition={{ duration: 0.25, ease: "easeOut" }}
-                      className={`max-w-[90%] p-4 rounded-2xl leading-relaxed text-sm shadow-xl backdrop-blur-md relative transition-all duration-300 ${
-                        msg.sender === "user"
-                          ? "bg-gradient-to-br from-cyan-950/80 to-slate-900/90 border border-cyan-500/40 text-cyan-50 rounded-tr-none shadow-[0_0_20px_rgba(6,182,212,0.15)] hover:border-cyan-400"
-                          : "bg-slate-950/90 border border-cyan-500/25 text-slate-100 rounded-tl-none shadow-[0_0_20px_rgba(0,0,0,0.5)] hover:border-cyan-500/40"
-                      }`}
-                    >
-                      {msg.sender === "snow" ? (
-                        <TypewriterText text={msg.text} />
-                      ) : (
-                        <FormattedMessage text={msg.text} />
-                      )}
-
-                      {msg.sender === "snow" && (
-                        <div className="flex items-center justify-between mt-3 pt-2 border-t border-cyan-500/15 text-xs">
-                          <span className="text-cyan-400/70 font-mono font-semibold tracking-wider text-[11px] flex items-center gap-1">
-                            <Sparkles className="w-3 h-3 text-cyan-400 animate-pulse" />
-                            SNOW
-                          </span>
-                          <div className="flex gap-2.5">
-                            <button onClick={() => navigator.clipboard.writeText(msg.text)} className="text-slate-400 hover:text-cyan-300 transition" title="Copy">
-                              <Copy className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => handleSendFeedback(msg.id, "thumbs_up")} className={`hover:text-emerald-400 transition ${msg.feedbackGiven === "thumbs_up" ? "text-emerald-400 font-bold" : "text-slate-400"}`} title="Thumbs Up">
-                              <ThumbsUp className="w-3.5 h-3.5" />
-                            </button>
-                            <button onClick={() => handleSendFeedback(msg.id, "thumbs_down")} className={`hover:text-rose-400 transition ${msg.feedbackGiven === "thumbs_down" ? "text-rose-400 font-bold" : "text-slate-400"}`} title="Thumbs Down">
-                              <ThumbsDown className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </motion.div>
-
-                    {/* Render Rich Widgets inside conversation */}
-                    {msg.widget && (
-                      <div className="w-full max-w-[90%] mt-1">
-                        {msg.widget.type === "weather" && (() => {
-                          const isDay = msg.widget.data.isDay !== undefined ? msg.widget.data.isDay : true;
-                          const windSpeed = msg.widget.data.windSpeedKm || 0;
-                          const visual = getWeatherVisual(msg.widget.data.condition || "Clear", isDay, windSpeed);
-                          return (
-                            <div className={`p-4 rounded-2xl border ${visual.bgGradient} text-cyan-200 text-xs shadow-lg`}>
-                              <div className="flex justify-between items-center border-b border-cyan-500/20 pb-1.5 mb-2">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-bold uppercase tracking-wider text-slate-300">{msg.widget.data.location}</span>
-                                  <span className={`text-[9px] px-2 py-0.5 rounded-full font-mono font-extrabold ${visual.badgeColor} border`}>{visual.tag}</span>
-                                </div>
-                                {visual.smallIcon}
-                              </div>
-                              <div className="flex items-center justify-between">
-                                <div>
-                                  <div className="text-2xl font-bold text-white font-mono">{msg.widget.data.temp}</div>
-                                  <div className={`text-xs capitalize font-semibold ${visual.accentText}`}>{msg.widget.data.condition}</div>
-                                </div>
-                                <div className={`p-2.5 rounded-xl ${visual.badgeColor} border`}>
-                                  {visual.icon}
-                                </div>
-                              </div>
-                              {(msg.widget.data.humidity || msg.widget.data.wind) && (
-                                <div className="grid grid-cols-2 gap-2 mt-3 pt-2 border-t border-cyan-500/15 text-[11px]">
-                                  {msg.widget.data.humidity && <div><span className="text-slate-400">Humidity:</span> <span className="font-mono font-bold text-white">{msg.widget.data.humidity}</span></div>}
-                                  {msg.widget.data.wind && <div><span className="text-slate-400">Wind:</span> <span className="font-mono font-bold text-white">{msg.widget.data.wind}</span></div>}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-                        {msg.widget.type === "stock" && (
-                          <div className="p-4 rounded-2xl border border-emerald-500/30 bg-slate-950/90 text-emerald-200 text-xs">
-                            <div className="font-bold border-b border-emerald-500/20 pb-1 mb-2">{msg.widget.data.symbol}</div>
-                            <div className="text-2xl font-bold text-white">{msg.widget.data.price} <span className="text-xs text-emerald-400">{msg.widget.data.change}</span></div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-
-                {isLoading && (
-                  <div className="flex items-center gap-2 p-3.5 rounded-xl bg-slate-950/90 border border-cyan-500/40 text-cyan-300 w-max shadow-[0_0_15px_rgba(34,211,238,0.2)] text-xs font-semibold">
-                    <Cpu className="w-4 h-4 animate-spin text-cyan-400" />
-                    <span>SNOW is thinking...</span>
-                  </div>
-                )}
-                <div ref={chatEndRef} />
-              </div>
-
-              {/* Chat Input Container */}
-              <div className="p-3.5 border-t border-cyan-500/20 bg-slate-950/95 relative space-y-2">
-                {/* Snow Voice & Telemetry Status Bar */}
-                <div className="flex items-center justify-between px-1 text-[11px] font-mono">
-                  <div className="flex items-center gap-2">
-                    <div className={`w-2 h-2 rounded-full ${
-                      isSpeaking ? "bg-emerald-400 animate-ping" :
-                      isListening ? "bg-rose-400 animate-ping" :
-                      isLoading ? "bg-cyan-400 animate-spin" : "bg-slate-500"
-                    }`} />
-                    <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
-                      {isSpeaking ? "Snow Speaking..." :
-                       isListening ? "Listening (Speak Now)..." :
-                       isLoading ? "Processing Directive..." : "Snow Standby"}
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded bg-slate-800/80 border border-cyan-500/20 text-cyan-300 text-[10px] hidden sm:inline" title="Double tap Space anywhere to wake">
-                      Space ×2 to Wake
-                    </span>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        if (!isMuted) stopSnowSpeech();
-                        setIsMuted(!isMuted);
-                        triggerToast(!isMuted ? "Snow Voice Muted." : "Snow Voice Unmuted.");
-                      }}
-                      className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] transition cursor-pointer font-mono ${
-                        isMuted 
-                          ? "bg-rose-950/60 border-rose-500/30 text-rose-300 hover:bg-rose-900/60" 
-                          : "bg-cyan-950/60 border-cyan-500/30 text-cyan-300 hover:bg-cyan-900/60"
-                      }`}
-                      title={isMuted ? "Unmute Voice" : "Mute Voice"}
-                    >
-                      {isMuted ? <VolumeX className="w-3 h-3" /> : <Volume2 className="w-3 h-3 text-cyan-400" />}
-                      <span>{isMuted ? "Muted" : "Voice On"}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* Attached Context Files Bar (Gemini / Claude Style) */}
-                {attachedContextFiles.length > 0 && (
-                  <div className="flex flex-wrap gap-2 pb-1">
-                    {attachedContextFiles.map((file) => (
-                      <div key={file.path} className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-cyan-950/90 border border-cyan-400/40 text-cyan-300 text-xs shadow-md font-mono">
-                        <Paperclip className="w-3.5 h-3.5 text-cyan-400" />
-                        <span className="font-semibold max-w-[140px] truncate">{file.name}</span>
-                        <button
-                          onClick={() => handleRemoveAttachedFile(file.path)}
-                          className="text-cyan-400/60 hover:text-rose-400 transition ml-1 cursor-pointer"
-                          title="Remove Attachment"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="flex items-center gap-2 rounded-2xl bg-slate-900 border border-cyan-500/35 p-2 px-3 shadow-[inset_0_0_15px_rgba(6,182,212,0.05)] focus-within:border-cyan-400 focus-within:shadow-[0_0_25px_rgba(34,211,238,0.25)] transition-all">
-                  <label htmlFor="chat-file-attachment" className="p-1.5 text-cyan-400/70 hover:text-cyan-300 transition cursor-pointer" title="Attach Workspace / Local File">
-                    <Paperclip className="w-4 h-4" />
-                    <input id="chat-file-attachment" type="file" onChange={handleCustomFileUpload} className="hidden" />
-                  </label>
-
-                  <input
-                    id="chat-input-field"
-                    type="text"
-                    placeholder={isListening ? "Listening to your voice..." : attachedContextFiles.length > 0 ? "Ask SNOW about attached files..." : "Ask SNOW anything or double-tap Space..."}
-                    value={inputText}
-                    onChange={(e) => setInputText(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && handleSendMessage()}
-                    className="flex-1 bg-transparent border-none outline-none text-sm text-white placeholder-slate-500 focus:ring-0 font-sans"
-                  />
-
-                  {/* Microphone Toggle Button */}
-                  <button
-                    type="button"
-                    onClick={toggleSpeechRecognition}
-                    className={`p-2 rounded-xl border transition cursor-pointer ${
-                      isListening
-                        ? "bg-rose-500/20 border-rose-400 text-rose-300 shadow-[0_0_15px_rgba(244,63,94,0.4)] animate-pulse"
-                        : "bg-slate-800/80 border-cyan-500/20 text-cyan-400 hover:bg-cyan-500/10 hover:border-cyan-400"
-                    }`}
-                    title={isListening ? "Stop Voice Listening" : "Start Voice Listening (or press Space ×2)"}
-                  >
-                    {isListening ? <MicOff className="w-4 h-4 text-rose-400" /> : <Mic className="w-4 h-4" />}
-                  </button>
-
-                  <button
-                    onClick={() => handleSendMessage()}
-                    disabled={(!inputText.trim() && attachedContextFiles.length === 0) || isLoading}
-                    className="p-2.5 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 disabled:opacity-30 transition cursor-pointer font-bold shadow-[0_0_15px_rgba(34,211,238,0.3)]"
-                  >
-                    <Send className="w-4 h-4" />
-                  </button>
-                </div>
-              </div>
-
-            </div>
+            <HolographicMissionLog
+              chatHistory={chatHistory}
+              inputText={inputText}
+              isLoading={isLoading}
+              isListening={isListening}
+              isSpeaking={isSpeaking}
+              isMuted={isMuted}
+              attachedContextFiles={attachedContextFiles}
+              onInputChange={setInputText}
+              onSendMessage={handleSendMessage}
+              onToggleListening={toggleSpeechRecognition}
+              onToggleMute={() => {
+                if (!isMuted) stopSnowSpeech();
+                setIsMuted(!isMuted);
+                triggerToast(!isMuted ? "Snow Voice Muted." : "Snow Voice Unmuted.");
+              }}
+              onClearHistory={() => {
+                setChatHistory([]);
+                clearWidgets();
+                setInputText("");
+              }}
+              onExtractConversation={handleExtractConversation}
+              onRemoveAttachment={(path) =>
+                setAttachedContextFiles((prev) => prev.filter((f) => f.path !== path))
+              }
+              onSendFeedback={handleSendFeedback}
+              renderFormattedMessage={(text) => <FormattedMessage text={text} />}
+              renderWidgetContent={renderWidgetContent}
+            />
 
           </div>
       </div>
