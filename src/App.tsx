@@ -1356,24 +1356,6 @@ export default function App() {
         }`}
       />
 
-      {/* Sci-Fi Global Viewport Corner Reticles */}
-      <div className="absolute top-1 left-2 pointer-events-none z-40 text-[9px] font-mono text-cyan-500/40 tracking-widest hidden md:flex items-center gap-1.5 select-none">
-        <span className="text-cyan-400 font-bold">┌</span>
-        <span>SEC-PERIMETER // NODE-ALPHA</span>
-      </div>
-      <div className="absolute top-1 right-2 pointer-events-none z-40 text-[9px] font-mono text-cyan-500/40 tracking-widest hidden md:flex items-center gap-1.5 select-none">
-        <span>AGI-DECK // 09°55'N 78°07'E</span>
-        <span className="text-cyan-400 font-bold">┐</span>
-      </div>
-      <div className="absolute bottom-1 left-2 pointer-events-none z-40 text-[9px] font-mono text-cyan-500/40 tracking-widest hidden md:flex items-center gap-1.5 select-none">
-        <span className="text-cyan-400 font-bold">└</span>
-        <span>ZERO-TRUST CONTAINMENT ACTIVE</span>
-      </div>
-      <div className="absolute bottom-1 right-2 pointer-events-none z-40 text-[9px] font-mono text-cyan-500/40 tracking-widest hidden md:flex items-center gap-1.5 select-none">
-        <span>QUANTUM CORE MK-V // PROTOTYPE</span>
-        <span className="text-cyan-400 font-bold">┘</span>
-      </div>
-
       <SnowfallBackground />
       {showConfetti && <Confetti />}
 
@@ -1418,7 +1400,7 @@ export default function App() {
 
           <div className="hidden lg:flex items-center gap-2 text-[10px] font-mono text-slate-400">
             <Compass className="w-3.5 h-3.5 text-cyan-400" />
-            <span>MADURAI NODE // 09°55'N 78°07'E</span>
+            <span>Madurai Node · 09°55'N 78°07'E</span>
           </div>
 
           <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 rounded-full text-[10px] text-emerald-300 font-mono font-semibold">
@@ -1441,22 +1423,22 @@ export default function App() {
             {isLoading ? (
               <span className="flex items-center gap-1.5 text-cyan-300 border-cyan-500/40 bg-cyan-500/15">
                 <RefreshCw className="w-3 h-3 text-cyan-400 animate-spin" />
-                <span>PROCESSING // NEURAL MATRIX</span>
+                <span>PROCESSING · NEURAL MATRIX</span>
               </span>
             ) : isListening ? (
               <span className="flex items-center gap-1.5 text-rose-300 border-rose-500/40 bg-rose-500/15">
                 <Radio className="w-3 h-3 text-rose-400 animate-pulse" />
-                <span>ACOUSTIC BEAM // LISTENING</span>
+                <span>ACOUSTIC BEAM · LISTENING</span>
               </span>
             ) : isSpeaking ? (
               <span className="flex items-center gap-1.5 text-emerald-300 border-emerald-500/40 bg-emerald-500/15">
                 <Activity className="w-3 h-3 text-emerald-400 animate-pulse" />
-                <span>DUPLEX SYNTH // ACTIVE</span>
+                <span>DUPLEX SYNTH · ACTIVE</span>
               </span>
             ) : (
               <span className="flex items-center gap-1.5 text-slate-400 border-slate-700/40 bg-slate-900/60">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/80" />
-                <span>STANDBY // EXECUTIVE READY</span>
+                <span>STANDBY · READY</span>
               </span>
             )}
           </div>
@@ -1604,12 +1586,6 @@ export default function App() {
               {/* Background Holographic Grid Accent */}
               <div className="absolute inset-0 hologram-bg opacity-30 pointer-events-none" />
               <div className="absolute top-0 inset-x-0 h-[2px] bg-gradient-to-r from-transparent via-cyan-400/80 to-transparent animate-pulse" />
-
-              {/* Sci-Fi HUD Corner Targeting Reticles */}
-              <div className="absolute top-3 left-3 w-4 h-4 border-t-2 border-l-2 border-cyan-400/70 pointer-events-none" />
-              <div className="absolute top-3 right-3 w-4 h-4 border-t-2 border-r-2 border-cyan-400/70 pointer-events-none" />
-              <div className="absolute bottom-3 left-3 w-4 h-4 border-b-2 border-l-2 border-cyan-400/70 pointer-events-none" />
-              <div className="absolute bottom-3 right-3 w-4 h-4 border-b-2 border-r-2 border-cyan-400/70 pointer-events-none" />
 
               {/* Quantum Cognitive Core Centerpiece */}
               <div className="z-10 w-full flex flex-col items-center justify-center">

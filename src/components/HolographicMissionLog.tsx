@@ -88,7 +88,7 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
               DIRECTIVE STREAM
             </span>
             <span className="text-[9px] font-mono text-cyan-500/60 font-semibold tracking-wider">
-              QUANTUM MISSION LOG // ZERO-TRUST
+              QUANTUM MISSION LOG
             </span>
           </div>
         </div>
@@ -131,7 +131,7 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
                   }`}
                 />
                 <span className="font-bold tracking-wider uppercase text-cyan-300">
-                  {isUser ? "OPERATOR // NJ" : "SNOW // COGNITIVE CORE"}
+                  {isUser ? "OPERATOR NJ" : "SNOW AGI"}
                 </span>
                 <span className="text-slate-500">•</span>
                 <span className="text-slate-400">{msg.timestamp}</span>

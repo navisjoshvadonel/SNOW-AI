@@ -135,9 +135,6 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
     <div className="col-span-3 flex flex-col gap-3 overflow-y-auto pr-1 scrollbar-none select-none">
       {/* ─── CARD 1: HARDWARE TELEMETRY ARC METERS ─── */}
       <div className="p-3.5 rounded-3xl bg-slate-900/80 border border-cyan-500/25 backdrop-blur-xl relative overflow-hidden shadow-[0_0_25px_rgba(6,182,212,0.06)]">
-        {/* HUD Corner Reticles */}
-        <div className="absolute top-2 left-2 w-2.5 h-2.5 border-t-2 border-l-2 border-cyan-400/80 pointer-events-none" />
-        <div className="absolute top-2 right-2 w-2.5 h-2.5 border-t-2 border-r-2 border-cyan-400/80 pointer-events-none" />
 
         {/* Header */}
         <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2 mb-2.5">
@@ -181,16 +178,13 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
           <span className="text-slate-400">HARDWARE STATUS:</span>
           <span className="text-emerald-300 font-bold flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-            <span>OPERATIONAL // OPTIMAL</span>
+            <span>OPERATIONAL · OPTIMAL</span>
           </span>
         </div>
       </div>
 
       {/* ─── CARD 2: SENTINEL THREAT RADAR & PROCESS WATCHDOG ─── */}
       <div className="p-3.5 rounded-3xl bg-slate-900/80 border border-cyan-500/25 backdrop-blur-xl relative overflow-hidden shadow-[0_0_25px_rgba(6,182,212,0.06)]">
-        {/* HUD Corner Reticles */}
-        <div className="absolute top-2 left-2 w-2.5 h-2.5 border-t-2 border-l-2 border-cyan-400/80 pointer-events-none" />
-        <div className="absolute top-2 right-2 w-2.5 h-2.5 border-t-2 border-r-2 border-cyan-400/80 pointer-events-none" />
 
         <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2 mb-2">
           <div className="flex items-center gap-2 text-cyan-300 font-mono font-bold text-xs tracking-wider">
@@ -246,9 +240,6 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
 
       {/* ─── CARD 3: TACTICAL ATMOSPHERE & WEATHER ─── */}
       <div className="p-3.5 rounded-3xl bg-slate-900/80 border border-cyan-500/25 backdrop-blur-xl relative overflow-hidden shadow-[0_0_25px_rgba(6,182,212,0.06)]">
-        {/* HUD Corner Reticles */}
-        <div className="absolute top-2 left-2 w-2.5 h-2.5 border-t-2 border-l-2 border-cyan-400/80 pointer-events-none" />
-        <div className="absolute top-2 right-2 w-2.5 h-2.5 border-t-2 border-r-2 border-cyan-400/80 pointer-events-none" />
 
         <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2 mb-2">
           <div className="flex items-center gap-2 text-cyan-300 font-mono font-bold text-xs tracking-wider">
@@ -292,9 +283,6 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
 
       {/* ─── CARD 4: WORKSPACE VAULT & COGNITIVE REPOSITORY ─── */}
       <div className="p-3.5 rounded-3xl bg-slate-900/80 border border-cyan-500/25 backdrop-blur-xl relative overflow-hidden shadow-[0_0_25px_rgba(6,182,212,0.06)]">
-        {/* HUD Corner Reticles */}
-        <div className="absolute top-2 left-2 w-2.5 h-2.5 border-t-2 border-l-2 border-cyan-400/80 pointer-events-none" />
-        <div className="absolute top-2 right-2 w-2.5 h-2.5 border-t-2 border-r-2 border-cyan-400/80 pointer-events-none" />
 
         <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2 mb-2">
           <div className="flex items-center gap-2 text-cyan-300 font-mono font-bold text-xs tracking-wider">

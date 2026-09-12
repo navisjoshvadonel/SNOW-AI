@@ -372,12 +372,12 @@ export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
           />
           <span className="text-slate-300 font-semibold uppercase">
             {state === "listening"
-              ? "ACOUSTIC SENSORS ACTIVE // AWAITING DIRECTIVE"
+              ? "ACOUSTIC SENSORS ACTIVE · LISTENING"
               : state === "thinking"
-              ? "NEURAL REASONING // SYNTHESIZING RESPONSE"
+              ? "NEURAL REASONING · SYNTHESIZING"
               : state === "speaking"
-              ? "AUDIO DUPLEX ONLINE // TRANSMITTING"
-              : "QUANTUM CORE MK-V // ZERO-TRUST ACTIVE"}
+              ? "AUDIO DUPLEX · TRANSMITTING"
+              : "QUANTUM CORE MK-V · ACTIVE"}
           </span>
         </div>
 
