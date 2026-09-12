@@ -2,6 +2,7 @@ import { execFile } from "child_process";
 import fs from "fs";
 import path from "path";
 import { promisify } from "util";
+import { scrubSecrets } from "./files claude/builtins";
 
 const execFileAsync = promisify(execFile);
 const SANDBOX_DIR = path.join(process.cwd(), "data", "sandbox");
@@ -66,8 +67,9 @@ BLOCKED_PROCESS_EVENTS = {
 }
 
 BLOCKED_PATH_PATTERNS = [
-    '.env', '/etc/shadow', '/etc/sudoers', '/etc/passwd',
-    '.ssh', 'id_rsa', 'id_ed25519', '.git', 'snow_brain.db', 'snow_rag.db'
+    '.env', '/etc/shadow', '/etc/sudoers', '/etc/passwd', '/etc',
+    '.ssh', 'id_rsa', 'id_ed25519', '.git', 'snow_brain.db', 'snow_rag.db',
+    '.bashrc', '.profile', '.bash_history', '/proc', '/sys', '/root'
 ]
 
 def security_audit_hook(event, args):
@@ -130,9 +132,11 @@ export async function runPythonCode(
 ): Promise<ExecutionResult> {
   ensureSandboxDir();
 
-  const maxMemoryMb = options?.maxMemoryMb || 256;
+  // Enforce strict 15s maximum execution ceiling and minimum 1s
+  const effectiveTimeoutMs = Math.min(Math.max(1000, timeoutMs), 15000);
+  const maxMemoryMb = Math.min(options?.maxMemoryMb || 256, 512);
   const allowNetwork = options?.allowNetwork || false;
-  const timeoutSecs = Math.max(1, Math.ceil(timeoutMs / 1000));
+  const timeoutSecs = Math.max(1, Math.ceil(effectiveTimeoutMs / 1000));
 
   const scriptId = `runner_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.py`;
   const scriptPath = path.join(SANDBOX_DIR, scriptId);
@@ -153,7 +157,7 @@ export async function runPythonCode(
 
   try {
     const { stdout, stderr } = await execFileAsync("python3", [scriptPath], {
-      timeout: timeoutMs,
+      timeout: effectiveTimeoutMs,
       maxBuffer: 5 * 1024 * 1024, // 5MB buffer cap
       cwd: SANDBOX_DIR,
       env: sanitizedEnv
@@ -162,8 +166,8 @@ export async function runPythonCode(
     const executionTimeMs = Date.now() - startTime;
     return {
       success: true,
-      stdout: stdout.trim(),
-      stderr: stderr.trim(),
+      stdout: scrubSecrets(stdout.trim()),
+      stderr: scrubSecrets(stderr.trim()),
       executionTimeMs,
       sandboxed: true
     };
@@ -172,13 +176,13 @@ export async function runPythonCode(
     let errMsg = error.stderr ? error.stderr.trim() : error.message;
 
     if (error.killed) {
-      errMsg = `Execution timed out after ${timeoutMs}ms (Process terminated by sandbox guardian).`;
+      errMsg = `Execution timed out after ${effectiveTimeoutMs}ms (Process terminated by sandbox guardian).`;
     }
 
     return {
       success: false,
-      stdout: error.stdout ? error.stdout.trim() : "",
-      stderr: errMsg,
+      stdout: error.stdout ? scrubSecrets(error.stdout.trim()) : "",
+      stderr: scrubSecrets(errMsg),
       executionTimeMs,
       sandboxed: true
     };

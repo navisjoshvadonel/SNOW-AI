@@ -160,6 +160,11 @@ export type TaskState = {
   outputOffset: number;
   notified: boolean;
   agentId?: AgentId;
+  milestones?: Array<{
+    name: string;
+    status: "pending" | "running" | "completed" | "failed";
+    verification?: string;
+  }>;
 };
 
 // ─── MCP ──────────────────────────────────────────────────────────────────────

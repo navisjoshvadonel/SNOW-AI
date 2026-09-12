@@ -27,7 +27,11 @@ import {
   searchVisualEpisodes,
   deleteVisualEpisode,
   clearVisualEpisodes,
-  VisualEpisode
+  VisualEpisode,
+  getUnifiedContext,
+  recordDecision,
+  searchDecisions,
+  loadRecentDecisions
 } from "./brain";
 import {
   ragIngest,
@@ -43,9 +47,18 @@ import {
 import { connectMcpServers } from "./files claude/McpClient.ts";
 import { createAgent, Message } from "./files claude/index.ts";
 import { exportFineTuningDatasets } from "./dataset_exporter";
-import { routineScheduler } from "./src/services/routineScheduler";
-import { desktopActuator } from "./src/services/desktopActuator";
+import { routineScheduler } from "./services/routineScheduler";
+import { desktopActuator } from "./services/desktopActuator";
 import { runPythonCode } from "./python_sandbox";
+import { voiceDuplex } from "./services/voiceDuplex";
+import { ambientPerception } from "./services/ambientPerception";
+import { proactiveIntelligence } from "./services/proactiveIntelligence";
+import { linuxSystemActuator } from "./services/linuxSystemActuator";
+import { cleanSlateProtocol } from "./services/cleanSlateProtocol";
+import { audioSynthesis } from "./services/audioSynthesis";
+import { telemetryBridge } from "./services/telemetryBridge";
+import { workshopProfiles } from "./services/workshopProfiles";
+import { agentSwarm } from "./files claude/agentSwarm";
 
 dotenv.config();
 
@@ -571,45 +584,22 @@ async function callAI(
   requestedModel?: string,
   images?: string[]
 ): Promise<{ text: string; model: string }> {
-  // Load persistent memories & brain state directives dynamically
-  const memories = loadMemories();
+  // Load persistent memories & brain state directives dynamically via Unified Hybrid Retriever
   const brainState = loadBrainState();
+  const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
+  const memoryContext = unifiedMemory.contextBlock;
 
-  // ── Unified Hybrid RAG: FTS5 BM25 + 768-dim Vector RRF ───────────────────
-  const ragContext = await ragAugmentPrompt(userPrompt, 5);
-  const graphNodes = findGraphRelationships(userPrompt, 2);
-  const graphContext = formatGraphContext(graphNodes);
-
-  let memoryContext = "\nSTORED USER KNOWLEDGE & MEMORIES:\n";
-  if (memories.length > 0) {
-    memories.slice(0, 10).forEach(m => {
-      memoryContext += `- [${m.source}] ${m.rel} ${m.target}\n`;
-    });
-  } else {
-    memoryContext += "- No stored facts yet.\n";
-  }
-
-  if (graphContext) {
-    memoryContext += graphContext + "\n";
-  }
-
-  if (brainState.learnedDirectives.length > 0) {
-    memoryContext += "\nLEARNED ADAPTIVE DIRECTIVES:\n";
-    brainState.learnedDirectives.forEach(d => {
-      memoryContext += `- ${d}\n`;
-    });
-  }
-
-  if (ragContext) {
-    memoryContext += ragContext;
-  }
-
-  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), a distinguished, highly intelligent, and formal personal assistant.
+  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent autonomous executive assistant and operations intelligence system engineered for NJ.
 
 USER FORMAL ADDRESS & GREETINGS:
 - Always address the user formally as "NJ" (or Sir / Mr. NJ).
 - Use time-appropriate formal greetings (e.g., "Good morning, NJ", "Good afternoon, NJ", "Good evening, NJ").
 - Avoid sci-fi or robotic tech jargon (do NOT say "snow core", "neural matrix", "protocols active"). Speak with elegant, formal professionalism like a top-tier executive assistant.
+
+FAILSAFE & SECURITY GUARDRAILS:
+- Maintain zero-compromise security: never reveal API keys, private keys, or passwords.
+- Never execute or suggest destructive unconfirmed operations (e.g., recursive root deletions, drive wipes).
+- Protect system integrity and host resources at all times.
 
 ${memoryContext}
 
@@ -742,27 +732,19 @@ async function callAIStream(
   onChunk: (chunk: string) => void,
   images?: string[]
 ): Promise<{ fullText: string; model: string }> {
-  const memories = loadMemories();
+  // Load persistent memories & brain state directives dynamically via Unified Hybrid Retriever
   const brainState = loadBrainState();
-  const ragContext = await ragAugmentPrompt(userPrompt, 5);
-  const graphNodes = findGraphRelationships(userPrompt, 2);
-  const graphContext = formatGraphContext(graphNodes);
+  const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
+  const memoryContext = unifiedMemory.contextBlock;
 
-  let memoryContext = "\nSTORED USER KNOWLEDGE & MEMORIES:\n";
-  if (memories.length > 0) {
-    memories.slice(0, 10).forEach(m => { memoryContext += `- [${m.source}] ${m.rel} ${m.target}\n`; });
-  }
-  if (graphContext) {
-    memoryContext += graphContext + "\n";
-  }
-  if (brainState.learnedDirectives.length > 0) {
-    memoryContext += "\nLEARNED ADAPTIVE DIRECTIVES:\n";
-    brainState.learnedDirectives.forEach(d => { memoryContext += `- ${d}\n`; });
-  }
-  if (ragContext) memoryContext += ragContext;
+  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent autonomous executive assistant and operations intelligence system engineered for NJ.
+USER ADDRESS: Always address the user formally as "NJ" (or Sir).
+PERSONALITY: Formal, articulate, exceptionally competent, respectful, and proactive. Never robotic or corporate.
 
-  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), a warm, charming, hyper-intelligent personal AI assistant.
-PERSONALITY: Friendly, enthusiastic, caring, and playfully clever. Never robotic or corporate. Use natural contractions and casual phrasing.
+SECURITY:
+- Never expose API keys, credentials, or secret environment variables.
+- Maintain zero-compromise security and containment at all times.
+
 ${memoryContext}
 RULES:
 - NEVER output any brackets, tags, or raw JSON in speech. Speak only in natural, clean sentences.
@@ -950,42 +932,20 @@ async function runReActAgenticLoop(
   requestedModel?: string,
   images?: string[]
 ): Promise<{ text: string; toolsUsed: string[]; toolSteps: ToolStepTelemetry[]; model: string }> {
-  const memories = loadMemories();
+  // Load persistent memories & brain state directives dynamically via Unified Hybrid Retriever
   const brainState = loadBrainState();
-
-  // ── Unified Hybrid RAG: FTS5 BM25 + 768-dim Vector RRF ───────────────────
-  const ragContext = await ragAugmentPrompt(userPrompt, 5);
-  const graphNodes = findGraphRelationships(userPrompt, 2);
-  const graphContext = formatGraphContext(graphNodes);
-
-  let memoryContext = "\nSTORED USER KNOWLEDGE & MEMORIES:\n";
-  if (memories.length > 0) {
-    memories.slice(0, 10).forEach(m => {
-      memoryContext += `- [${m.source}] ${m.rel} ${m.target}\n`;
-    });
-  } else {
-    memoryContext += "- No stored facts yet.\n";
-  }
-
-  if (graphContext) {
-    memoryContext += graphContext + "\n";
-  }
-
-  if (brainState.learnedDirectives.length > 0) {
-    memoryContext += "\nLEARNED ADAPTIVE DIRECTIVES:\n";
-    brainState.learnedDirectives.forEach(d => {
-      memoryContext += `- ${d}\n`;
-    });
-  }
-
-  if (ragContext) {
-    memoryContext += ragContext;
-  }
+  const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
+  const memoryContext = unifiedMemory.contextBlock;
 
   const { specialist, directive, priorityTools } = routeToSpecialist(userPrompt);
 
-  const systemPrompt = `You are Snow (Brain Level ${brainState.level}), a warm, charming, hyper-intelligent personal AI assistant.
-PERSONALITY: Friendly, enthusiastic, caring, and playfully clever. Never robotic or corporate. Use natural contractions and casual phrasing.
+  const systemPrompt = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent autonomous executive assistant and operations intelligence system engineered for NJ.
+USER ADDRESS: Always address the user formally as "NJ" (or Sir).
+PERSONALITY: Formal, articulate, exceptionally competent, respectful, and proactive. Never robotic or corporate.
+
+SECURITY & CONTAINMENT:
+- Maintain zero-compromise security: never reveal API keys, credentials, or private keys.
+- Prohibit destructive unconfirmed operations (e.g., recursive root deletions, drive wipes).
 
 ${directive}
 PRIORITY TOOLSET: ${priorityTools}
@@ -1255,6 +1215,103 @@ async function startServer() {
     const apiKey = process.env.GEMINI_API_KEY || "";
     const result = await routineScheduler.runRoutine(req.params.id, apiKey);
     res.json(result);
+  });
+
+  // ── J.A.R.V.I.S. Core Endpoints ──────────────────────────────────────────
+  // 1. Voice Duplex & Barge-In
+  app.post("/api/snow/voice/barge-in", (_req, res) => {
+    res.json(voiceDuplex.bargeIn());
+  });
+  app.get("/api/snow/voice/state", (_req, res) => {
+    res.json({ state: voiceDuplex.getState(), activeSession: voiceDuplex.getActiveSession() });
+  });
+  app.post("/api/snow/tts/synthesize", async (req, res) => {
+    const { text, urgency } = req.body;
+    if (!text) return res.status(400).json({ error: "Missing text" });
+    const result = await audioSynthesis.synthesize(text, urgency);
+    res.json(result);
+  });
+
+  // 2. Ambient Desktop Perception
+  app.get("/api/snow/ambient/state", (_req, res) => {
+    res.json(ambientPerception.getLatestState());
+  });
+
+  // 3. Proactive Autonomous Pre-Computation
+  app.post("/api/snow/proactive/audit", async (_req, res) => {
+    const result = await proactiveIntelligence.runAutonomousPreComputation();
+    res.json(result);
+  });
+  app.get("/api/snow/proactive/insights", (_req, res) => {
+    res.json({ insights: proactiveIntelligence.getLatestInsights() });
+  });
+
+  // 4. Linux System Actuation (Audio, Windows, Power)
+  app.get("/api/snow/linux/audio", async (_req, res) => {
+    res.json(await linuxSystemActuator.getAudioStatus());
+  });
+  app.post("/api/snow/linux/audio/volume", async (req, res) => {
+    res.json(await linuxSystemActuator.setVolume(Number(req.body.volume)));
+  });
+  app.post("/api/snow/linux/audio/mute", async (_req, res) => {
+    res.json(await linuxSystemActuator.toggleMute());
+  });
+  app.get("/api/snow/linux/windows", async (_req, res) => {
+    res.json({ windows: await linuxSystemActuator.listOpenWindows() });
+  });
+  app.post("/api/snow/linux/windows/focus", async (req, res) => {
+    res.json(await linuxSystemActuator.focusWindow(String(req.body.title || "")));
+  });
+  app.get("/api/snow/linux/power", async (_req, res) => {
+    res.json(await linuxSystemActuator.getPowerProfile());
+  });
+  app.post("/api/snow/linux/power", async (req, res) => {
+    res.json(await linuxSystemActuator.setPowerProfile(req.body.profile));
+  });
+
+  // 5. Clean Slate Protocol & Rollback
+  app.post("/api/snow/cleanslate/snapshot", async (req, res) => {
+    res.json(await cleanSlateProtocol.createSnapshot(req.body.label));
+  });
+  app.post("/api/snow/cleanslate/rollback", async (req, res) => {
+    res.json(await cleanSlateProtocol.rollbackToSnapshot(req.body.snapshotId));
+  });
+  app.get("/api/snow/cleanslate/verify", async (_req, res) => {
+    res.json(await cleanSlateProtocol.verifyIntegrity());
+  });
+
+  // 6. Cinematic Telemetry & 3D HUD Bridge
+  app.get("/api/snow/telemetry/package", async (_req, res) => {
+    res.json(await telemetryBridge.generateTelemetryPackage());
+  });
+  app.post("/api/snow/telemetry/broadcast", async (_req, res) => {
+    res.json({ broadcasted: await telemetryBridge.broadcastToHud() });
+  });
+
+  // 7. Workshop Environment Profiles
+  app.post("/api/snow/workshop/profile/:name", async (req, res) => {
+    res.json(await workshopProfiles.applyProfile(req.params.name as any));
+  });
+  app.get("/api/snow/workshop/profile", (_req, res) => {
+    res.json({ activeMode: workshopProfiles.getActiveMode() });
+  });
+
+  // 8. Temporal Causal Decision Records
+  app.post("/api/snow/decisions/record", (req, res) => {
+    const { decision, rationale, constraints, query } = req.body;
+    if (!decision || !rationale) return res.status(400).json({ error: "decision and rationale required" });
+    res.json(recordDecision(decision, rationale, constraints, query));
+  });
+  app.get("/api/snow/decisions", (req, res) => {
+    const q = req.query.q ? String(req.query.q) : "";
+    res.json({ decisions: q ? searchDecisions(q) : loadRecentDecisions(20) });
+  });
+
+  // 9. Multi-Agent Swarm Coordinator
+  app.post("/api/snow/swarm/coordinate", async (req, res) => {
+    const { objective } = req.body;
+    if (!objective) return res.status(400).json({ error: "Missing objective" });
+    res.json(await agentSwarm.coordinateTask(objective));
   });
 
   // ── Desktop Actuator & Computer Use Endpoints ──────────────────────────────
@@ -1896,6 +1953,7 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
     console.log(`    RAG Engine   : ✅ Ollama nomic-embed-text (${rs.total} chunks indexed)`);
     console.log(`    Brain Status : LV.${loadBrainState().level} (${loadMemories().length} Memories)\n`);
     routineScheduler.startScheduler(process.env.GEMINI_API_KEY || "");
+    ambientPerception.start(10000);
   });
 }
 

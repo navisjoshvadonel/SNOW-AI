@@ -34,6 +34,42 @@ import type { ToolDefinition, ToolUseContext } from "./types.js";
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
 
+// ─── Universal Secret Scrubber ───────────────────────────────────────────────
+
+/**
+ * Universal secret redactor: sanitizes API keys, tokens, SSH keys, bearer headers,
+ * and active sensitive environment variables from any tool output or diagnostic stream.
+ */
+export function scrubSecrets(text: string): string {
+  if (!text || typeof text !== "string") return text;
+  let scrubbed = text;
+
+  // 1. Google Gemini API keys (AIzaSy...)
+  scrubbed = scrubbed.replace(/AIza[0-9A-Za-z-_]{35}/g, "[REDACTED_GEMINI_KEY]");
+  // 2. OpenAI API keys (sk-...)
+  scrubbed = scrubbed.replace(/sk-[a-zA-Z0-9_-]{20,}/g, "[REDACTED_OPENAI_KEY]");
+  // 3. GitHub PAT & OAuth tokens
+  scrubbed = scrubbed.replace(/(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}/g, "[REDACTED_GITHUB_TOKEN]");
+  scrubbed = scrubbed.replace(/github_pat_[A-Za-z0-9_]{50,}/g, "[REDACTED_GITHUB_PAT]");
+  // 4. Slack tokens
+  scrubbed = scrubbed.replace(/xox[baprs]-[A-Za-z0-9-]+/g, "[REDACTED_SLACK_TOKEN]");
+  // 5. AWS Access Keys
+  scrubbed = scrubbed.replace(/AKIA[0-9A-Z]{16}/g, "[REDACTED_AWS_KEY]");
+  // 6. Cryptographic Private Keys
+  scrubbed = scrubbed.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED_PRIVATE_KEY]");
+  // 7. Authorization Bearer tokens
+  scrubbed = scrubbed.replace(/(Bearer\s+)[A-Za-z0-9\-_.~+/]+=*/gi, "$1[REDACTED_BEARER_TOKEN]");
+
+  // 8. Loaded environment variable values that match credential naming patterns
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v && v.length >= 6 && /(?:KEY|SECRET|TOKEN|PASSWORD|AUTH|CREDENTIAL|PRIVATE)/i.test(k)) {
+      scrubbed = scrubbed.split(v).join(`[REDACTED_${k}]`);
+    }
+  }
+
+  return scrubbed;
+}
+
 // ─── BashTool ─────────────────────────────────────────────────────────────────
 
 type BashInput = {
@@ -67,10 +103,11 @@ export const BashTool: ToolDefinition<BashInput> = {
       return { valid: false, message: "Timeout cannot exceed 600 seconds", code: 400 };
     }
 
-    // Comprehensive security blocklist for system disruption, destructive commands, and secret exfiltration
+    // Comprehensive zero-trust security blocklist for system disruption, destructive commands, and secret exfiltration
     const BLOCKED_COMMANDS: { pattern: RegExp; reason: string }[] = [
-      { pattern: /\brm\s+-(?:r[fv]|fr|rf)\s+(?:\/|\~|\$HOME|\.\.)(?:\s|$)/, reason: "Recursive deletion of root, home, or parent directory is prohibited" },
+      { pattern: /\brm\s+-(?:r[fv]|fr|rf)\s+(?:\/|\~|\$HOME|\.\.|\*)(?:\s|$)/, reason: "Recursive deletion of root, home, parent, or wildcard directory is prohibited" },
       { pattern: /\bmkfs\b/, reason: "Filesystem formatting is prohibited" },
+      { pattern: /\b(fdisk|parted|gdisk)\b/, reason: "Disk partition modification is prohibited" },
       { pattern: /\bdd\s+if=.*of=\/dev/, reason: "Direct low-level block device write is prohibited" },
       { pattern: /\b(shutdown|reboot|poweroff|halt|init\s+[06])\b/, reason: "System shutdown or reboot commands are prohibited" },
       { pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: "Fork bombs are prohibited" },
@@ -78,6 +115,9 @@ export const BashTool: ToolDefinition<BashInput> = {
       { pattern: /\b(?:nc|netcat|ncat)\s+.*-e\b/, reason: "Reverse shell command is prohibited" },
       { pattern: /\/dev\/tcp\//, reason: "Direct bash TCP socket redirection is prohibited" },
       { pattern: /\b(?:cat|less|more|head|tail|grep|strings)\s+.*(?:\.env|\.ssh|id_rsa|id_ed25519)/, reason: "Command attempts to read protected credentials or keys" },
+      { pattern: /\b(?:chmod|chown)\s+-[rR]\s+777\s+\//, reason: "Global permission escalation on root filesystem is prohibited" },
+      { pattern: />\s*(?:\/etc|\/boot|\/sys|\/proc|\/root)/, reason: "Direct writing or redirecting into system directories is prohibited" },
+      { pattern: /\bgit\s+clean\s+-(?:[a-zA-Z]*f[a-zA-Z]*x|[a-zA-Z]*x[a-zA-Z]*f)/, reason: "Aggressive git clean -fdx wiping untracked ignored files is prohibited" },
     ];
 
     for (const { pattern, reason } of BLOCKED_COMMANDS) {
@@ -146,7 +186,7 @@ export const BashTool: ToolDefinition<BashInput> = {
         .filter(Boolean)
         .join("\n");
 
-      return { content: output || "(no output)", isError: false };
+      return { content: scrubSecrets(output || "(no output)"), isError: false };
     } catch (err: unknown) {
       const e = err as { stdout?: string; stderr?: string; message?: string; killed?: boolean };
       if (e.killed) {
@@ -158,7 +198,7 @@ export const BashTool: ToolDefinition<BashInput> = {
       const detail = [e.stdout?.trim(), e.stderr?.trim(), e.message]
         .filter(Boolean)
         .join("\n");
-      return { content: detail || "Command failed", isError: true };
+      return { content: scrubSecrets(detail || "Command failed"), isError: true };
     }
   },
 };
@@ -210,7 +250,7 @@ export const FileReadTool: ToolDefinition<FileReadInput> = {
       .join("\n");
 
     return {
-      content: numbered,
+      content: scrubSecrets(numbered),
       metadata: { totalLines: lines.length, readLines: slice.length },
     };
   },
@@ -497,7 +537,7 @@ export const GrepTool: ToolDefinition<GrepInput> = {
     }
 
     return {
-      content: results.length > 0 ? results.join("\n") : "(no matches)",
+      content: scrubSecrets(results.length > 0 ? results.join("\n") : "(no matches)"),
       metadata: { matchCount: results.length },
     };
   },
@@ -1333,6 +1373,85 @@ export const ComputerUseTool: ToolDefinition<ComputerUseInput> = {
   }
 };
 
+// ─── LinuxSystemTool ────────────────────────────────────────────────────────
+
+type LinuxSystemInput = {
+  category: "audio" | "display" | "windows" | "power";
+  action: "get_volume" | "set_volume" | "toggle_mute" | "list_windows" | "focus_window" | "get_power_profile" | "set_power_profile";
+  value?: string | number;
+};
+
+export const LinuxSystemTool: ToolDefinition<LinuxSystemInput> = {
+  name: "LinuxSystem",
+  description:
+    "Direct native Linux OS and hardware control. Inspects/sets master audio volume and mute state (PipeWire/PulseAudio), " +
+    "queries/focuses desktop windows, and inspects/sets system power performance profiles.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      category: { type: "string", enum: ["audio", "display", "windows", "power"] },
+      action: { type: "string", enum: ["get_volume", "set_volume", "toggle_mute", "list_windows", "focus_window", "get_power_profile", "set_power_profile"] },
+      value: { type: ["string", "number"], description: "Argument for action (e.g., volume level 0-100, window title substring, power profile name)" }
+    },
+    required: ["category", "action"]
+  },
+
+  validate(input) {
+    if (!input.category || !input.action) return { valid: false, message: "category and action are required", code: 400 };
+    return { valid: true };
+  },
+
+  checkPermission(_input, _ctx) {
+    return { granted: true };
+  },
+
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: `LinuxSystem: ${input.category} -> ${input.action}` };
+
+    try {
+      if (input.category === "audio") {
+        if (input.action === "get_volume") {
+          const { stdout } = await execAsync("wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null || echo 'Volume: 0.50'");
+          return { content: `Master Audio: ${stdout.trim()}`, isError: false };
+        } else if (input.action === "set_volume") {
+          const vol = Math.max(0, Math.min(100, Number(input.value || 50)));
+          await execAsync(`wpctl set-volume @DEFAULT_AUDIO_SINK@ ${vol / 100} 2>/dev/null || pactl set-sink-volume @DEFAULT_SINK@ ${vol}% 2>/dev/null`);
+          return { content: `Master Audio volume set to ${vol}%`, isError: false };
+        } else if (input.action === "toggle_mute") {
+          await execAsync("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle 2>/dev/null || pactl set-sink-mute @DEFAULT_SINK@ toggle 2>/dev/null");
+          return { content: "Toggled audio mute state.", isError: false };
+        }
+      } else if (input.category === "windows") {
+        if (input.action === "list_windows") {
+          const { stdout } = await execAsync("wmctrl -l 2>/dev/null || echo '(Window manager list unavailable)'");
+          return { content: `Open Windows:\n${stdout.trim()}`, isError: false };
+        } else if (input.action === "focus_window") {
+          const target = String(input.value || "").replace(/[^a-zA-Z0-9\s_-]/g, "");
+          if (!target) return { content: "Missing window title substring", isError: true };
+          await execAsync(`wmctrl -a "${target}" 2>/dev/null || xdotool search --name "${target}" windowactivate 2>/dev/null`);
+          return { content: `Focused window matching: '${target}'`, isError: false };
+        }
+      } else if (input.category === "power") {
+        if (input.action === "get_power_profile") {
+          const { stdout } = await execAsync("powerprofilesctl get 2>/dev/null || echo 'balanced'");
+          return { content: `Current Power Profile: ${stdout.trim()}`, isError: false };
+        } else if (input.action === "set_power_profile") {
+          const profile = String(input.value || "balanced").toLowerCase();
+          if (!["performance", "balanced", "power-saver"].includes(profile)) {
+            return { content: "Invalid profile. Must be performance, balanced, or power-saver.", isError: true };
+          }
+          await execAsync(`powerprofilesctl set ${profile} 2>/dev/null`);
+          return { content: `System power profile updated to: ${profile}`, isError: false };
+        }
+      }
+
+      return { content: `Unsupported category/action: ${input.category}/${input.action}`, isError: true };
+    } catch (err: any) {
+      return { content: `LinuxSystem error: ${err.message}`, isError: true };
+    }
+  }
+};
+
 // ─── Registry builder ─────────────────────────────────────────────────────────
 
 export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>> {
@@ -1342,7 +1461,7 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
     GlobTool, GrepTool, WebSearchTool, WeatherTool,
     SystemTelemetryTool, MemoryStoreTool, AppLauncherTool, MediaControlTool,
     PythonSandboxTool, ClipboardTool, NotificationTool, ProcessManagerTool,
-    ServiceManagerTool, GitManagerTool, ComputerUseTool
+    ServiceManagerTool, GitManagerTool, ComputerUseTool, LinuxSystemTool
   ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }

@@ -5,6 +5,7 @@
  */
 
 import path from "path";
+import fs from "fs";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import { GoogleGenAI } from "@google/genai";
@@ -54,6 +55,31 @@ export interface GroundAndActResult {
 }
 
 class DesktopActuatorService {
+  private emergencyKillSwitch: boolean = false;
+  private auditLogPath: string = path.join(process.cwd(), "data", "actuator_audit.log");
+
+  /**
+   * Toggle emergency halt for all actuation
+   */
+  public setEmergencyKillSwitch(halt: boolean): void {
+    this.emergencyKillSwitch = halt;
+    console.warn(`[Snow Actuator] Emergency Kill-Switch ${halt ? "ENGAGED" : "DISENGAGED"}`);
+  }
+
+  public isHalted(): boolean {
+    return this.emergencyKillSwitch;
+  }
+
+  private logAudit(entry: Record<string, any>): void {
+    try {
+      const dataDir = path.dirname(this.auditLogPath);
+      if (!fs.existsSync(dataDir)) {
+        fs.mkdirSync(dataDir, { recursive: true });
+      }
+      fs.appendFileSync(this.auditLogPath, JSON.stringify({ ...entry, timestamp: new Date().toISOString() }) + "\n");
+    } catch {}
+  }
+
   /**
    * 1. Check Desktop & Screen Status
    */
@@ -109,16 +135,50 @@ class DesktopActuatorService {
     target?: string;
     button?: "left" | "middle" | "right";
   }): Promise<DesktopActionResult> {
+    if (this.emergencyKillSwitch) {
+      const haltResult: DesktopActionResult = {
+        success: false,
+        action: payload.action,
+        error: "SAFETY HALT: Desktop Actuator is locked by Emergency Kill-Switch."
+      };
+      this.logAudit({ payload, result: haltResult, status: "BLOCKED_KILL_SWITCH" });
+      return haltResult;
+    }
+
+    // Coordinate bounding check
+    if (payload.x !== undefined && (payload.x < 0 || payload.x > 7680)) {
+      return { success: false, action: payload.action, error: `Invalid coordinate x=${payload.x} (out of screen bounds)` };
+    }
+    if (payload.y !== undefined && (payload.y < 0 || payload.y > 4320)) {
+      return { success: false, action: payload.action, error: `Invalid coordinate y=${payload.y} (out of screen bounds)` };
+    }
+
+    // Dangerous system hotkey check
+    if (payload.action === "hotkey" && payload.keys && Array.isArray(payload.keys)) {
+      const normalizedKeys = payload.keys.map(k => k.toLowerCase());
+      const isDangerous =
+        (normalizedKeys.includes("ctrl") && normalizedKeys.includes("alt") && (normalizedKeys.includes("delete") || normalizedKeys.includes("del") || normalizedKeys.includes("backspace"))) ||
+        (normalizedKeys.includes("ctrl") && normalizedKeys.includes("alt") && normalizedKeys.some(k => /^f[1-6]$/.test(k)));
+
+      if (isDangerous) {
+        return { success: false, action: payload.action, error: "Destructive or system-crashing hotkey combination prohibited." };
+      }
+    }
+
     try {
       const { stdout } = await execFileAsync("python3", [SCRIPT_PATH, "action", JSON.stringify(payload)]);
-      return JSON.parse(stdout.trim());
+      const result: DesktopActionResult = JSON.parse(stdout.trim());
+      this.logAudit({ payload, result, status: result.success ? "SUCCESS" : "FAILED" });
+      return result;
     } catch (e: any) {
       console.warn("[Snow Actuator] executeAction error:", e.message);
-      return {
+      const errResult = {
         success: false,
         action: payload.action,
         error: e.message
       };
+      this.logAudit({ payload, result: errResult, status: "ERROR" });
+      return errResult;
     }
   }
 

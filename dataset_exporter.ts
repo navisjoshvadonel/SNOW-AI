@@ -15,6 +15,7 @@ export interface ExportStats {
   alpacaPath: string;
   shareGptPath: string;
   dpoPath: string;
+  openAiPath?: string;
   modelfilePath: string;
 }
 
@@ -69,11 +70,16 @@ export async function exportFineTuningDatasets(): Promise<ExportStats> {
     });
   }
 
-  const systemInstruction = `You are Snow, a warm, charming, hyper-intelligent personal AI assistant. Speak naturally without markdown, brackets, or code tags. ${memoryContext}`;
+  const systemInstruction = `You are Snow, an elite, hyper-intelligent autonomous executive assistant and operations intelligence system engineered for NJ.
+USER ADDRESS: Always address the user formally as "NJ" (or Sir).
+PERSONALITY: Formal, articulate, exceptionally competent, respectful, and proactive.
+RULES: Speak naturally without markdown, brackets, or code tags. Maintain zero-compromise security.
+${memoryContext}`;
 
-  // Process Feedback for DPO and SFT
+  // Process Feedback for DPO, SFT, and OpenAI format
   const upvotedMap = new Map<string, string>();
   const downvotedMap = new Map<string, string>();
+  const openAiEntries: any[] = [];
 
   feedbackRows.forEach(row => {
     if (row.feedback === "thumbs_up") {
@@ -89,6 +95,13 @@ export async function exportFineTuningDatasets(): Promise<ExportStats> {
           { from: "system", value: systemInstruction },
           { from: "human", value: row.prompt },
           { from: "gpt", value: row.response }
+        ]
+      });
+      openAiEntries.push({
+        messages: [
+          { role: "system", content: systemInstruction },
+          { role: "user", content: row.prompt },
+          { role: "assistant", content: row.response }
         ]
       });
     } else if (row.feedback === "thumbs_down") {
@@ -130,6 +143,13 @@ export async function exportFineTuningDatasets(): Promise<ExportStats> {
             { from: "gpt", value: snowMsg }
           ]
         });
+        openAiEntries.push({
+          messages: [
+            { role: "system", content: systemInstruction },
+            { role: "user", content: userMsg },
+            { role: "assistant", content: snowMsg }
+          ]
+        });
       }
     }
   });
@@ -138,10 +158,12 @@ export async function exportFineTuningDatasets(): Promise<ExportStats> {
   const alpacaPath = path.join(DATA_DIR, "training_alpaca.jsonl");
   const shareGptPath = path.join(DATA_DIR, "training_sharegpt.jsonl");
   const dpoPath = path.join(DATA_DIR, "training_dpo.jsonl");
+  const openAiPath = path.join(DATA_DIR, "training_openai.jsonl");
 
   fs.writeFileSync(alpacaPath, alpacaEntries.map(e => JSON.stringify(e)).join("\n"));
   fs.writeFileSync(shareGptPath, shareGptEntries.map(e => JSON.stringify(e)).join("\n"));
   fs.writeFileSync(dpoPath, dpoEntries.map(e => JSON.stringify(e)).join("\n"));
+  fs.writeFileSync(openAiPath, openAiEntries.map(e => JSON.stringify(e)).join("\n"));
 
   // 4. Build Custom Ollama Modelfile
   const modelfilePath = path.join(process.cwd(), "Modelfile");
@@ -166,6 +188,7 @@ SYSTEM """${systemInstruction}"""
     alpacaPath,
     shareGptPath,
     dpoPath,
+    openAiPath,
     modelfilePath
   };
 }

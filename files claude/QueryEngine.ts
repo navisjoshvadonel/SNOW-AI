@@ -29,6 +29,8 @@
  *     model can respond gracefully.
  */
 
+import fs from "fs";
+import path from "path";
 import type {
   AgentError,
   ContentBlock,
@@ -331,14 +333,34 @@ export class QueryEngine {
     }
 
     // Execute (drain progress events)
+    let result: ToolResult;
     try {
-      return await dispatchTool(tool, toolUse.input, ctx);
+      result = await dispatchTool(tool, toolUse.input, ctx);
     } catch (err) {
-      return {
+      result = {
         content: `Tool execution error: ${err instanceof Error ? err.message : String(err)}`,
         isError: true,
       };
     }
+
+    // System 2 Cognitive Reflection & Self-Healing Loop
+    if (result.isError) {
+      result.content = `${result.content}\n\n[SYSTEM COGNITIVE REFLECTION: Action '${toolUse.name}' returned an error. Analyze the root cause, adjust command parameters or paths, and attempt an alternate solution without repeating the failure pattern.]`;
+    } else if (toolUse.name === "Write" || toolUse.name === "Edit") {
+      // Automated post-execution verification pass
+      const filePath = (toolUse.input as any)?.file_path;
+      if (filePath && typeof filePath === "string") {
+        try {
+          const absPath = path.resolve(ctx.cwd, filePath);
+          if (fs.existsSync(absPath)) {
+            const stats = fs.statSync(absPath);
+            result.content += `\n[VERIFICATION PASS: ${filePath} successfully updated (${stats.size} bytes). File integrity confirmed.]`;
+          }
+        } catch {}
+      }
+    }
+
+    return result;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

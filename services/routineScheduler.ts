@@ -7,7 +7,7 @@ import si from "systeminformation";
 import { exec } from "child_process";
 import { promisify } from "util";
 import { GoogleGenAI } from "@google/genai";
-import { loadRecentVisualEpisodes } from "../../brain";
+import { loadRecentVisualEpisodes } from "../brain";
 
 const execAsync = promisify(exec);
 const SNOW_ICON = "/home/snowjd/Documents/Snow Jarvis/public/snow-icon.png";
@@ -91,7 +91,7 @@ class RoutineSchedulerService {
       tempC: Math.round(temp.main || 45),
       diskUsedGb: (rootDisk.used / (1024 ** 3)).toFixed(1),
       diskTotalGb: (rootDisk.size / (1024 ** 3)).toFixed(1),
-      diskPct: Math.round(rootDisk.use || 0)
+      diskPct: Math.round(((rootDisk as any).use ?? ((rootDisk.used / (rootDisk.size || 1)) * 100)) || 0)
     };
   }
 
@@ -297,6 +297,14 @@ Generate a STRICT JSON response in this exact format with NO markdown wrapping:
       lastRun: null,
       status: "active"
     });
+
+    this.routines.set("proactive_precomputation", {
+      id: "proactive_precomputation",
+      name: "Autonomous Pre-Computation & Codebase Health Audit",
+      intervalMinutes: 15,
+      lastRun: null,
+      status: "active"
+    });
   }
 
   public startScheduler(apiKey: string): void {
@@ -318,7 +326,13 @@ Generate a STRICT JSON response in this exact format with NO markdown wrapping:
     }, 60 * 60 * 1000);
     this.timers.set("morning_briefing", briefingTimer);
 
-    console.log("[SNOW SCHEDULER] ⏰ Autonomous background routines online (Sentinel, Git, Daily Briefing).");
+    // 4. Proactive Pre-Computation Audit (Every 15 minutes)
+    const precompTimer = setInterval(async () => {
+      await this.runRoutine("proactive_precomputation", apiKey);
+    }, 15 * 60 * 1000);
+    this.timers.set("proactive_precomputation", precompTimer);
+
+    console.log("[SNOW SCHEDULER] ⏰ Autonomous background routines online (Sentinel, Git, Daily Briefing, Pre-Computation).");
   }
 
   public async runRoutine(routineId: string, apiKey: string): Promise<{ success: boolean; message: string }> {
@@ -380,9 +394,14 @@ Generate a STRICT JSON response in this exact format with NO markdown wrapping:
         } else {
           routine.lastResult = `Briefing status: last generated ${this.lastBriefingDate || "none"}.`;
         }
+      } else if (routineId === "proactive_precomputation") {
+        const { proactiveIntelligence } = await import("./proactiveIntelligence");
+        const audit = await proactiveIntelligence.runAutonomousPreComputation();
+        routine.lastRun = now.toISOString();
+        routine.lastResult = `Pre-computation pass complete: ${audit.insightsCount} insight(s) generated.`;
       }
 
-      routine.status = "active";
+      routine.status = "idle";
       return { success: true, message: routine.lastResult || "Routine completed successfully." };
     } catch (e: any) {
       routine.status = "error";

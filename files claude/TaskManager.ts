@@ -61,7 +61,11 @@ export class TaskManager {
   async create(
     type: TaskType,
     description: string,
-    opts?: { toolUseId?: string; agentId?: AgentId },
+    opts?: {
+      toolUseId?: string;
+      agentId?: AgentId;
+      milestones?: Array<{ name: string; status?: "pending" | "running" | "completed" | "failed"; verification?: string }>;
+    },
   ): Promise<TaskState> {
     await mkdir(this.outputDir, { recursive: true });
 
@@ -79,11 +83,33 @@ export class TaskManager {
       outputOffset: 0,
       notified: false,
       agentId: opts?.agentId,
+      milestones: opts?.milestones?.map(m => ({
+        name: m.name,
+        status: m.status || "pending",
+        verification: m.verification
+      })),
     };
 
     this.tasks.set(id, state);
     this.notify();
     return state;
+  }
+
+  /**
+   * Update progress or verification result of a specific milestone
+   */
+  updateMilestone(
+    id: TaskId,
+    milestoneIndex: number,
+    patch: { status?: "pending" | "running" | "completed" | "failed"; verification?: string }
+  ): void {
+    const task = this.requireTask(id);
+    if (!task.milestones || !task.milestones[milestoneIndex]) return;
+    task.milestones[milestoneIndex] = {
+      ...task.milestones[milestoneIndex],
+      ...patch
+    };
+    this.notify();
   }
 
   /**

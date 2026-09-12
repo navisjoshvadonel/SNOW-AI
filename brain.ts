@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import Database from "better-sqlite3";
 import { GoogleGenAI } from "@google/genai";
-import { embedText, ragIngestFact } from "./rag.js";
+import { embedText, ragIngestFact, ragAugmentPrompt } from "./rag.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES & DATA STRUCTURES
@@ -33,6 +33,16 @@ export interface VisualEpisode {
   objects: string;
   activity?: string;
   thumbnail?: string;
+  timestamp: string;
+}
+
+export interface DecisionRecord {
+  id: string;
+  decision: string;
+  rationale: string;
+  constraints?: string;
+  gitCommit?: string;
+  contextQuery?: string;
   timestamp: string;
 }
 
@@ -144,6 +154,16 @@ function getDb(): Database.Database {
         objects TEXT NOT NULL,
         activity TEXT,
         thumbnail TEXT,
+        timestamp TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS decision_records (
+        id TEXT PRIMARY KEY,
+        decision TEXT NOT NULL,
+        rationale TEXT NOT NULL,
+        constraints TEXT,
+        git_commit TEXT,
+        context_query TEXT,
         timestamp TEXT NOT NULL
       );
     `);
@@ -804,4 +824,186 @@ export function deleteVisualEpisode(id: string): boolean {
 export function clearVisualEpisodes(): void {
   const db = getDb();
   db.exec(`DELETE FROM visual_episodes`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UNIFIED HYBRID MEMORY SYNTHESIS (GRAPH + RAG + VISUAL EPISODES)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface UnifiedContextResult {
+  contextBlock: string;
+  memoryCount: number;
+  graphCount: number;
+  ragCount: number;
+  visualCount: number;
+  directiveCount: number;
+}
+
+/**
+ * All-in-one cognitive context retriever that synthesizes:
+ *  1. Persistent entity memories & knowledge graph connections
+ *  2. Adaptive learned directives (curated from past interactions)
+ *  3. Spatial & visual episodic memory (Astra-style screen perception history)
+ *  4. Hybrid semantic vector & FTS5 BM25 RAG documents
+ */
+export async function getUnifiedContext(
+  query: string,
+  options?: {
+    maxMemories?: number;
+    maxRag?: number;
+    maxVisual?: number;
+    maxDirectives?: number;
+  }
+): Promise<UnifiedContextResult> {
+  const maxMem = options?.maxMemories ?? 10;
+  const maxRag = options?.maxRag ?? 5;
+  const maxVis = options?.maxVisual ?? 4;
+  const maxDir = options?.maxDirectives ?? 10;
+
+  // 1. Graph Memories & Relationships
+  const memories = loadMemories();
+  const graphNodes = findGraphRelationships(query, 2);
+  const graphContext = formatGraphContext(graphNodes);
+
+  // 2. Hybrid Vector RAG
+  let ragContext = "";
+  try {
+    ragContext = await ragAugmentPrompt(query, maxRag);
+  } catch {}
+
+  // 3. Visual Episodes (Desktop / Screen perception history)
+  let visualEpisodes: VisualEpisode[] = [];
+  try {
+    visualEpisodes = searchVisualEpisodes(query, maxVis);
+    if (visualEpisodes.length === 0) {
+      visualEpisodes = loadRecentVisualEpisodes(maxVis);
+    }
+  } catch {}
+
+  // 4. Learned Directives & Brain State
+  const brainState = loadBrainState();
+
+  // 5. Synthesis & Assembly
+  const sections: string[] = [];
+
+  // Memory & Knowledge Graph
+  if (memories.length > 0) {
+    let memText = "STORED USER KNOWLEDGE & MEMORIES:\n";
+    memories.slice(0, maxMem).forEach(m => {
+      memText += `- [${m.source}] ${m.rel} ${m.target}\n`;
+    });
+    sections.push(memText.trim());
+  }
+
+  if (graphContext) {
+    sections.push(graphContext.trim());
+  }
+
+  // Learned Directives
+  if (brainState.learnedDirectives.length > 0) {
+    let dirText = "LEARNED ADAPTIVE DIRECTIVES:\n";
+    brainState.learnedDirectives.slice(-maxDir).forEach(d => {
+      dirText += `- ${d}\n`;
+    });
+    sections.push(dirText.trim());
+  }
+
+  // Visual Episodic Memory
+  if (visualEpisodes.length > 0) {
+    let visText = "RECENT DESKTOP & VISUAL EPISODES (SPATIAL MEMORY):\n";
+    visualEpisodes.forEach(v => {
+      visText += `- [${new Date(v.timestamp).toLocaleTimeString()}] Scene: "${v.scene}" | Activity: "${v.activity || "active"}" | Objects: [${v.objects}]\n`;
+    });
+    sections.push(visText.trim());
+  }
+
+  // Semantic RAG Context
+  if (ragContext) {
+    sections.push(ragContext.trim());
+  }
+
+  // 5. Temporal Causal Decisions
+  try {
+    const decisions = searchDecisions(query, 3);
+    if (decisions.length > 0) {
+      let decText = "RECENT ARCHITECTURAL & SYSTEM DECISIONS (CAUSAL MEMORY):\n";
+      decisions.forEach(d => {
+        decText += `- Decision: "${d.decision}" | Rationale: "${d.rationale}"${d.constraints ? ` | Constraint: "${d.constraints}"` : ""}\n`;
+      });
+      sections.push(decText.trim());
+    }
+  } catch {}
+
+  return {
+    contextBlock: sections.length > 0 ? `\n\n${sections.join("\n\n")}` : "",
+    memoryCount: memories.length,
+    graphCount: graphNodes.length,
+    ragCount: ragContext ? maxRag : 0,
+    visualCount: visualEpisodes.length,
+    directiveCount: brainState.learnedDirectives.length
+  };
+}
+
+export function recordDecision(
+  decision: string,
+  rationale: string,
+  constraints?: string,
+  contextQuery?: string,
+  gitCommit?: string
+): DecisionRecord {
+  const db = getDb();
+  const id = `dec-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const timestamp = new Date().toISOString();
+  const stmt = db.prepare(`
+    INSERT INTO decision_records (id, decision, rationale, constraints, git_commit, context_query, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  stmt.run(id, decision, rationale, constraints || "", gitCommit || "", contextQuery || "", timestamp);
+  ragIngestFact("decision_engine", "architectural_decision", `${decision} (Reason: ${rationale})`).catch(() => {});
+  return { id, decision, rationale, constraints, gitCommit, contextQuery, timestamp };
+}
+
+export function searchDecisions(query: string, limit: number = 5): DecisionRecord[] {
+  const db = getDb();
+  const q = `%${query.toLowerCase()}%`;
+  const stmt = db.prepare(`
+    SELECT * FROM decision_records
+    WHERE LOWER(decision) LIKE ? OR LOWER(rationale) LIKE ? OR LOWER(constraints) LIKE ? OR LOWER(context_query) LIKE ?
+    ORDER BY timestamp DESC
+    LIMIT ?
+  `);
+  return stmt.all(q, q, q, q, limit) as DecisionRecord[];
+}
+
+export function loadRecentDecisions(limit: number = 10): DecisionRecord[] {
+  const db = getDb();
+  const stmt = db.prepare("SELECT * FROM decision_records ORDER BY timestamp DESC LIMIT ?");
+  return stmt.all(limit) as DecisionRecord[];
+}
+
+/**
+ * Prunes duplicate and stale learned directives to prevent memory bloat
+ */
+export function compactMemoryDirectives(): { removedCount: number; remainingCount: number } {
+  const state = loadBrainState();
+  const originalCount = state.learnedDirectives.length;
+  const seen = new Set<string>();
+  const uniqueDirectives: string[] = [];
+
+  for (const d of state.learnedDirectives) {
+    const norm = d.trim().toLowerCase();
+    if (norm && !seen.has(norm)) {
+      seen.add(norm);
+      uniqueDirectives.push(d.trim());
+    }
+  }
+
+  // Retain most recent 25 directives
+  state.learnedDirectives = uniqueDirectives.slice(-25);
+  saveBrainState(state);
+
+  return {
+    removedCount: originalCount - state.learnedDirectives.length,
+    remainingCount: state.learnedDirectives.length
+  };
 }

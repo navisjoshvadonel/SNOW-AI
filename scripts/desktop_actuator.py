@@ -36,7 +36,7 @@ import mss
 import pyautogui
 from PIL import Image
 
-pyautogui.FAILSAFE = False  # Avoid exceptions when moving near screen edges
+pyautogui.FAILSAFE = True   # Standard fail-safe: moving mouse to corner triggers safety abort
 pyautogui.PAUSE = 0.05      # Snappy 50ms action cadence
 
 def get_screen_status():
@@ -140,6 +140,8 @@ def execute_action(action: str, **kwargs):
         else:
             return {"success": False, "error": f"Unknown action '{action}'"}
 
+    except pyautogui.FailSafeException:
+        return {"success": False, "error": "FailSafe engaged: Pointer moved to emergency corner to abort desktop automation"}
     except Exception as e:
         return {"success": False, "error": f"Action failed: {str(e)}"}
 
