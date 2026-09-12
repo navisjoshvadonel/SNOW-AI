@@ -761,16 +761,19 @@ export default function App() {
       if (hour >= 12 && hour < 17) {
         timeGreeting = "Good afternoon, NJ";
         period = "afternoon";
-      } else if (hour >= 17) {
+      } else if (hour >= 17 && hour < 22) {
         timeGreeting = "Good evening, NJ";
         period = "evening";
+      } else if (hour >= 22 || hour < 5) {
+        timeGreeting = "Good evening, NJ";
+        period = "tonight";
       }
 
       const welcomePool = [
-        `${timeGreeting}. Snow is online and at your service. What are we working on this ${period}?`,
-        `${timeGreeting}. All local systems are nominal. What can I do for you?`,
-        `${timeGreeting}. Ready for your directives. What's on your mind?`,
-        `${timeGreeting}. At your command. How can I assist you right now?`
+        `${timeGreeting}. Snow is online and operational. What are we focusing on ${period === "tonight" ? "tonight" : `this ${period}`}?`,
+        `${timeGreeting}. All local systems nominal and ready for your directives.`,
+        `${timeGreeting}. At your command — what's on your mind?`,
+        `Hey NJ, ${timeGreeting.toLowerCase()}. Ready for your next directive.`
       ];
       const selectedWelcome = welcomePool[Math.floor(Math.random() * welcomePool.length)];
 

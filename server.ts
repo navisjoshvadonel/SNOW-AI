@@ -525,12 +525,6 @@ function buildOfflineReply(
 
   // Greetings - dynamic and situational, never a single hardcoded string!
   if (/^(hi|hello|hey|sup|yo|greetings|howdy|good\s+(morning|afternoon|evening|night))\b/i.test(q)) {
-    const eveningVariants = [
-      `Good evening, NJ! I am here and operational. What are we working on tonight?`,
-      `Hey NJ, good evening! Systems are active and ready for your directives.`,
-      `Evening, NJ. All local subsystems are nominal. How can I assist you?`,
-      `Good evening, NJ! What's on your mind?`
-    ];
     const morningVariants = [
       `Good morning, NJ! Systems are nominal. What's on our agenda today?`,
       `Hey NJ, good morning! Ready for your directives.`,
@@ -541,7 +535,18 @@ function buildOfflineReply(
       `Hey NJ, good afternoon! What are we working on?`,
       `Good afternoon, NJ. How may I assist you right now?`
     ];
-    const pool = period === "morning" ? morningVariants : (period === "afternoon" ? afternoonVariants : eveningVariants);
+    const eveningVariants = [
+      `Good evening, NJ! I am here and operational. What are we working on tonight?`,
+      `Hey NJ, good evening! Systems are active and ready for your directives.`,
+      `Evening, NJ. All local subsystems are nominal. How can I assist you?`,
+      `Good evening, NJ! What's on your mind?`
+    ];
+    const nightVariants = [
+      `Good evening, NJ! Burning the midnight oil? I'm right here with you.`,
+      `Hey NJ, late hours active. All subsystems nominal. What are we finishing up?`,
+      `Good evening, NJ. Ready for whatever you need tonight.`
+    ];
+    const pool = period === "morning" ? morningVariants : (period === "afternoon" ? afternoonVariants : (period === "night" ? nightVariants : eveningVariants));
     return pool[Math.floor(Math.random() * pool.length)];
   }
 
@@ -1310,7 +1315,7 @@ async function startServer() {
       }
 
       const apiKey = process.env.GEMINI_API_KEY || "";
-      const modelsToTry = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
+      const modelsToTry = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
       
       let transcribed = "";
       for (const modelName of modelsToTry) {
@@ -1531,21 +1536,39 @@ async function startServer() {
 
     if (isPureGreetingOrWake && images.length === 0) {
       const temporal = getTemporalContext();
-      const dynamicGreetings = [
-        `Hey NJ, ${temporal.naturalGreeting.toLowerCase()}! What's on your mind?`,
-        `${temporal.naturalGreeting}, NJ. I'm right here with you. How can I help?`,
-        `Hey NJ! Systems ready for your directives this ${temporal.period}.`,
-        `${temporal.naturalGreeting}, NJ. What can I do for you tonight?`,
-        `Evening, NJ. At your service — what are we working on?`,
-        `Hey NJ! All subsystems nominal this ${temporal.period}. What do you need?`
-      ].filter(g => {
-        if (temporal.period === "morning" && (g.includes("Evening") || g.includes("tonight"))) return false;
-        if (temporal.period === "afternoon" && (g.includes("Evening") || g.includes("tonight"))) return false;
-        if ((temporal.period === "evening" || temporal.period === "night") && g.includes("morning")) return false;
-        return true;
-      });
+      const greetingMap: Record<string, string[]> = {
+        morning: [
+          `Good morning, NJ! Systems are nominal and calibrated. What are we tackling today?`,
+          `Hey NJ, good morning! Ready for your directives.`,
+          `Morning, NJ. All local subsystems online. How can I assist you?`,
+          `Good morning, NJ! What's on our agenda today?`,
+          `Hey NJ! Operational telemetry is green across the board. How can I help you kick off the day?`
+        ],
+        afternoon: [
+          `Good afternoon, NJ! Systems active and standing by. What are we working on?`,
+          `Hey NJ, good afternoon! How can I assist you right now?`,
+          `Afternoon, NJ. All processes running smoothly. What's on your mind?`,
+          `Good afternoon, NJ. Ready for your next command.`,
+          `Hey NJ, checking in. How can I help you this afternoon?`
+        ],
+        evening: [
+          `Good evening, NJ! Systems are fully operational. What are we focusing on tonight?`,
+          `Hey NJ, good evening! All subsystems nominal. What can I do for you?`,
+          `Evening, NJ. Right here and at your service. What are we working on?`,
+          `Good evening, NJ! How can I assist you this evening?`,
+          `Hey NJ! Operational telemetry is green across the board. What's on your mind tonight?`,
+          `Good evening, NJ. Standing by for your directives.`
+        ],
+        night: [
+          `Good evening, NJ. Working late tonight? I'm right here with you.`,
+          `Hey NJ, all quiet on the local subsystems. What are we wrapping up tonight?`,
+          `Good evening, NJ. Operational and standing by. How can I help?`,
+          `Hey NJ! Late session active. Systems ready for whatever you need.`
+        ]
+      };
 
-      const chosenGreeting = dynamicGreetings[Math.floor(Math.random() * dynamicGreetings.length)];
+      const pool = greetingMap[temporal.period] || greetingMap.evening;
+      const chosenGreeting = pool[Math.floor(Math.random() * pool.length)];
       console.log(`[SNOW GREETING] Dynamic situational greeting triggered for "${effectivePrompt}" (${temporal.period}): "${chosenGreeting}"`);
       return res.json({
         text: chosenGreeting,
