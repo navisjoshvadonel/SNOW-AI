@@ -1447,36 +1447,7 @@ export default function App() {
           <span className="text-xs text-slate-300 font-medium">{currentDateTime.date}</span>
         </div>
 
-        {/* Center-Right Navigation Tabs Bar */}
-        <div className="hidden xl:flex items-center gap-1 bg-slate-950/80 border border-cyan-500/25 p-1 rounded-xl">
-          {[
-            { id: "hud", label: "HUD", icon: Layers },
-            { id: "graph", label: "Graph", icon: BrainCircuit },
-            { id: "vector", label: "Vector", icon: Database },
-            { id: "compiler", label: "Compiler", icon: Sparkles },
-            { id: "sandbox", label: "Sandbox", icon: Code },
-            { id: "models", label: "Models", icon: Cpu },
-          ].map(tab => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id as ActiveTab)}
-                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
-                  isActive
-                    ? "bg-cyan-500/25 text-cyan-300 border border-cyan-400/50 shadow-[0_0_12px_rgba(6,182,212,0.3)]"
-                    : "text-slate-400 hover:text-cyan-200 hover:bg-slate-900/60"
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Right Info Badges & Navigation Tabs */}
+        {/* Right Info Badges */}
         <div className="flex items-center gap-3">
           {/* Quick Weather Badge */}
           {(() => {
@@ -1553,61 +1524,10 @@ export default function App() {
       </AnimatePresence>
 
       {/* ─────────────────────────────────────────────────────────────────────────────
-          MAIN VIEW CONTAINER (HUD OR OTHER TABS)
+          MAIN VIEW CONTAINER (HUD)
       ───────────────────────────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-hidden relative">
-        {activeTab === "graph" && (
-          <div className="w-full h-full p-4">
-            <NetworkGraph
-              memories={memories}
-              onAddMemory={handleAddMemory}
-              onDeleteMemory={handleDeleteMemory}
-              onClearMemories={handleClearMemories}
-            />
-          </div>
-        )}
-        {activeTab === "vector" && (
-          <div className="w-full h-full p-4">
-            <ChromaDBStore
-              documents={vectorDocs}
-              onAddDocument={handleAddVectorDoc}
-              onRemoveDocument={handleRemoveVectorDoc}
-              onClearDocuments={() => setVectorDocs([])}
-            />
-          </div>
-        )}
-        {activeTab === "compiler" && (
-          <div className="w-full h-full p-4">
-            <PromptCompiler
-              mode={compilerMode}
-              onChangeMode={setCompilerMode}
-              memories={memories}
-              modelSelected={selectedModel}
-            />
-          </div>
-        )}
-        {activeTab === "sandbox" && (
-          <div className="w-full h-full p-4">
-            <CodeSandbox
-              files={sandboxFiles}
-              onUpdateFile={(name, code) => {
-                setSandboxFiles(prev => prev.map(f => f.name === name ? { ...f, code } : f));
-              }}
-              onSendToSnow={(fileName, fileContent) => {
-                setActiveTab("hud");
-                handleSendMessage(`Please help me debug ${fileName}:\n\n\`\`\`javascript\n${fileContent}\n\`\`\``);
-              }}
-            />
-          </div>
-        )}
-        {activeTab === "models" && (
-          <div className="w-full h-full p-4">
-            <ModelStatus modelSelected={selectedModel} onChangeModel={setSelectedModel} />
-          </div>
-        )}
-
-        {activeTab === "hud" && (
-          <div className="w-full h-full grid grid-cols-12 gap-4 p-4">
+        <div className="w-full h-full grid grid-cols-12 gap-4 p-4">
             
             {/* ─────────────────────────────────────────────────────────────────────────────
                 LEFT COLUMN: WIDGET PANELS (4 Cols)
@@ -2152,7 +2072,6 @@ export default function App() {
             </div>
 
           </div>
-        )}
       </div>
     </div>
   );
