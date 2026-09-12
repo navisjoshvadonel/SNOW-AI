@@ -1064,7 +1064,7 @@ export default function App() {
     recognition.onstart = () => {
       setIsListening(true);
       playJarvisWakeChime();
-      triggerToast("⚡ Jarvis Listening (Speak your command)...");
+      triggerToast("⚡ Snow Listening (Speak your command)...");
     };
 
     recognition.onresult = (event: any) => {
@@ -1972,7 +1972,7 @@ export default function App() {
 
               {/* Chat Input Container */}
               <div className="p-3.5 border-t border-cyan-500/20 bg-slate-950/95 relative space-y-2">
-                {/* Jarvis Voice & Telemetry Status Bar */}
+                {/* Snow Voice & Telemetry Status Bar */}
                 <div className="flex items-center justify-between px-1 text-[11px] font-mono">
                   <div className="flex items-center gap-2">
                     <div className={`w-2 h-2 rounded-full ${
@@ -1981,9 +1981,9 @@ export default function App() {
                       isLoading ? "bg-cyan-400 animate-spin" : "bg-slate-500"
                     }`} />
                     <span className="text-slate-400 font-semibold uppercase tracking-wider text-[10px]">
-                      {isSpeaking ? "Jarvis Speaking..." :
+                      {isSpeaking ? "Snow Speaking..." :
                        isListening ? "Listening (Speak Now)..." :
-                       isLoading ? "Processing Directive..." : "Jarvis Standby"}
+                       isLoading ? "Processing Directive..." : "Snow Standby"}
                     </span>
                     <span className="px-1.5 py-0.5 rounded bg-slate-800/80 border border-cyan-500/20 text-cyan-300 text-[10px] hidden sm:inline" title="Double tap Space anywhere to wake">
                       Space ×2 to Wake
@@ -1995,7 +1995,7 @@ export default function App() {
                       onClick={() => {
                         if (!isMuted) stopJarvisSpeech();
                         setIsMuted(!isMuted);
-                        triggerToast(!isMuted ? "Jarvis Voice Muted." : "Jarvis Voice Unmuted.");
+                        triggerToast(!isMuted ? "Snow Voice Muted." : "Snow Voice Unmuted.");
                       }}
                       className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[10px] transition cursor-pointer font-mono ${
                         isMuted 
