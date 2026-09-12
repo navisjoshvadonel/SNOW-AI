@@ -330,11 +330,11 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
             placeholder={
               isListening
                 ? isJarvisMode
-                  ? "⚡ Jarvis listening... (Speak freely, hands-free loop active)"
+                  ? "⚡ Say 'Hey Snow' or speak freely (Hands-free active)..."
                   : "Listening to your voice..."
                 : attachedContextFiles.length > 0
                 ? "Ask Snow about attached files..."
-                : "Ask Snow anything or press Space ×2 to speak..."
+                : "Ask Snow anything, say 'Hey Snow', or press Space ×2..."
             }
             value={inputText}
             onChange={(e) => onInputChange(e.target.value)}

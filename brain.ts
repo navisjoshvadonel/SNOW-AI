@@ -602,11 +602,14 @@ export function recordFeedback(prompt: string, response: string, feedback: "thum
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function resolveIntent(prompt: string): Promise<ResolvedIntent> {
-  const pLower = prompt.toLowerCase();
+  const pLower = prompt.toLowerCase().trim();
 
-  // Try LLM Intent Resolution first for intelligent intent parsing
+  // Fast-track simple greetings, casual talk, and wake calls without burning Gemini API quota
+  const isSimpleGreetingOrChat = /^(?:hello|hi|hey|yo|sup|greetings|howdy|good\s+(?:morning|afternoon|evening|night)|who are you|what is your name|are you there|snow|jarvis)[.!?\s]*$/i.test(pLower);
+
+  // Try LLM Intent Resolution first for intelligent intent parsing only on non-trivial queries
   const apiKey = process.env.GEMINI_API_KEY || "";
-  if (apiKey) {
+  if (apiKey && !isSimpleGreetingOrChat) {
     try {
       const ai = new GoogleGenAI({ apiKey });
       const systemInstruction = `You are a dynamic neural intent parser for Snow OS. Analyze the user input and extract intents and slots in JSON format.

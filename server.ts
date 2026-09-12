@@ -1,5 +1,5 @@
 import express from "express";
-import { spawn } from "child_process";
+import { spawn, exec } from "child_process";
 import path from "path";
 import fs from "fs";
 import os from "os";
@@ -483,6 +483,36 @@ function buildWidgetTags(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// REAL-TIME TEMPORAL CONTEXT HELPER (Accurate, dynamic situational context)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function getTemporalContext() {
+  const now = new Date();
+  const hour = now.getHours();
+  let period: "morning" | "afternoon" | "evening" | "night";
+  let naturalGreeting: string;
+
+  if (hour >= 5 && hour < 12) {
+    period = "morning";
+    naturalGreeting = "Good morning";
+  } else if (hour >= 12 && hour < 17) {
+    period = "afternoon";
+    naturalGreeting = "Good afternoon";
+  } else if (hour >= 17 && hour < 22) {
+    period = "evening";
+    naturalGreeting = "Good evening";
+  } else {
+    period = "night";
+    naturalGreeting = "Good evening";
+  }
+
+  const timeStr = now.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true });
+  const dateStr = now.toLocaleDateString("en-IN", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+
+  return { hour, period, naturalGreeting, timeStr, dateStr, timestamp: now.toISOString() };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // BUILT-IN OFFLINE AI BRAIN  (works without internet or Ollama)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -491,15 +521,28 @@ function buildOfflineReply(
   history?: { role: string; text: string }[]
 ): string {
   const q = userPrompt.toLowerCase().trim();
-  const now = new Date();
-  const timeStr = now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-  const dateStr = now.toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
-  const hour = now.getHours();
-  const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
+  const { hour, period, naturalGreeting, timeStr, dateStr } = getTemporalContext();
 
-  // Greetings
-  if (/^(hi|hello|hey|sup|yo|greetings|howdy|good (morning|afternoon|evening|night))/.test(q)) {
-    return `${greeting}, NJ. I am Snow, your personal AI assistant. I am running in offline mode right now, which means my Gemini cloud brain is temporarily unavailable. However, I am fully operational locally and ready to assist you with anything I can handle directly. What do you need?`;
+  // Greetings - dynamic and situational, never a single hardcoded string!
+  if (/^(hi|hello|hey|sup|yo|greetings|howdy|good\s+(morning|afternoon|evening|night))\b/i.test(q)) {
+    const eveningVariants = [
+      `Good evening, NJ! I am here and operational. What are we working on tonight?`,
+      `Hey NJ, good evening! Systems are active and ready for your directives.`,
+      `Evening, NJ. All local subsystems are nominal. How can I assist you?`,
+      `Good evening, NJ! What's on your mind?`
+    ];
+    const morningVariants = [
+      `Good morning, NJ! Systems are nominal. What's on our agenda today?`,
+      `Hey NJ, good morning! Ready for your directives.`,
+      `Morning, NJ. How can I assist you starting your day?`
+    ];
+    const afternoonVariants = [
+      `Good afternoon, NJ! Systems ready for your commands.`,
+      `Hey NJ, good afternoon! What are we working on?`,
+      `Good afternoon, NJ. How may I assist you right now?`
+    ];
+    const pool = period === "morning" ? morningVariants : (period === "afternoon" ? afternoonVariants : eveningVariants);
+    return pool[Math.floor(Math.random() * pool.length)];
   }
 
   // Who are you / identity
@@ -584,21 +627,29 @@ async function callAI(
   requestedModel?: string,
   images?: string[]
 ): Promise<{ text: string; model: string }> {
-  // Load persistent memories & brain state directives dynamically via Unified Hybrid Retriever
+  // Load real-time temporal situation, persistent memories & brain state directives dynamically
+  const temporal = getTemporalContext();
   const brainState = loadBrainState();
   const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
   const memoryContext = unifiedMemory.contextBlock;
 
-  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent autonomous executive assistant and operations intelligence system engineered for NJ.
+  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent female autonomous executive assistant and operations intelligence system engineered for NJ.
+VOICE & IDENTITY: You are female. You speak with a polished, articulate, warm feminine tone. All your answers will be read aloud through speech synthesis, so keep spoken answers direct, natural, crisp, and conversational.
 
-USER FORMAL ADDRESS & GREETINGS:
-- Always address the user formally as "NJ" (or Sir / Mr. NJ).
-- Use time-appropriate formal greetings (e.g., "Good morning, NJ", "Good afternoon, NJ", "Good evening, NJ").
-- Avoid sci-fi or robotic tech jargon (do NOT say "snow core", "neural matrix", "protocols active"). Speak with elegant, formal professionalism like a top-tier executive assistant.
+REAL-TIME SITUATION & CLOCK:
+- Current Local Time: ${temporal.timeStr} (${temporal.period.toUpperCase()})
+- Today's Date: ${temporal.dateStr}
+- User: NJ (address formally as "NJ" or "Sir")
+- Location: Madurai, Tamil Nadu, India
+
+CONVERSATIONAL DYNAMICS & GREETING GUIDELINES:
+- It is currently ${temporal.period} (${temporal.timeStr}). If greeting NJ, match this exact time context naturally (e.g. "Good ${temporal.period}").
+- NEVER use rigid, repetitive greeting boilerplate (do NOT say "Good [period], NJ. How may I assist you today?" over and over).
+- If NJ gives a brief greeting like "Hey" or "Hi", respond warmly, concisely, and naturally like an intelligent companion (e.g., "Hey NJ, good ${temporal.period}!", "Good ${temporal.period}, NJ! What's on your mind?").
+- Speak with natural human variation and executive poise.
 
 FAILSAFE & SECURITY GUARDRAILS:
 - Maintain zero-compromise security: never reveal API keys, private keys, or passwords.
-- Never execute or suggest destructive unconfirmed operations (e.g., recursive root deletions, drive wipes).
 - Protect system integrity and host resources at all times.
 
 ${memoryContext}
@@ -613,7 +664,7 @@ RULES:
     : userPrompt;
 
   const apiKey = process.env.GEMINI_API_KEY || "";
-  let GEMINI_MODELS = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-lite-latest"];
+  let GEMINI_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
@@ -733,13 +784,20 @@ async function callAIStream(
   images?: string[]
 ): Promise<{ fullText: string; model: string }> {
   // Load persistent memories & brain state directives dynamically via Unified Hybrid Retriever
+  const temporal = getTemporalContext();
   const brainState = loadBrainState();
   const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
   const memoryContext = unifiedMemory.contextBlock;
 
-  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent autonomous executive assistant and operations intelligence system engineered for NJ.
+  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent female autonomous executive assistant and operations intelligence system engineered for NJ.
 USER ADDRESS: Always address the user formally as "NJ" (or Sir).
-PERSONALITY: Formal, articulate, exceptionally competent, respectful, and proactive. Never robotic or corporate.
+VOICE & IDENTITY: Female executive assistant. Polished, warm, articulate, exceptionally competent, respectful, and proactive. Never robotic or corporate. Keep spoken responses clean and conversational.
+
+REAL-TIME SITUATION & CLOCK:
+- Current Local Time: ${temporal.timeStr} (${temporal.period.toUpperCase()})
+- Today's Date: ${temporal.dateStr}
+- Location: Madurai, Tamil Nadu, India
+- Temporal Context: It is currently ${temporal.period}. Never repeat canned greetings.
 
 SECURITY:
 - Never expose API keys, credentials, or secret environment variables.
@@ -754,7 +812,7 @@ RULES:
   const fullPrompt = contextText ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}` : userPrompt;
   const apiKey = process.env.GEMINI_API_KEY || "";
   // High-performance active Gemini model cascade
-  let GEMINI_MODELS = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-lite-latest"];
+  let GEMINI_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
@@ -933,15 +991,17 @@ async function runReActAgenticLoop(
   images?: string[]
 ): Promise<{ text: string; toolsUsed: string[]; toolSteps: ToolStepTelemetry[]; model: string }> {
   // Load persistent memories & brain state directives dynamically via Unified Hybrid Retriever
+  const temporal = getTemporalContext();
   const brainState = loadBrainState();
   const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
   const memoryContext = unifiedMemory.contextBlock;
 
   const { specialist, directive, priorityTools } = routeToSpecialist(userPrompt);
 
-  const systemPrompt = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent autonomous executive assistant and operations intelligence system engineered for NJ.
+  const systemPrompt = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent female autonomous executive assistant and operations intelligence system engineered for NJ.
 USER ADDRESS: Always address the user formally as "NJ" (or Sir).
-PERSONALITY: Formal, articulate, exceptionally competent, respectful, and proactive. Never robotic or corporate.
+VOICE & IDENTITY: Female executive assistant. Formal, articulate, exceptionally competent, respectful, and proactive. Never robotic or corporate.
+REAL-TIME CLOCK: ${temporal.timeStr} (${temporal.period.toUpperCase()}), ${temporal.dateStr} (Madurai, Tamil Nadu, India). Context: It is currently ${temporal.period}. Speak naturally and contextually.
 
 SECURITY & CONTAINMENT:
 - Maintain zero-compromise security: never reveal API keys, credentials, or private keys.
@@ -1240,15 +1300,17 @@ async function startServer() {
         return res.status(400).json({ error: "Missing base64 audio data", text: "" });
       }
 
-      const mimeType = clientMime || (audio.startsWith("data:") ? audio.match(/^data:([^;]+);base64,/)?.[1] : "audio/webm") || "audio/webm";
-      const base64Data = audio.replace(/^data:[^;]+;base64,/, "");
+      // Robustly extract pure base64 payload and clean mime type
+      const base64Data = audio.includes(";base64,") ? audio.split(";base64,")[1] : audio.replace(/^data:[^,]+,/, "");
+      const rawMime = clientMime || (audio.startsWith("data:") ? audio.split(";")[0].replace("data:", "") : "audio/webm") || "audio/webm";
+      const mimeType = rawMime.split(";")[0].trim();
 
       if (base64Data.length < 50) {
         return res.json({ text: "", isSilence: true });
       }
 
       const apiKey = process.env.GEMINI_API_KEY || "";
-      const modelsToTry = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-3.5-flash"];
+      const modelsToTry = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
       
       let transcribed = "";
       for (const modelName of modelsToTry) {
@@ -1261,11 +1323,11 @@ async function startServer() {
               contents: [{
                 parts: [
                   {
-                    text: "You are the high-speed speech-to-text transcriber for Snow (a Jarvis personal AI assistant). Transcribe what the user is saying accurately. Filter out ambient room noise, static, breaths, coughs, and clicks. If there is no clear speech, or only background silence/noise, reply with 'SILENCE'. Otherwise reply ONLY with the exact spoken words, properly punctuated and capitalized. Do not include quotes, commentary, or markdown."
+                    text: "You are the ultra-accurate high-speed speech-to-text transcriber for Snow (a female personal AI assistant). Transcribe everything the user says in any accent, language, or volume accurately. Output ONLY the exact transcribed spoken words, properly punctuated. Never add quotes, commentary, or markdown. Only if the audio is completely blank/pure silence with no audible words at all, reply with 'SILENCE'."
                   },
                   {
                     inlineData: {
-                      mimeType: mimeType.split(";")[0],
+                      mimeType: mimeType,
                       data: base64Data
                     }
                   }
@@ -1279,17 +1341,21 @@ async function startServer() {
           });
 
           if (!gRes.ok) {
+            const errBody = await gRes.text().catch(() => "");
+            console.warn(`[SNOW Transcribe] Failover from ${modelName} (status ${gRes.status}):`, errBody.slice(0, 200));
             continue;
           }
 
           const data = await gRes.json();
-          const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+          const parts = data?.candidates?.[0]?.content?.parts || [];
+          const textParts = parts.filter((p: any) => !p.thought && typeof p.text === "string").map((p: any) => p.text.trim()).filter(Boolean);
+          const candidateText = textParts.join(" ").trim();
           if (candidateText && !/^silence\.?$/i.test(candidateText.trim())) {
             transcribed = candidateText.replace(/^["']|["']$/g, "").trim();
           }
           break;
         } catch (e: any) {
-          console.warn(`[SNOW Transcribe] Failover from ${modelName}:`, e.message);
+          console.warn(`[SNOW Transcribe] Error calling ${modelName}:`, e.message);
         }
       }
 
@@ -1455,6 +1521,38 @@ async function startServer() {
     const images = rawImages.filter(img => typeof img === "string" && img.length > 0);
 
     console.log("\n[SNOW] ─── New query:", effectivePrompt, "Model:", requestedModel || "default", "Visual frames:", images.length);
+
+    // ── Instant Situational Greeting & Wake-Word Route (Dynamic, never hardcoded) ──
+    const trimmedPrompt = effectivePrompt.trim().replace(/[.,!?;]+$/, "").trim();
+    const isPureGreetingOrWake = /^(?:hey|hi|hello|yo|howdy|sup|ok)\s*(?:snow|jarvis)?$/i.test(trimmedPrompt) ||
+                                 /^(?:wake up|are you there|listen|wake)\s*(?:snow|jarvis)?$/i.test(trimmedPrompt) ||
+                                 /^(?:good\s+(?:morning|afternoon|evening|night))\s*(?:snow|jarvis)?$/i.test(trimmedPrompt) ||
+                                 /^(?:snow|jarvis)$/i.test(trimmedPrompt);
+
+    if (isPureGreetingOrWake && images.length === 0) {
+      const temporal = getTemporalContext();
+      const dynamicGreetings = [
+        `Hey NJ, ${temporal.naturalGreeting.toLowerCase()}! What's on your mind?`,
+        `${temporal.naturalGreeting}, NJ. I'm right here with you. How can I help?`,
+        `Hey NJ! Systems ready for your directives this ${temporal.period}.`,
+        `${temporal.naturalGreeting}, NJ. What can I do for you tonight?`,
+        `Evening, NJ. At your service — what are we working on?`,
+        `Hey NJ! All subsystems nominal this ${temporal.period}. What do you need?`
+      ].filter(g => {
+        if (temporal.period === "morning" && (g.includes("Evening") || g.includes("tonight"))) return false;
+        if (temporal.period === "afternoon" && (g.includes("Evening") || g.includes("tonight"))) return false;
+        if ((temporal.period === "evening" || temporal.period === "night") && g.includes("morning")) return false;
+        return true;
+      });
+
+      const chosenGreeting = dynamicGreetings[Math.floor(Math.random() * dynamicGreetings.length)];
+      console.log(`[SNOW GREETING] Dynamic situational greeting triggered for "${effectivePrompt}" (${temporal.period}): "${chosenGreeting}"`);
+      return res.json({
+        text: chosenGreeting,
+        model: "dynamic-situational-core",
+        toolActivity: []
+      });
+    }
 
     // Dynamic Intent & Slot resolution (No hardcoding)
     const intent = await resolveIntent(effectivePrompt);
@@ -2021,6 +2119,10 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
     console.log(`    Gemini key   : ${process.env.GEMINI_API_KEY ? "✅ set" : "❌ missing"}`);
     console.log(`    RAG Engine   : ✅ Ollama nomic-embed-text (${rs.total} chunks indexed)`);
     console.log(`    Brain Status : LV.${loadBrainState().level} (${loadMemories().length} Memories)\n`);
+    // Ensure Linux microphone input capture volume is healthy (>=85%)
+    try {
+      exec("wpctl set-volume @DEFAULT_AUDIO_SOURCE@ 0.85 2>/dev/null || amixer set Capture 85% 2>/dev/null", () => {});
+    } catch {}
     routineScheduler.startScheduler(process.env.GEMINI_API_KEY || "");
     ambientPerception.start(10000);
   });

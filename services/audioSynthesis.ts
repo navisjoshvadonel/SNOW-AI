@@ -30,15 +30,15 @@ class AudioSynthesisService {
     urgency: AudioUrgency = "calm"
   ): Promise<SynthesizedAudioResult> {
     // 1. Calculate prosody curves
-    let rate = 1.0;
-    let pitch = 0.98; // Slightly lower, dignified British butler register
+    let rate = 1.02;
+    let pitch = 1.14; // Melodic, clear feminine executive assistant register
 
     if (urgency === "alert") {
       rate = 1.18;
-      pitch = 1.05;
+      pitch = 1.20;
     } else if (urgency === "emergency") {
       rate = 1.28;
-      pitch = 1.12;
+      pitch = 1.25;
     }
 
     // 2. Generate clean SSML
@@ -47,12 +47,12 @@ class AudioSynthesisService {
     // 3. Register with voice duplex tracker
     voiceDuplex.startSpeaking(text, urgency === "calm" ? "normal" : "urgent");
 
-    // 4. Try native Linux speech dispatcher (spd-say) if available
+    // 4. Try native Linux speech dispatcher (spd-say) if available with female voice
     let dispatched = false;
     try {
       const cleanSpoken = text.replace(/"/g, '\\"').replace(/[\r\n]+/g, " ");
       const speedParam = urgency === "calm" ? 0 : urgency === "alert" ? 25 : 40;
-      await execAsync(`spd-say -r ${speedParam} "${cleanSpoken}" 2>/dev/null`);
+      await execAsync(`spd-say -t female1 -p 15 -r ${speedParam} "${cleanSpoken}" 2>/dev/null`);
       dispatched = true;
     } catch {}
 

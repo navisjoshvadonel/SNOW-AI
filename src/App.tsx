@@ -389,6 +389,11 @@ export default function App() {
   const hasSpokenRef = useRef<boolean>(false);
   const lastSpeechTimestampRef = useRef<number>(0);
   const webSpeechDisabledRef = useRef<boolean>(false);
+  const firstSpeechTimestampRef = useRef<number>(0);
+  const hasAutoStartedVoiceRef = useRef<boolean>(false);
+  const speechWatchdogRef = useRef<any>(null);
+  const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const availableVoicesRef = useRef<SpeechSynthesisVoice[]>([]);
   const lastSpacePressRef = useRef<number>(0);
   const [showConfetti, setShowConfetti] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -745,26 +750,36 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Initial formal time-aware greeting for NJ
+  // Initial dynamic, situation-aware greeting for NJ
   useEffect(() => {
     if (chatHistory.length === 0) {
-      const now = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-      const hour = new Date().getHours();
-      let timeGreeting = "Good morning, NJ.";
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+      const hour = now.getHours();
+      let timeGreeting = "Good morning, NJ";
+      let period = "morning";
       if (hour >= 12 && hour < 17) {
-        timeGreeting = "Good afternoon, NJ.";
-      } else if (hour >= 17 && hour < 22) {
-        timeGreeting = "Good evening, NJ.";
-      } else if (hour >= 22 || hour < 5) {
-        timeGreeting = "Good evening, NJ.";
+        timeGreeting = "Good afternoon, NJ";
+        period = "afternoon";
+      } else if (hour >= 17) {
+        timeGreeting = "Good evening, NJ";
+        period = "evening";
       }
+
+      const welcomePool = [
+        `${timeGreeting}. Snow is online and at your service. What are we working on this ${period}?`,
+        `${timeGreeting}. All local systems are nominal. What can I do for you?`,
+        `${timeGreeting}. Ready for your directives. What's on your mind?`,
+        `${timeGreeting}. At your command. How can I assist you right now?`
+      ];
+      const selectedWelcome = welcomePool[Math.floor(Math.random() * welcomePool.length)];
 
       setChatHistory([
         {
           id: "welcome-1",
           sender: "snow",
-          text: `${timeGreeting} I am at your service. How may I assist you today?`,
-          timestamp: now
+          text: selectedWelcome,
+          timestamp: timeStr
         }
       ]);
     }
@@ -878,13 +893,41 @@ export default function App() {
     fetch("/api/snow/voice/barge-in", { method: "POST" }).catch(() => {});
   };
 
-  // ─── Speak Response as Snow ──────────────────────────────────────────────────
+  // Cache available synthesis voices on load & voice changes
+  useEffect(() => {
+    if ("speechSynthesis" in window) {
+      const updateVoices = () => {
+        availableVoicesRef.current = window.speechSynthesis.getVoices();
+      };
+      updateVoices();
+      window.speechSynthesis.onvoiceschanged = updateVoices;
+    }
+  }, []);
+
+  // ─── Speak Response as Snow (Articulate Female Voice) ────────────────────────
   const speakSnow = (textToSpeak: string) => {
-    if (isMuted || !("speechSynthesis" in window)) return;
+    if (isMuted || !("speechSynthesis" in window)) {
+      if (isJarvisModeRef.current) {
+        setTimeout(() => {
+          if (isJarvisModeRef.current && !isSpeakingRef.current) {
+            startSnowVoiceListening(true);
+          }
+        }, 1200);
+      }
+      return;
+    }
+
     try {
       window.speechSynthesis.cancel();
+      if (speechWatchdogRef.current) clearTimeout(speechWatchdogRef.current);
+
       const cleaned = cleanForSpeech(textToSpeak);
-      if (!cleaned) return;
+      if (!cleaned) {
+        if (isJarvisModeRef.current && !isSpeakingRef.current) {
+          setTimeout(() => startSnowVoiceListening(true), 400);
+        }
+        return;
+      }
 
       // Extract first 2-3 sentences for concise, crisp spoken delivery
       const sentenceMatches = cleaned.match(/[^.!?]+[.!?]+/g);
@@ -893,28 +936,49 @@ export default function App() {
         : cleaned.slice(0, 260).trim();
 
       const utterance = new SpeechSynthesisUtterance(spokenSummary);
-      utterance.rate = 1.05; // Slightly brisk, intelligent cadence
-      utterance.pitch = 0.98; // Grounded, crisp Snow tone
+      utterance.rate = 1.02; // Elegant, fluid conversational pace
+      utterance.pitch = 1.14; // Melodic, crystal-clear feminine register
 
-      const voices = window.speechSynthesis.getVoices();
-      const preferred = voices.find(v => 
-        (v.name.includes("UK English") || v.name.includes("Daniel") || v.name.includes("Natural") || v.name.includes("Google UK English Male") || v.name.includes("Oliver") || v.name.includes("Arthur"))
-      ) || voices.find(v => v.lang.startsWith("en-GB")) 
-        || voices.find(v => v.lang.startsWith("en-US")) 
-        || voices.find(v => v.lang.startsWith("en"));
+      // Select female voice with prioritized fallback chain
+      const voices = (availableVoicesRef.current && availableVoicesRef.current.length > 0)
+        ? availableVoicesRef.current
+        : window.speechSynthesis.getVoices();
 
-      if (preferred) utterance.voice = preferred;
+      const femaleVoice = voices.find(v => 
+        v.lang.startsWith("en") && (
+          /female|samantha|victoria|karen|zira|jenny|aria|sonia|ava|emma|natasha|susan|moira|tessa|stephanie|allison|fiona|veena|catherine|linda/i.test(v.name)
+        )
+      ) || voices.find(v =>
+        v.lang.startsWith("en") && (
+          v.name.includes("Google UK English Female") ||
+          v.name.includes("Google US English") ||
+          v.name.includes("Natural") ||
+          v.name.includes("Online")
+        )
+      ) || voices.find(v =>
+        v.lang.startsWith("en") && !/male|david|daniel|george|arthur|oliver|mark|richard|james|brian|guy/i.test(v.name)
+      ) || voices.find(v => v.lang.startsWith("en")) || voices[0];
+
+      if (femaleVoice) utterance.voice = femaleVoice;
+
+      // Pin utterance to prevent Chromium GC freeze bug
+      activeUtteranceRef.current = utterance;
+      (window as any)._snowActiveUtterance = utterance;
 
       utterance.onstart = () => {
         setIsSpeaking(true);
         isSpeakingRef.current = true;
       };
 
-      utterance.onend = () => {
+      const handleSpeechDone = () => {
+        if (speechWatchdogRef.current) clearTimeout(speechWatchdogRef.current);
+        activeUtteranceRef.current = null;
+        (window as any)._snowActiveUtterance = null;
         setIsSpeaking(false);
         isSpeakingRef.current = false;
+
         // J.A.R.V.I.S. Continuous Conversational Loop:
-        // Automatically resume listening for Tony's follow-up the moment speech ends!
+        // Automatically resume listening for follow-up immediately after speech finishes!
         if (isJarvisModeRef.current && !isMuted) {
           setTimeout(() => {
             if (isJarvisModeRef.current && !isSpeakingRef.current) {
@@ -924,23 +988,29 @@ export default function App() {
         }
       };
 
-      utterance.onerror = () => {
-        setIsSpeaking(false);
-        isSpeakingRef.current = false;
-        if (isJarvisModeRef.current && !isMuted) {
-          setTimeout(() => {
-            if (isJarvisModeRef.current && !isSpeakingRef.current) {
-              startSnowVoiceListening(true);
-            }
-          }, 350);
-        }
+      utterance.onend = handleSpeechDone;
+      utterance.onerror = (err) => {
+        console.warn("[Snow Voice] Speech synthesis notice:", err);
+        handleSpeechDone();
       };
+
+      // Watchdog timer: Auto-recover if browser speech stalls or misses onend
+      const maxSpeechMs = Math.max(3500, (spokenSummary.length * 90) + 1500);
+      speechWatchdogRef.current = setTimeout(() => {
+        if (isSpeakingRef.current) {
+          console.log("[Snow Voice] Speech watchdog auto-recovered state.");
+          handleSpeechDone();
+        }
+      }, maxSpeechMs);
 
       window.speechSynthesis.speak(utterance);
     } catch (e) {
       console.warn("Speech synthesis error:", e);
       setIsSpeaking(false);
       isSpeakingRef.current = false;
+      if (isJarvisModeRef.current && !isMuted) {
+        setTimeout(() => startSnowVoiceListening(true), 350);
+      }
     }
   };
 
@@ -1077,18 +1147,24 @@ export default function App() {
             stopSnowSpeech();
           }
 
-          // Voice Activity Detection (VAD)
-          if (normalizedVol > 12) {
+          // Voice Activity Detection (VAD) - sensitive threshold for crisp speech detection
+          if (normalizedVol > 6) {
+            if (!hasSpokenRef.current) {
+              firstSpeechTimestampRef.current = Date.now();
+            }
             hasSpokenRef.current = true;
             lastSpeechTimestampRef.current = Date.now();
           }
 
-          // Smart silence detection: 1.4s of sustained silence after speaking
+          // Smart silence detection: 950ms of sustained silence after speaking, or 5.5s safety cutoff
           if (hasSpokenRef.current && lastSpeechTimestampRef.current > 0) {
             const silentDuration = Date.now() - lastSpeechTimestampRef.current;
-            if (silentDuration > 1400) {
+            const totalSpeakingDuration = firstSpeechTimestampRef.current > 0 ? (Date.now() - firstSpeechTimestampRef.current) : 0;
+
+            if (silentDuration > 950 || totalSpeakingDuration > 5500) {
               hasSpokenRef.current = false;
               lastSpeechTimestampRef.current = 0;
+              firstSpeechTimestampRef.current = 0;
 
               // Check if Web Speech transcript is already available
               const webSpeechText = accumulatedTranscriptRef.current.trim();
@@ -1140,7 +1216,7 @@ export default function App() {
           if (!accumulatedTranscriptRef.current.trim()) {
             triggerToast("⚡ Processing your voice directive...");
             const transcribed = await transcribeAudioBlob(blob);
-            if (transcribed && transcribed.trim() && shouldKeepListeningRef.current) {
+            if (transcribed && transcribed.trim()) {
               setInputText(transcribed.trim());
               stopSnowVoiceListening(true);
               handleSendMessageRef.current(transcribed.trim());
@@ -1195,6 +1271,13 @@ export default function App() {
             setInputText(activeSpeech);
             hasSpokenRef.current = true;
             lastSpeechTimestampRef.current = Date.now();
+
+            // Instant wake-word trigger on Web Speech API
+            if (/^(?:hey|hi|hello|yo|ok)?\s*(?:snow|jarvis)[.!?]*$/i.test(activeSpeech.trim())) {
+              stopSnowVoiceListening(true);
+              handleSendMessageRef.current(activeSpeech.trim());
+              return;
+            }
           }
         };
 
@@ -1309,6 +1392,40 @@ export default function App() {
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isListening, isMuted]);
+
+  // ─── Auto-Wake Voice Initialization on Startup & Interaction ───────────────
+  useEffect(() => {
+    const attemptAutoListen = async () => {
+      if (hasAutoStartedVoiceRef.current) return;
+      hasAutoStartedVoiceRef.current = true;
+      try {
+        await startSnowVoiceListening(true);
+      } catch (err) {
+        console.log("[Snow Voice] Initial auto-listen waiting for user interaction:", err);
+      }
+    };
+
+    // Auto-listen shortly after UI mount
+    const timer = setTimeout(attemptAutoListen, 800);
+
+    // Fallback: If browser audio policy requires user gesture, start on first click/key
+    const handleFirstGesture = () => {
+      if (!isListening && !shouldKeepListeningRef.current) {
+        startSnowVoiceListening(true);
+      }
+      window.removeEventListener("click", handleFirstGesture);
+      window.removeEventListener("keydown", handleFirstGesture);
+    };
+
+    window.addEventListener("click", handleFirstGesture);
+    window.addEventListener("keydown", handleFirstGesture);
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("click", handleFirstGesture);
+      window.removeEventListener("keydown", handleFirstGesture);
+    };
+  }, []);
 
   // Export Conversation Transcript
   const handleExtractConversation = () => {
@@ -1486,10 +1603,9 @@ export default function App() {
       fetchMemories();
       fetchBrainStatus();
 
-      // Verbal speech delivery
-      if (!data.error && cleanDisplay) {
-        speakSnow(cleanDisplay);
-      }
+      // Verbal speech delivery for all responses (always speak response aloud)
+      const spokenText = cleanDisplay || "Understood, NJ. Directive processed.";
+      speakSnow(spokenText);
     } catch (err: any) {
       console.error("[Snow Chat Error]", err);
       const isNetworkError = err instanceof TypeError && (
