@@ -1400,12 +1400,12 @@ export default function App() {
 
           <div className="hidden lg:flex items-center gap-2 text-[10px] font-mono text-slate-400">
             <Compass className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Madurai Node · 09°55'N 78°07'E</span>
+            <span>Madurai, India · 09°55'N 78°07'E</span>
           </div>
 
           <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 rounded-full text-[10px] text-emerald-300 font-mono font-semibold">
             <ShieldCheck className="w-3 h-3 text-emerald-400" />
-            <span>CONTAINMENT ACTIVE</span>
+            <span>SECURE</span>
           </div>
         </div>
 
@@ -1423,22 +1423,22 @@ export default function App() {
             {isLoading ? (
               <span className="flex items-center gap-1.5 text-cyan-300 border-cyan-500/40 bg-cyan-500/15">
                 <RefreshCw className="w-3 h-3 text-cyan-400 animate-spin" />
-                <span>PROCESSING · NEURAL MATRIX</span>
+                <span>THINKING...</span>
               </span>
             ) : isListening ? (
               <span className="flex items-center gap-1.5 text-rose-300 border-rose-500/40 bg-rose-500/15">
                 <Radio className="w-3 h-3 text-rose-400 animate-pulse" />
-                <span>ACOUSTIC BEAM · LISTENING</span>
+                <span>LISTENING...</span>
               </span>
             ) : isSpeaking ? (
               <span className="flex items-center gap-1.5 text-emerald-300 border-emerald-500/40 bg-emerald-500/15">
                 <Activity className="w-3 h-3 text-emerald-400 animate-pulse" />
-                <span>DUPLEX SYNTH · ACTIVE</span>
+                <span>SPEAKING...</span>
               </span>
             ) : (
               <span className="flex items-center gap-1.5 text-slate-400 border-slate-700/40 bg-slate-900/60">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/80" />
-                <span>STANDBY · READY</span>
+                <span>READY</span>
               </span>
             )}
           </div>
@@ -1455,7 +1455,7 @@ export default function App() {
             }`}
           >
             {isMuted ? <VolumeX className="w-3 h-3 text-amber-400" /> : <Volume2 className="w-3 h-3 text-cyan-400" />}
-            <span>{isMuted ? "VOICE MUTED" : "VOICE ACTIVE"}</span>
+            <span>{isMuted ? "MUTED" : "VOICE ON"}</span>
           </div>
 
           {/* Quick Weather Badge */}

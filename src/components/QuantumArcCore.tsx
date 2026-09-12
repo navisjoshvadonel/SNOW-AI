@@ -23,10 +23,10 @@ export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
 
   // Orbital Swarm Specialist Agents
   const swarmAgents = [
-    { name: "ARCH", label: "Architect", color: "#38bdf8", icon: BrainCircuit, initialAngle: 0 },
-    { name: "EXEC", label: "Executor", color: "#22d3ee", icon: Zap, initialAngle: 90 },
-    { name: "SENT", label: "Sentinel", color: "#34d399", icon: Shield, initialAngle: 180 },
-    { name: "TELM", label: "Telemetry", color: "#a78bfa", icon: Radio, initialAngle: 270 },
+    { name: "PLAN", label: "Planner", color: "#38bdf8", icon: BrainCircuit, initialAngle: 0 },
+    { name: "BLD", label: "Builder", color: "#22d3ee", icon: Zap, initialAngle: 90 },
+    { name: "SEC", label: "Security", color: "#34d399", icon: Shield, initialAngle: 180 },
+    { name: "SYS", label: "System", color: "#a78bfa", icon: Radio, initialAngle: 270 },
   ];
 
   // Dynamic state colors
@@ -370,32 +370,32 @@ export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
               boxShadow: `0 0 8px ${accentColor}`,
             }}
           />
-          <span className="text-slate-300 font-semibold uppercase">
+          <span className="text-slate-300 font-semibold uppercase tracking-wider">
             {state === "listening"
-              ? "ACOUSTIC SENSORS ACTIVE · LISTENING"
+              ? "Listening to you..."
               : state === "thinking"
-              ? "NEURAL REASONING · SYNTHESIZING"
+              ? "Thinking..."
               : state === "speaking"
-              ? "AUDIO DUPLEX · TRANSMITTING"
-              : "QUANTUM CORE MK-V · ACTIVE"}
+              ? "Speaking..."
+              : "At your service, NJ"}
           </span>
         </div>
 
         {/* Real-Time Telemetry Stats Row */}
         <div className="flex items-center gap-4 text-[10px] font-mono text-cyan-400/70 pt-1">
           <div className="flex items-center gap-1.5">
-            <span className="text-slate-500">SYS_LOAD:</span>
+            <span className="text-slate-500">CPU LOAD:</span>
             <span className="text-cyan-200 font-bold">{cpuPct}%</span>
           </div>
           <span className="text-cyan-500/30">•</span>
           <div className="flex items-center gap-1.5">
-            <span className="text-slate-500">LATENCY:</span>
-            <span className="text-cyan-200 font-bold">14ms</span>
+            <span className="text-slate-500">SPEED:</span>
+            <span className="text-cyan-200 font-bold">Fast</span>
           </div>
           <span className="text-cyan-500/30">•</span>
           <div className="flex items-center gap-1.5">
-            <span className="text-slate-500">SWARM:</span>
-            <span className="text-emerald-300 font-bold">4 ONLINE</span>
+            <span className="text-slate-500">AI AGENTS:</span>
+            <span className="text-emerald-300 font-bold">4 Active</span>
           </div>
         </div>
       </div>

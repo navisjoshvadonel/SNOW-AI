@@ -85,10 +85,10 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
           </span>
           <div className="flex flex-col">
             <span className="font-extrabold text-xs text-cyan-200 tracking-widest uppercase font-mono">
-              DIRECTIVE STREAM
+              CONVERSATION
             </span>
             <span className="text-[9px] font-mono text-cyan-500/60 font-semibold tracking-wider">
-              QUANTUM MISSION LOG
+              LIVE CHAT
             </span>
           </div>
         </div>
@@ -131,7 +131,7 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
                   }`}
                 />
                 <span className="font-bold tracking-wider uppercase text-cyan-300">
-                  {isUser ? "OPERATOR NJ" : "SNOW AGI"}
+                  {isUser ? "NJ" : "SNOW"}
                 </span>
                 <span className="text-slate-500">•</span>
                 <span className="text-slate-400">{msg.timestamp}</span>
@@ -153,7 +153,7 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
                   <div className="mb-2.5 pb-2 border-b border-cyan-500/15 space-y-1 font-mono">
                     <div className="text-[9px] text-cyan-400/80 font-bold uppercase tracking-widest flex items-center gap-1">
                       <Terminal className="w-3 h-3 text-cyan-400" />
-                      <span>AUTONOMOUS EXECUTION TRACE</span>
+                      <span>ACTIONS TAKEN</span>
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {msg.toolActivity.map((tool, idx) => (
@@ -182,7 +182,7 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
                   <div className="mt-2.5 pt-1.5 border-t border-cyan-500/15 flex items-center justify-between font-mono text-[10px] text-slate-400">
                     <div className="flex items-center gap-1.5 text-cyan-400/70 font-bold">
                       <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                      <span>ZERO-TRUST VERIFIED</span>
+                      <span>VERIFIED SECURE</span>
                     </div>
 
                     <div className="flex items-center gap-2">
@@ -224,7 +224,7 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
           <div className="flex items-start gap-2">
             <div className="p-3 rounded-2xl bg-slate-950/90 border border-cyan-500/30 rounded-tl-none flex items-center gap-2 text-xs font-mono text-cyan-300 shadow-[0_0_20px_rgba(6,182,212,0.15)]">
               <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-              <span>SYNTHESIZING COGNITIVE DIRECTIVE...</span>
+              <span>Snow is thinking...</span>
             </div>
           </div>
         )}
@@ -250,18 +250,18 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
             />
             <span className="text-slate-300 font-semibold uppercase tracking-wider">
               {isSpeaking
-                ? "Snow Speaking..."
+                ? "Snow is speaking..."
                 : isListening
-                ? "Listening (Speak Now)..."
+                ? "Listening (speak now)..."
                 : isLoading
-                ? "Processing Directive..."
-                : "Snow Standby"}
+                ? "Thinking..."
+                : "Snow is ready"}
             </span>
             <span
               className="px-1.5 py-0.2 rounded bg-slate-900 border border-cyan-500/20 text-cyan-300 text-[9px] hidden sm:inline"
-              title="Double tap Space anywhere to wake"
+              title="Double tap Space anywhere to speak"
             >
-              Space ×2 to Wake
+              Space ×2 to Speak
             </span>
           </div>
 
@@ -310,8 +310,8 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
               isListening
                 ? "Listening to your voice..."
                 : attachedContextFiles.length > 0
-                ? "Ask SNOW about attached files..."
-                : "Enter directive or double-tap Space..."
+                ? "Ask Snow about attached files..."
+                : "Ask Snow anything or press Space ×2 to speak..."
             }
             value={inputText}
             onChange={(e) => onInputChange(e.target.value)}
@@ -338,7 +338,7 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
             onClick={() => onSendMessage()}
             disabled={(!inputText.trim() && attachedContextFiles.length === 0) || isLoading}
             className="p-2 rounded-xl bg-gradient-to-r from-cyan-400 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 disabled:opacity-30 transition cursor-pointer font-bold shadow-[0_0_12px_rgba(34,211,238,0.3)]"
-            title="Execute directive"
+            title="Send message"
           >
             <Send className="w-3.5 h-3.5" />
           </button>

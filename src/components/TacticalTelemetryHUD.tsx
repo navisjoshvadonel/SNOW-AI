@@ -140,7 +140,7 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
         <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2 mb-2.5">
           <div className="flex items-center gap-2 text-cyan-300 font-mono font-bold text-xs tracking-wider">
             <Activity className="w-3.5 h-3.5 text-cyan-400" />
-            <span>HARDWARE TELEMETRY</span>
+            <span>SYSTEM PERFORMANCE</span>
           </div>
           <button
             onClick={onRefreshStats}
@@ -175,10 +175,10 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
 
         {/* Dynamic Hardware Health Strip */}
         <div className="mt-2.5 pt-2 border-t border-cyan-500/15 flex items-center justify-between font-mono text-[10px]">
-          <span className="text-slate-400">HARDWARE STATUS:</span>
+          <span className="text-slate-400">SYSTEM HEALTH:</span>
           <span className="text-emerald-300 font-bold flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-            <span>OPERATIONAL · OPTIMAL</span>
+            <span>HEALTHY</span>
           </span>
         </div>
       </div>
@@ -189,10 +189,10 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
         <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2 mb-2">
           <div className="flex items-center gap-2 text-cyan-300 font-mono font-bold text-xs tracking-wider">
             <Shield className="w-3.5 h-3.5 text-emerald-400" />
-            <span>SENTINEL THREAT RADAR</span>
+            <span>SECURITY & ENGINES</span>
           </div>
           <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-950/70 border border-emerald-500/30 px-2 py-0.5 rounded-full">
-            ZERO THREATS
+            ALL CLEAR
           </span>
         </div>
 
@@ -223,16 +223,16 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
           {/* Active Process Telemetry */}
           <div className="flex-1 space-y-1.5 font-mono text-[10px]">
             <div className="flex justify-between items-center bg-slate-950/70 px-2 py-1 rounded-lg border border-cyan-500/15">
-              <span className="text-slate-400 truncate">D-BUS BRIDGE</span>
-              <span className="text-cyan-300 font-bold">LNK ACTIVE</span>
+              <span className="text-slate-400 truncate">SYSTEM CONTROL</span>
+              <span className="text-cyan-300 font-bold">CONNECTED</span>
             </div>
             <div className="flex justify-between items-center bg-slate-950/70 px-2 py-1 rounded-lg border border-cyan-500/15">
-              <span className="text-slate-400 truncate">VOICE DUPLEX</span>
-              <span className="text-emerald-300 font-bold">&lt;80ms LAT</span>
+              <span className="text-slate-400 truncate">VOICE ENGINE</span>
+              <span className="text-emerald-300 font-bold">INSTANT</span>
             </div>
             <div className="flex justify-between items-center bg-slate-950/70 px-2 py-1 rounded-lg border border-cyan-500/15">
-              <span className="text-slate-400 truncate">SWARM MESH</span>
-              <span className="text-blue-300 font-bold">4 NODES</span>
+              <span className="text-slate-400 truncate">AI ASSISTANTS</span>
+              <span className="text-blue-300 font-bold">4 READY</span>
             </div>
           </div>
         </div>
@@ -244,7 +244,7 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
         <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2 mb-2">
           <div className="flex items-center gap-2 text-cyan-300 font-mono font-bold text-xs tracking-wider">
             <Radio className="w-3.5 h-3.5 text-cyan-400" />
-            <span>ATMOSPHERIC SENSORS</span>
+            <span>WEATHER</span>
           </div>
           <span className="text-[10px] font-mono text-slate-400 uppercase font-bold">
             {weather.condition}
@@ -271,7 +271,7 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
             <span className="text-cyan-200 font-bold">{weather.humidity || "65%"}</span>
           </div>
           <div className="bg-slate-950/70 p-1 rounded-lg border border-cyan-500/15">
-            <span className="text-slate-500 block">WIND VEC</span>
+            <span className="text-slate-500 block">WIND</span>
             <span className="text-cyan-200 font-bold">{weather.wind || "8 km/h"}</span>
           </div>
           <div className="bg-slate-950/70 p-1 rounded-lg border border-cyan-500/15">
@@ -287,7 +287,7 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
         <div className="flex items-center justify-between border-b border-cyan-500/20 pb-2 mb-2">
           <div className="flex items-center gap-2 text-cyan-300 font-mono font-bold text-xs tracking-wider">
             <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
-            <span>WORKSPACE VAULT</span>
+            <span>PROJECT FILES</span>
           </div>
           <span className="text-[10px] font-mono text-cyan-400 font-bold">{workspaceFiles.length} FILES</span>
         </div>
@@ -295,7 +295,7 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
         {/* Vault Search Input */}
         <input
           type="text"
-          placeholder="Filter indexed repository files..."
+          placeholder="Search project files..."
           value={vaultSearchQuery}
           onChange={(e) => onVaultSearchChange(e.target.value)}
           className="w-full bg-slate-950 border border-cyan-500/25 rounded-xl px-2.5 py-1.5 text-xs text-cyan-200 placeholder-slate-500 outline-none focus:border-cyan-400 font-mono mb-2"
@@ -382,7 +382,7 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
         <div className="flex items-center justify-between font-mono text-[10px]">
           <div className="flex items-center gap-1.5 text-slate-400">
             <Clock className="w-3 h-3 text-cyan-400" />
-            <span>SESSION RUNTIME:</span>
+            <span>UPTIME:</span>
           </div>
           <span className="font-bold text-white tracking-wider">{uptimeFormatted}</span>
         </div>
