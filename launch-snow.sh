@@ -74,7 +74,7 @@ ensure_server_running() {
 # ── Launch floating HUD window ───────────────────────────────────────────────
 launch_hud_window() {
   local URL="http://127.0.0.1:$PORT"
-  local APP_FLAGS="--app=$URL --user-data-dir=$HOME/.config/snow-hud-profile --class=SNOW --window-size=1260,820 --window-position=center --no-first-run --disable-sync --disable-translate --disable-features=Translate"
+  local APP_FLAGS="--app=$URL --user-data-dir=$HOME/.config/snow-hud-profile --class=SNOW --window-size=1260,820 --window-position=center --no-first-run --disable-sync --disable-translate --disable-features=Translate --use-fake-ui-for-media-stream --autoplay-policy=no-user-gesture-required"
 
   log "⚡ Summoning SNOW HUD window..."
   if [ -x "/snap/bin/chromium" ]; then

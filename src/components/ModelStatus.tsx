@@ -19,13 +19,22 @@ interface HybridModel {
 
 const MODELS_REGISTRY: HybridModel[] = [
   {
-    id: "gemini-2.5-flash",
-    name: "Gemini 2.5 Flash",
-    type: "Cloud Fast Core",
+    id: "gemini-flash-latest",
+    name: "Gemini Flash Latest (Active Core)",
+    type: "Cloud Neural Multimodal Core",
     status: "ONLINE",
-    latency: 95,
+    latency: 75,
+    parameters: "High-Speed Realtime Audio & Vision",
+    useCase: "Astra real-time vision, speech & J.A.R.V.I.S. execution",
+  },
+  {
+    id: "gemini-3.6-flash",
+    name: "Gemini 3.6 Flash",
+    type: "Next-Gen Flash Core",
+    status: "ONLINE",
+    latency: 82,
     parameters: "Multimodal Fast Core",
-    useCase: "Astra real-time vision, speech & agent execution",
+    useCase: "Hyper-fast conversational intelligence",
   },
   {
     id: "gemini-1.5-pro",

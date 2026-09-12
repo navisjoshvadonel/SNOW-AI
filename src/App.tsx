@@ -371,10 +371,24 @@ export default function App() {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const silenceTimerRef = useRef<any>(null);
+  const [isJarvisMode, setIsJarvisMode] = useState(true);
+  const [micVolume, setMicVolume] = useState(0);
+
+  const isJarvisModeRef = useRef<boolean>(true);
+  const isSpeakingRef = useRef<boolean>(false);
   const shouldKeepListeningRef = useRef<boolean>(false);
-  const recognitionRestartTimerRef = useRef<any>(null);
+  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const animFrameRef = useRef<number | null>(null);
+  const silenceTimerRef = useRef<any>(null);
   const accumulatedTranscriptRef = useRef<string>("");
+  const hasSpokenRef = useRef<boolean>(false);
+  const lastSpeechTimestampRef = useRef<number>(0);
+  const webSpeechDisabledRef = useRef<boolean>(false);
   const lastSpacePressRef = useRef<number>(0);
   const [showConfetti, setShowConfetti] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -512,7 +526,7 @@ export default function App() {
     memoriesCount: 4,
     vectorsCount: 2
   });
-  const [selectedModel, setSelectedModel] = useState<string>("gemini-2.5-flash");
+  const [selectedModel, setSelectedModel] = useState<string>("gemini-flash-latest");
   const [compilerMode, setCompilerMode] = useState<"general" | "education" | "debugging" | "context_awareness">("general");
 
   // Code Sandbox State
@@ -534,7 +548,6 @@ export default function App() {
   const [timeWidget, setTimeWidget] = useState<TimeData | null>(null);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
-  const recognitionRef = useRef<any>(null);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatHistory, isLoading]);
 
@@ -846,12 +859,23 @@ export default function App() {
       .trim();
   };
 
+  // Keep voice refs synchronized with component state
+  useEffect(() => {
+    isJarvisModeRef.current = isJarvisMode;
+  }, [isJarvisMode]);
+
+  useEffect(() => {
+    isSpeakingRef.current = isSpeaking;
+  }, [isSpeaking]);
+
   // ─── Stop Ongoing Snow Speech (Barge-In) ─────────────────────────────────────
   const stopSnowSpeech = () => {
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
     setIsSpeaking(false);
+    isSpeakingRef.current = false;
+    fetch("/api/snow/voice/barge-in", { method: "POST" }).catch(() => {});
   };
 
   // ─── Speak Response as Snow ──────────────────────────────────────────────────
@@ -874,159 +898,372 @@ export default function App() {
 
       const voices = window.speechSynthesis.getVoices();
       const preferred = voices.find(v => 
-        (v.name.includes("UK English") || v.name.includes("Daniel") || v.name.includes("Natural") || v.name.includes("Google UK English Male"))
+        (v.name.includes("UK English") || v.name.includes("Daniel") || v.name.includes("Natural") || v.name.includes("Google UK English Male") || v.name.includes("Oliver") || v.name.includes("Arthur"))
       ) || voices.find(v => v.lang.startsWith("en-GB")) 
         || voices.find(v => v.lang.startsWith("en-US")) 
         || voices.find(v => v.lang.startsWith("en"));
 
       if (preferred) utterance.voice = preferred;
 
-      utterance.onstart = () => setIsSpeaking(true);
-      utterance.onend = () => setIsSpeaking(false);
-      utterance.onerror = () => setIsSpeaking(false);
+      utterance.onstart = () => {
+        setIsSpeaking(true);
+        isSpeakingRef.current = true;
+      };
+
+      utterance.onend = () => {
+        setIsSpeaking(false);
+        isSpeakingRef.current = false;
+        // J.A.R.V.I.S. Continuous Conversational Loop:
+        // Automatically resume listening for Tony's follow-up the moment speech ends!
+        if (isJarvisModeRef.current && !isMuted) {
+          setTimeout(() => {
+            if (isJarvisModeRef.current && !isSpeakingRef.current) {
+              startSnowVoiceListening(true);
+            }
+          }, 350);
+        }
+      };
+
+      utterance.onerror = () => {
+        setIsSpeaking(false);
+        isSpeakingRef.current = false;
+        if (isJarvisModeRef.current && !isMuted) {
+          setTimeout(() => {
+            if (isJarvisModeRef.current && !isSpeakingRef.current) {
+              startSnowVoiceListening(true);
+            }
+          }, 350);
+        }
+      };
 
       window.speechSynthesis.speak(utterance);
     } catch (e) {
       console.warn("Speech synthesis error:", e);
       setIsSpeaking(false);
+      isSpeakingRef.current = false;
     }
   };
 
   // Ref to handleSendMessage to avoid stale closures in voice timers
   const handleSendMessageRef = useRef<(text?: string) => Promise<void>>(async () => {});
 
-  // ─── Continuous Voice Recognition with Auto-Submission & Auto-Healing ──────
-  const stopSnowVoiceListening = () => {
+  // ─── Native Audio Cleanup Helper ─────────────────────────────────────────────
+  const cleanupAudioStreams = () => {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      try { mediaRecorderRef.current.stop(); } catch {}
+    }
+    mediaRecorderRef.current = null;
+
+    if (audioStreamRef.current) {
+      audioStreamRef.current.getTracks().forEach(track => track.stop());
+      audioStreamRef.current = null;
+    }
+
+    if (audioContextRef.current && audioContextRef.current.state !== "closed") {
+      try { audioContextRef.current.close(); } catch {}
+      audioContextRef.current = null;
+    }
+    analyserRef.current = null;
+    setMicVolume(0);
+  };
+
+  // ─── Neural Server-Side Transcription (Gemini STT) ──────────────────────────
+  const transcribeAudioBlob = async (audioBlob: Blob): Promise<string> => {
+    try {
+      const reader = new FileReader();
+      const base64Promise = new Promise<string>((resolve, reject) => {
+        reader.onloadend = () => resolve(reader.result as string);
+        reader.onerror = reject;
+      });
+      reader.readAsDataURL(audioBlob);
+      const base64Audio = await base64Promise;
+
+      const res = await fetch("/api/snow/voice/transcribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ audio: base64Audio, mimeType: audioBlob.type || "audio/webm" })
+      });
+
+      if (!res.ok) return "";
+      const data = await res.json();
+      return data.text || "";
+    } catch (err) {
+      console.warn("[Snow Voice] Transcription request notice:", err);
+      return "";
+    }
+  };
+
+  // ─── Continuous Voice Engine (Dual-Mode: Native Audio + WebSpeech API) ──────
+  const stopSnowVoiceListening = (preserveJarvisMode = false) => {
     shouldKeepListeningRef.current = false;
+    if (!preserveJarvisMode) {
+      setIsJarvisMode(false);
+      isJarvisModeRef.current = false;
+    }
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    if (recognitionRestartTimerRef.current) clearTimeout(recognitionRestartTimerRef.current);
+
     if (recognitionRef.current) {
       try { recognitionRef.current.abort(); } catch {}
       recognitionRef.current = null;
     }
+    cleanupAudioStreams();
     setIsListening(false);
     accumulatedTranscriptRef.current = "";
+    hasSpokenRef.current = false;
+    lastSpeechTimestampRef.current = 0;
   };
 
-  const startSnowVoiceListening = () => {
-    // Barge-in: interrupt ongoing speech if any
+  const startSnowVoiceListening = async (isAutoSilent = false) => {
+    // Barge-in: immediately stop ongoing speech if any
     stopSnowSpeech();
-
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    if (!SpeechRecognition) {
-      triggerToast("Web Speech Recognition is not supported in this browser. Please use Chrome or Edge.");
-      return;
-    }
 
     shouldKeepListeningRef.current = true;
     accumulatedTranscriptRef.current = "";
-    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-    if (recognitionRestartTimerRef.current) clearTimeout(recognitionRestartTimerRef.current);
+    hasSpokenRef.current = false;
+    lastSpeechTimestampRef.current = 0;
+    audioChunksRef.current = [];
 
-    if (recognitionRef.current) {
-      try { recognitionRef.current.abort(); } catch {}
-      recognitionRef.current = null;
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+
+    // Only chime and toast on explicit user activation, never repeatedly in Jarvis loop
+    if (!isAutoSilent) {
+      playSnowWakeChime();
+      triggerToast(isJarvisModeRef.current ? "⚡ J.A.R.V.I.S. Loop Active (Speak freely)..." : "⚡ Snow Listening...");
     }
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = "en-US";
+    setIsListening(true);
 
-    recognition.onstart = () => {
-      setIsListening(true);
-      playSnowWakeChime();
-      triggerToast("⚡ Snow Listening (Speak your command)...");
-    };
-
-    recognition.onresult = (event: any) => {
-      let interimTranscript = "";
-
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        const text = event.results[i][0]?.transcript || "";
-        if (event.results[i].isFinal) {
-          accumulatedTranscriptRef.current += (accumulatedTranscriptRef.current ? " " : "") + text.trim();
-        } else {
-          interimTranscript += text;
+    // ── 1. Setup Native Microphone & Web Audio Analyser (Works in all browsers) ──
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
         }
-      }
+      });
+      audioStreamRef.current = stream;
 
-      const activeSpeech = (
-        accumulatedTranscriptRef.current + (interimTranscript ? " " + interimTranscript.trim() : "")
-      ).trim();
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioCtx) {
+        const audioCtx = new AudioCtx();
+        audioContextRef.current = audioCtx;
+        const source = audioCtx.createMediaStreamSource(stream);
+        const analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 64;
+        analyser.smoothingTimeConstant = 0.4;
+        source.connect(analyser);
+        analyserRef.current = analyser;
 
-      if (activeSpeech) {
-        setInputText(activeSpeech);
+        const dataArray = new Uint8Array(analyser.frequencyBinCount);
+        const updateAudioMetrics = () => {
+          if (!shouldKeepListeningRef.current) return;
+          analyser.getByteFrequencyData(dataArray);
 
-        // Smart Silence Auto-Submit (2.5 seconds of sustained silence after speaking)
-        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-        silenceTimerRef.current = setTimeout(() => {
-          const toSubmit = (accumulatedTranscriptRef.current || activeSpeech).trim();
-          if (toSubmit) {
-            shouldKeepListeningRef.current = false;
-            if (recognitionRestartTimerRef.current) clearTimeout(recognitionRestartTimerRef.current);
-            try { recognition.stop(); } catch {}
-            setIsListening(false);
-            accumulatedTranscriptRef.current = "";
-            handleSendMessageRef.current(toSubmit);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) {
+            sum += dataArray[i];
           }
-        }, 2500);
-      }
-    };
+          const avg = sum / dataArray.length;
+          const normalizedVol = Math.min(100, Math.round((avg / 128) * 100));
+          setMicVolume(normalizedVol);
 
-    recognition.onerror = (event: any) => {
-      // Benign timeouts or abortions should not kill the listening session
-      if (event.error === "no-speech" || event.error === "aborted") {
-        return;
-      }
-      console.warn("[Snow Voice] Speech recognition notice:", event.error);
-      if (event.error === "not-allowed" || event.error === "service-not-allowed") {
-        shouldKeepListeningRef.current = false;
-        setIsListening(false);
-        triggerToast("Microphone access denied or unavailable.");
-      }
-    };
+          // Barge-in check: If Snow starts speaking and user speaks aloud
+          if (isSpeakingRef.current && normalizedVol > 18) {
+            stopSnowSpeech();
+          }
 
-    recognition.onend = () => {
-      // If user intentionally stopped listening or submitted command, finish cleanly
-      if (!shouldKeepListeningRef.current) {
-        setIsListening(false);
-        return;
+          // Voice Activity Detection (VAD)
+          if (normalizedVol > 12) {
+            hasSpokenRef.current = true;
+            lastSpeechTimestampRef.current = Date.now();
+          }
+
+          // Smart silence detection: 1.4s of sustained silence after speaking
+          if (hasSpokenRef.current && lastSpeechTimestampRef.current > 0) {
+            const silentDuration = Date.now() - lastSpeechTimestampRef.current;
+            if (silentDuration > 1400) {
+              hasSpokenRef.current = false;
+              lastSpeechTimestampRef.current = 0;
+
+              // Check if Web Speech transcript is already available
+              const webSpeechText = accumulatedTranscriptRef.current.trim();
+              if (webSpeechText) {
+                const toSubmit = webSpeechText;
+                stopSnowVoiceListening(true);
+                handleSendMessageRef.current(toSubmit);
+                return;
+              }
+
+              // Otherwise stop recorder to trigger Neural Gemini transcription
+              if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+                try { mediaRecorderRef.current.stop(); } catch {}
+                return;
+              }
+            }
+          }
+
+          animFrameRef.current = requestAnimationFrame(updateAudioMetrics);
+        };
+        animFrameRef.current = requestAnimationFrame(updateAudioMetrics);
       }
 
-      // Seamless Auto-Healing Reconnect Loop:
-      // When browser's engine times out on silence, immediately restart recognition
-      // so Snow NEVER stops listening unexpectedly while awake.
-      if (recognitionRestartTimerRef.current) clearTimeout(recognitionRestartTimerRef.current);
-      recognitionRestartTimerRef.current = setTimeout(() => {
-        if (shouldKeepListeningRef.current) {
-          try {
-            recognition.start();
-          } catch (e) {
-            if (shouldKeepListeningRef.current) {
-              startSnowVoiceListening();
+      // Initialize MediaRecorder for neural audio streaming
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/ogg")
+        ? "audio/ogg"
+        : "";
+
+      const options = mimeType ? { mimeType } : undefined;
+      const mediaRecorder = new MediaRecorder(stream, options);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event: BlobEvent) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        if (audioChunksRef.current.length > 0) {
+          const blob = new Blob(audioChunksRef.current, { type: mimeType || "audio/webm" });
+          audioChunksRef.current = [];
+
+          if (!accumulatedTranscriptRef.current.trim()) {
+            triggerToast("⚡ Processing your voice directive...");
+            const transcribed = await transcribeAudioBlob(blob);
+            if (transcribed && transcribed.trim() && shouldKeepListeningRef.current) {
+              setInputText(transcribed.trim());
+              stopSnowVoiceListening(true);
+              handleSendMessageRef.current(transcribed.trim());
+              return;
             }
           }
         }
-      }, 150);
-    };
 
-    recognitionRef.current = recognition;
-    try {
-      recognition.start();
-    } catch (e) {
-      console.warn("Failed to start speech recognition:", e);
+        // If still listening and no command was submitted, restart recorder chunking
+        if (shouldKeepListeningRef.current && stream.active) {
+          try {
+            audioChunksRef.current = [];
+            mediaRecorder.start(250);
+          } catch {}
+        }
+      };
+
+      mediaRecorder.start(250);
+    } catch (micErr) {
+      console.warn("[Snow Voice] Mic capture notice:", micErr);
+      triggerToast("Microphone access denied or unavailable.");
       setIsListening(false);
       shouldKeepListeningRef.current = false;
+      return;
+    }
+
+    // ── 2. Setup Web Speech Recognition (Secondary Instant Interim Stream) ──────
+    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (SpeechRecognition && !webSpeechDisabledRef.current) {
+      try {
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = "en-US";
+
+        recognition.onresult = (event: any) => {
+          let interimTranscript = "";
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            const text = event.results[i][0]?.transcript || "";
+            if (event.results[i].isFinal) {
+              accumulatedTranscriptRef.current += (accumulatedTranscriptRef.current ? " " : "") + text.trim();
+            } else {
+              interimTranscript += text;
+            }
+          }
+
+          const activeSpeech = (
+            accumulatedTranscriptRef.current + (interimTranscript ? " " + interimTranscript.trim() : "")
+          ).trim();
+
+          if (activeSpeech) {
+            setInputText(activeSpeech);
+            hasSpokenRef.current = true;
+            lastSpeechTimestampRef.current = Date.now();
+          }
+        };
+
+        recognition.onerror = (event: any) => {
+          if (event.error === "no-speech" || event.error === "aborted") {
+            return;
+          }
+          if (event.error === "network") {
+            // Distro/Snap Chromium without Google speech keys: gracefully rely on Native MediaRecorder Neural Engine
+            console.log("[Snow Voice] Web Speech network notice — using Native Neural Voice Engine.");
+            webSpeechDisabledRef.current = true;
+            try { recognition.abort(); } catch {}
+            recognitionRef.current = null;
+            return;
+          }
+          if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+            webSpeechDisabledRef.current = true;
+            try { recognition.abort(); } catch {}
+            recognitionRef.current = null;
+          }
+        };
+
+        recognition.onend = () => {
+          // Graceful re-initialization without dead-instance start() or recursive flapping
+          if (shouldKeepListeningRef.current && !webSpeechDisabledRef.current) {
+            try {
+              const freshRec = new SpeechRecognition();
+              freshRec.continuous = true;
+              freshRec.interimResults = true;
+              freshRec.lang = "en-US";
+              freshRec.onresult = recognition.onresult;
+              freshRec.onerror = recognition.onerror;
+              freshRec.onend = recognition.onend;
+              recognitionRef.current = freshRec;
+              freshRec.start();
+            } catch {}
+          }
+        };
+
+        recognitionRef.current = recognition;
+        recognition.start();
+      } catch (recErr) {
+        console.warn("[Snow Voice] SpeechRecognition startup notice:", recErr);
+      }
     }
   };
 
   const toggleSpeechRecognition = () => {
     if (isListening || shouldKeepListeningRef.current) {
-      stopSnowVoiceListening();
+      stopSnowVoiceListening(false);
       triggerToast("Voice input paused.");
     } else {
-      startSnowVoiceListening();
+      setIsJarvisMode(true);
+      isJarvisModeRef.current = true;
+      startSnowVoiceListening(false);
+    }
+  };
+
+  const toggleJarvisMode = () => {
+    const next = !isJarvisMode;
+    setIsJarvisMode(next);
+    isJarvisModeRef.current = next;
+    if (next) {
+      triggerToast("⚡ J.A.R.V.I.S. Continuous Conversation Mode Enabled.");
+      if (!isListening) {
+        startSnowVoiceListening(false);
+      }
+    } else {
+      triggerToast("Push-to-Talk Mode Enabled.");
     }
   };
 
@@ -1041,12 +1278,11 @@ export default function App() {
           target.isContentEditable
         );
 
-        // If typing inside input field that already has text, preserve regular spaces
         if (isInputField) {
           const inputElem = target as HTMLInputElement;
           const hasContent = inputElem.value && inputElem.value.trim().length > 0;
           if (hasContent && !e.ctrlKey && !e.altKey) {
-            return; // Normal typing inside input
+            return;
           }
         }
 
@@ -1059,10 +1295,12 @@ export default function App() {
           e.preventDefault();
           lastSpacePressRef.current = 0;
           if (isListening || shouldKeepListeningRef.current) {
-            stopSnowVoiceListening();
+            stopSnowVoiceListening(false);
             triggerToast("Voice input paused.");
           } else {
-            startSnowVoiceListening();
+            setIsJarvisMode(true);
+            isJarvisModeRef.current = true;
+            startSnowVoiceListening(false);
           }
         }
       }
@@ -1156,7 +1394,7 @@ export default function App() {
       setAttachedContextFiles([]);
     }
 
-    stopSnowVoiceListening();
+    stopSnowVoiceListening(true);
 
     const now = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
     setChatHistory((prev) => [...prev, { id: `user-${Date.now()}`, sender: "user", text: rawText.trim(), timestamp: now }]);
@@ -1504,9 +1742,9 @@ export default function App() {
                   onChange={(e) => setSelectedModel(e.target.value)}
                   className="w-full bg-slate-950 border border-cyan-500/30 rounded-lg p-2 text-cyan-200 outline-none focus:border-cyan-400"
                 >
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Fast & Smart)</option>
-                  <option value="gemini-1.5-pro">Gemini 1.5 Pro (Deep Logic)</option>
-                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Lightweight)</option>
+                  <option value="gemini-flash-latest">Gemini Flash Latest (Active Core)</option>
+                  <option value="gemini-3.6-flash">Gemini 3.6 Flash (Ultra Fast)</option>
+                  <option value="gemini-3.5-flash">Gemini 3.5 Flash (Reliable)</option>
                   <option value="ollama">Ollama Local Engine (Offline)</option>
                 </select>
               </div>
@@ -1593,6 +1831,7 @@ export default function App() {
                   state={isLoading ? "thinking" : isListening ? "listening" : isSpeaking ? "speaking" : "standby"}
                   cpuPct={liveStats.cpuPct || 12}
                   isMuted={isMuted}
+                  micVolume={micVolume}
                 />
               </div>
 
@@ -1609,6 +1848,9 @@ export default function App() {
               isSpeaking={isSpeaking}
               isMuted={isMuted}
               attachedContextFiles={attachedContextFiles}
+              isJarvisMode={isJarvisMode}
+              onToggleJarvisMode={toggleJarvisMode}
+              micVolume={micVolume}
               onInputChange={setInputText}
               onSendMessage={handleSendMessage}
               onToggleListening={toggleSpeechRecognition}

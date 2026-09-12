@@ -613,7 +613,7 @@ RULES:
     : userPrompt;
 
   const apiKey = process.env.GEMINI_API_KEY || "";
-  let GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"];
+  let GEMINI_MODELS = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-lite-latest"];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
@@ -753,8 +753,8 @@ RULES:
 
   const fullPrompt = contextText ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}` : userPrompt;
   const apiKey = process.env.GEMINI_API_KEY || "";
-  // Confirmed working Gemini model names (prioritize low-latency Gemini 2.5 Flash)
-  let GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro", "gemini-1.5-flash"];
+  // High-performance active Gemini model cascade
+  let GEMINI_MODELS = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-3.5-flash", "gemini-flash-lite-latest"];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
@@ -971,7 +971,7 @@ RULES:
     });
   }
 
-  const activeModel = requestedModel && requestedModel.startsWith("gemini-") ? requestedModel : "gemini-2.5-flash";
+  const activeModel = requestedModel && requestedModel.startsWith("gemini-") ? requestedModel : "gemini-flash-latest";
   const permissionMode = (process.env.SNOW_PERMISSION_MODE as any) || "default";
 
   const agent = await createAgent({
@@ -1130,7 +1130,7 @@ async function startServer() {
   const app = express();
 
   // Security headers & body limit protection
-  app.use(express.json({ limit: "5mb" }));
+  app.use(express.json({ limit: "15mb" }));
   app.use((_req, res, next) => {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "SAMEORIGIN");
@@ -1230,6 +1230,75 @@ async function startServer() {
     if (!text) return res.status(400).json({ error: "Missing text" });
     const result = await audioSynthesis.synthesize(text, urgency);
     res.json(result);
+  });
+
+  // Neural Voice STT Transcription Engine (Multimodal Gemini Speech-to-Text)
+  app.post("/api/snow/voice/transcribe", async (req, res) => {
+    try {
+      const { audio, mimeType: clientMime } = req.body;
+      if (!audio || typeof audio !== "string") {
+        return res.status(400).json({ error: "Missing base64 audio data", text: "" });
+      }
+
+      const mimeType = clientMime || (audio.startsWith("data:") ? audio.match(/^data:([^;]+);base64,/)?.[1] : "audio/webm") || "audio/webm";
+      const base64Data = audio.replace(/^data:[^;]+;base64,/, "");
+
+      if (base64Data.length < 50) {
+        return res.json({ text: "", isSilence: true });
+      }
+
+      const apiKey = process.env.GEMINI_API_KEY || "";
+      const modelsToTry = ["gemini-flash-latest", "gemini-3.6-flash", "gemini-3.5-flash"];
+      
+      let transcribed = "";
+      for (const modelName of modelsToTry) {
+        try {
+          const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+          const gRes = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  {
+                    text: "You are the high-speed speech-to-text transcriber for Snow (a Jarvis personal AI assistant). Transcribe what the user is saying accurately. Filter out ambient room noise, static, breaths, coughs, and clicks. If there is no clear speech, or only background silence/noise, reply with 'SILENCE'. Otherwise reply ONLY with the exact spoken words, properly punctuated and capitalized. Do not include quotes, commentary, or markdown."
+                  },
+                  {
+                    inlineData: {
+                      mimeType: mimeType.split(";")[0],
+                      data: base64Data
+                    }
+                  }
+                ]
+              }],
+              generationConfig: {
+                temperature: 0.0,
+                maxOutputTokens: 256
+              }
+            })
+          });
+
+          if (!gRes.ok) {
+            continue;
+          }
+
+          const data = await gRes.json();
+          const candidateText = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+          if (candidateText && !/^silence\.?$/i.test(candidateText.trim())) {
+            transcribed = candidateText.replace(/^["']|["']$/g, "").trim();
+          }
+          break;
+        } catch (e: any) {
+          console.warn(`[SNOW Transcribe] Failover from ${modelName}:`, e.message);
+        }
+      }
+
+      console.log(`[SNOW Transcribe] Transcribed: "${transcribed}" (${Math.round(base64Data.length * 0.75 / 1024)} KB audio)`);
+      res.json({ text: transcribed, isSilence: !transcribed });
+    } catch (err: any) {
+      console.error("[SNOW Transcribe] Fatal error:", err);
+      res.status(500).json({ error: err.message || "Failed to transcribe audio", text: "" });
+    }
   });
 
   // 2. Ambient Desktop Perception
@@ -1761,7 +1830,7 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
 {"scene": "1-sentence summary of the scene", "objects": ["list", "of", "notable", "visible", "items", "windows", "or", "tools"], "activity": "brief note on current activity"}`;
 
         const geminiRes = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
+          model: "gemini-flash-latest",
           contents: [{
             role: "user",
             parts: [

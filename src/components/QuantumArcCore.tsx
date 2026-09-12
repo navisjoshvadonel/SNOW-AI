@@ -6,12 +6,14 @@ export interface QuantumArcCoreProps {
   state: "standby" | "thinking" | "listening" | "speaking";
   cpuPct?: number;
   isMuted?: boolean;
+  micVolume?: number;
 }
 
 export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
   state,
   cpuPct = 12,
   isMuted = false,
+  micVolume = 0,
 }) => {
   // 32-band radial frequency equalizer calculation
   const frequencyBands = useMemo(() => {
@@ -152,12 +154,16 @@ export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
         {/* ─── LAYER 4: 32-Band Circular Frequency Spectrum ─── */}
         <div className="absolute inset-10 flex items-center justify-center pointer-events-none">
           {frequencyBands.map((band) => {
-            // Calculate dynamic bar height depending on state
+            // Calculate dynamic bar height depending on state & live mic volume
+            const voiceBoost = state === "listening" && micVolume > 3
+              ? Math.min(20, Math.round((micVolume / 100) * 20))
+              : 0;
+
             const barHeight =
               state === "speaking"
                 ? [6, 18 + (band.id % 5) * 4, 8, 24 - (band.id % 4) * 3, 6]
                 : state === "listening"
-                ? [8, 22 + (band.id % 7) * 3, 10, 26, 8]
+                ? [6 + voiceBoost, 16 + voiceBoost + (band.id % 7) * 2, 8 + voiceBoost * 0.7, 20 + voiceBoost * 1.2, 6 + voiceBoost]
                 : state === "thinking"
                 ? [4, 14, 4, 18, 4]
                 : [4, 8, 4];
@@ -166,7 +172,7 @@ export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
               state === "speaking"
                 ? 0.4 + (band.id % 4) * 0.1
                 : state === "listening"
-                ? 0.3 + (band.id % 3) * 0.1
+                ? (voiceBoost > 5 ? 0.15 : 0.35 + (band.id % 3) * 0.08)
                 : 1.8;
 
             return (

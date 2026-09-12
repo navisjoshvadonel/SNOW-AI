@@ -28,6 +28,9 @@ export interface HolographicMissionLogProps {
   isSpeaking: boolean;
   isMuted: boolean;
   attachedContextFiles: { name: string; path: string; content: string }[];
+  isJarvisMode?: boolean;
+  onToggleJarvisMode?: () => void;
+  micVolume?: number;
   onInputChange: (text: string) => void;
   onSendMessage: (textToSend?: string) => void;
   onToggleListening: () => void;
@@ -48,6 +51,9 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
   isSpeaking,
   isMuted,
   attachedContextFiles,
+  isJarvisMode = true,
+  onToggleJarvisMode,
+  micVolume = 0,
   onInputChange,
   onSendMessage,
   onToggleListening,
@@ -266,6 +272,21 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Jarvis Hands-Free Mode Toggle */}
+            <button
+              type="button"
+              onClick={onToggleJarvisMode}
+              className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-[9px] transition cursor-pointer font-mono font-bold ${
+                isJarvisMode
+                  ? "bg-cyan-500/20 border-cyan-400 text-cyan-200 shadow-[0_0_10px_rgba(6,182,212,0.3)]"
+                  : "bg-slate-900/60 border-slate-700 text-slate-400 hover:border-slate-500"
+              }`}
+              title={isJarvisMode ? "Continuous Hands-Free J.A.R.V.I.S. Conversation Active" : "Click to enable Continuous Hands-Free J.A.R.V.I.S. Mode"}
+            >
+              <BrainCircuit className={`w-3 h-3 ${isJarvisMode ? "text-cyan-400 animate-pulse" : "text-slate-500"}`} />
+              <span>{isJarvisMode ? "JARVIS LOOP" : "PUSH TALK"}</span>
+            </button>
+
             <button
               onClick={onToggleMute}
               className={`flex items-center gap-1 px-2 py-0.5 rounded-lg border text-[9px] transition cursor-pointer font-mono ${
@@ -308,7 +329,9 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
             type="text"
             placeholder={
               isListening
-                ? "Listening to your voice..."
+                ? isJarvisMode
+                  ? "⚡ Jarvis listening... (Speak freely, hands-free loop active)"
+                  : "Listening to your voice..."
                 : attachedContextFiles.length > 0
                 ? "Ask Snow about attached files..."
                 : "Ask Snow anything or press Space ×2 to speak..."
@@ -318,6 +341,22 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
             onKeyDown={(e) => e.key === "Enter" && onSendMessage()}
             className="flex-1 bg-transparent border-none outline-none text-xs text-white placeholder-slate-500 focus:ring-0 font-sans px-2"
           />
+
+          {/* Live Voice Audio Waveform Equalizer when Listening */}
+          {isListening && (
+            <div className="hidden sm:flex items-center gap-0.5 px-2 py-1 rounded-lg bg-rose-500/15 border border-rose-500/30">
+              {[0.4, 0.8, 1.0, 0.7, 0.5].map((factor, i) => (
+                <span
+                  key={i}
+                  className="w-1 bg-rose-400 rounded-full transition-all duration-75"
+                  style={{
+                    height: `${Math.max(4, Math.min(16, Math.round(((micVolume || 10) * factor * 0.4) + 4)))}px`
+                  }}
+                />
+              ))}
+              <span className="text-[9px] font-mono font-bold text-rose-300 ml-1">REC</span>
+            </div>
+          )}
 
           {/* Microphone Toggle Button */}
           <button
