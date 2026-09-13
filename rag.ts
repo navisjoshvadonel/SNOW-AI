@@ -71,6 +71,8 @@ function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_rag_source   ON rag_chunks(source);
     CREATE INDEX IF NOT EXISTS idx_rag_category ON rag_chunks(category);
     CREATE INDEX IF NOT EXISTS idx_rag_ts       ON rag_chunks(timestamp DESC);
+    -- Fix 2: composite index so category+timestamp queries hit a single index
+    CREATE INDEX IF NOT EXISTS idx_rag_ts_cat   ON rag_chunks(category, timestamp DESC);
   `);
 
   // 2. Virtual Table for Full-Text Search (BM25 via FTS5)
@@ -397,12 +399,28 @@ export async function ragSearch(
   }
 
   // 2. Dense Vector Retrieval (Cosine Similarity)
+  // Fix 2: candidate set capped at 150 (was 500) to avoid loading huge BLOB arrays into JS.
+  // BM25 pre-filtering via ftsIds means we already have the most textually relevant candidates;
+  // taking the top 150 by recency covers the dense retrieval well in practice.
   const queryVec = await embedText(clean);
   let chunkRows: any[];
   if (filterCategory) {
-    chunkRows = db.prepare("SELECT * FROM rag_chunks WHERE category = ? ORDER BY timestamp DESC LIMIT 500").all(filterCategory);
+    chunkRows = db.prepare("SELECT * FROM rag_chunks WHERE category = ? ORDER BY timestamp DESC LIMIT 150").all(filterCategory);
   } else {
-    chunkRows = db.prepare("SELECT * FROM rag_chunks ORDER BY timestamp DESC LIMIT 500").all();
+    // If we got BM25 hits, prefer those IDs first, then fill up to 150 from recency
+    if (bm25Ranks.size > 0) {
+      const bm25IdList = Array.from(bm25Ranks.keys()).map(id => `'${id.replace(/'/g, "''")}'`).join(",");
+      chunkRows = db.prepare(
+        `SELECT * FROM rag_chunks WHERE id IN (${bm25IdList}) UNION
+         SELECT * FROM rag_chunks ORDER BY timestamp DESC LIMIT 150`
+      ).all();
+      // Deduplicate (UNION may have overlaps when SQLite evaluates both arms)
+      const seen = new Set<string>();
+      chunkRows = chunkRows.filter(r => seen.has(r.id) ? false : (seen.add(r.id), true));
+      if (chunkRows.length > 150) chunkRows = chunkRows.slice(0, 150);
+    } else {
+      chunkRows = db.prepare("SELECT * FROM rag_chunks ORDER BY timestamp DESC LIMIT 150").all();
+    }
   }
 
   if (chunkRows.length === 0) return [];
@@ -492,10 +510,13 @@ export async function ragAugmentPrompt(
 
 // ─── CURATION, DEDUPLICATION & AUTO-PRUNING ───────────────────────────────────
 
-/** Deduplicates near-identical memory chunks using cosine similarity threshold */
-export function ragDeduplicate(similarityThreshold: number = 0.96): number {
+/** Deduplicates near-identical memory chunks using cosine similarity threshold.
+ * Fix 6: limited to the most recent `limit` chunks (default 100) to prevent
+ * O(N²) cosine operations from blocking the Node.js event loop. */
+export function ragDeduplicate(similarityThreshold: number = 0.96, limit: number = 100): number {
   const db = getDb();
-  const chunks = ragLoadAll();
+  // Only compare the most recent chunks — oldest ones have already been checked
+  const chunks = ragLoadAll().slice(0, limit);
   let deleted = 0;
 
   for (let i = 0; i < chunks.length; i++) {

@@ -23,6 +23,7 @@ import TacticalTelemetryHUD from "./components/TacticalTelemetryHUD";
 import HolographicMissionLog from "./components/HolographicMissionLog";
 import SnowfallBackground from "./components/SnowfallBackground";
 import { MemoryNode, CodeFile } from "./types";
+import FingerprintGate from "./components/FingerprintGate";
 
 type WeatherType = "default" | "sunny" | "rain" | "cloudy" | "snow" | "storm";
 type ActiveTab = "hud" | "graph" | "vector" | "compiler" | "sandbox" | "models";
@@ -398,6 +399,62 @@ export default function App() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+
+  // ── Biometric Auth Gate ────────────────────────────────────────────────────
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authToken, setAuthToken] = useState<string | null>(null);
+
+  // On mount: check if a valid session token already exists in sessionStorage
+  useEffect(() => {
+    const existing = sessionStorage.getItem("snow_auth_token");
+    if (!existing) return;
+    fetch("/api/auth/status", {
+      headers: { "Authorization": `Bearer ${existing}` }
+    })
+      .then(r => r.json())
+      .then(d => {
+        if (d.authenticated) {
+          setAuthToken(existing);
+          setIsAuthenticated(true);
+        } else {
+          sessionStorage.removeItem("snow_auth_token");
+        }
+      })
+      .catch(() => sessionStorage.removeItem("snow_auth_token"));
+  }, []);
+
+  // Global fetch interceptor: automatically attaches session token to all /api/snow and /api/system calls
+  useEffect(() => {
+    const originalFetch = window.fetch;
+    window.fetch = async (input, init) => {
+      const url = typeof input === "string" ? input : (input instanceof URL ? input.href : (input as any)?.url || "");
+      if (url.startsWith("/api/snow") || url.startsWith("/api/system")) {
+        const token = sessionStorage.getItem("snow_auth_token");
+        if (token) {
+          const headers = new Headers(init?.headers);
+          if (!headers.has("Authorization") && !headers.has("x-snow-token")) {
+            headers.set("Authorization", `Bearer ${token}`);
+          }
+          const resp = await originalFetch(input, { ...init, headers });
+          if (resp.status === 401) {
+            sessionStorage.removeItem("snow_auth_token");
+            setIsAuthenticated(false);
+            setAuthToken(null);
+          }
+          return resp;
+        }
+      }
+      return originalFetch(input, init);
+    };
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, []);
+
+  const handleAuthenticated = (token: string) => {
+    setAuthToken(token);
+    setIsAuthenticated(true);
+  };
 
   // Live System Stats & Telemetry
   const [liveStats, setLiveStats] = useState<SystemData>({
@@ -1527,7 +1584,10 @@ export default function App() {
     try {
       const res = await fetch("/api/snow/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(authToken ? { "Authorization": `Bearer ${authToken}` } : {})
+        },
         body: JSON.stringify({
           prompt: promptForBackend,
           model: selectedModel,
@@ -1699,6 +1759,20 @@ export default function App() {
   };
 
   return (
+    <>
+      {/* Biometric gate — shown until NJ's fingerprint is verified */}
+      <AnimatePresence>
+        {!isAuthenticated && (
+          <FingerprintGate onAuthenticated={handleAuthenticated} />
+        )}
+      </AnimatePresence>
+
+      {/* Main Snow UI — rendered but hidden until gate clears */}
+      <motion.div
+        animate={{ opacity: isAuthenticated ? 1 : 0, scale: isAuthenticated ? 1 : 0.98 }}
+        transition={{ duration: 0.5, ease: "easeOut" }}
+        style={{ pointerEvents: isAuthenticated ? "auto" : "none" }}
+      >
     <div className={`w-full h-screen flex flex-col transition-colors duration-1000 bg-weather-${weatherState} overflow-hidden font-sans text-white relative bg-slate-950`}>
       {/* Dynamic Cognitive State Ambient Aura */}
       <div
@@ -1995,5 +2069,7 @@ export default function App() {
           </div>
       </div>
     </div>
+      </motion.div>
+    </>
   );
 }

@@ -276,9 +276,12 @@ function autoMigrateJsonToSqlite(db: Database.Database) {
 // MEMORY STORE MANAGERS (SQLITE + GRAPH TRAVERSAL)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function loadMemories(): MemoryNode[] {
+export function loadMemories(limit?: number): MemoryNode[] {
   const db = getDb();
-  const rows: any[] = db.prepare("SELECT * FROM memories ORDER BY timestamp ASC").all();
+  // Fix 8: push LIMIT into SQL — avoids loading the entire table when only a slice is needed
+  const rows: any[] = limit
+    ? db.prepare("SELECT * FROM memories ORDER BY timestamp ASC LIMIT ?").all(limit)
+    : db.prepare("SELECT * FROM memories ORDER BY timestamp ASC").all();
   return rows.map(r => ({
     id: r.id,
     source: r.source,
@@ -289,7 +292,12 @@ export function loadMemories(): MemoryNode[] {
   }));
 }
 
-export function saveMemories(mems: MemoryNode[]) {
+/**
+ * Replaces the entire memories table with the provided array.
+ * BULK OPERATION ONLY — do NOT call this from addMemory().
+ * For single additions use addMemory() which does a direct INSERT.
+ */
+export function bulkReplaceMemories(mems: MemoryNode[]) {
   const db = getDb();
   const deleteStmt = db.prepare("DELETE FROM memories");
   const insertStmt = db.prepare("INSERT INTO memories (id, source, rel, target, category, timestamp) VALUES (?, ?, ?, ?, ?, ?)");
@@ -302,6 +310,9 @@ export function saveMemories(mems: MemoryNode[]) {
   });
   tx(mems);
 }
+
+/** @deprecated Use bulkReplaceMemories for bulk ops. For single entries use addMemory(). */
+export const saveMemories = bulkReplaceMemories;
 
 export function addMemory(
   source: string,
@@ -736,7 +747,7 @@ export async function trainBrain(customInstructions?: string): Promise<{
   newMemoriesCount: number;
 }> {
   const state = loadBrainState();
-  const memories = loadMemories();
+  const memories = loadMemories(); // full count needed for training report
   const feedback = loadFeedback();
 
   state.level += 1;
@@ -864,7 +875,8 @@ export async function getUnifiedContext(
   const maxDir = options?.maxDirectives ?? 10;
 
   // 1. Graph Memories & Relationships
-  const memories = loadMemories();
+  // Fix 8: pass limit directly so SQL only fetches what we need
+  const memories = loadMemories(maxMem);
   const graphNodes = findGraphRelationships(query, 2);
   const graphContext = formatGraphContext(graphNodes);
 

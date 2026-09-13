@@ -70,27 +70,22 @@ class AmbientPerceptionService {
       // 1. Check if screen is locked
       const isLocked = await this.checkScreenLocked();
 
-      // 2. Query active window title and class via xdotool / xprop
+      // 2. Fix 7: Combine the 3 sequential shell spawns into ONE xdotool call.
+      //    `xdotool getactivewindow getwindowname getwindowclassname` returns
+      //    window-name on line 1 and class on line 2 in a single process fork.
       let title = "";
       let wmClass = "";
 
       try {
-        const { stdout: titleOut } = await execAsync("xdotool getactivewindow getwindowname 2>/dev/null || echo ''");
-        title = titleOut.trim();
-
-        const { stdout: idOut } = await execAsync("xdotool getactivewindow 2>/dev/null || echo ''");
-        const winId = idOut.trim();
-
-        if (winId) {
-          const { stdout: classOut } = await execAsync(`xprop -id ${winId} WM_CLASS 2>/dev/null || echo ''`);
-          const classMatch = classOut.match(/"([^"]+)"/g);
-          if (classMatch && classMatch.length > 0) {
-            wmClass = classMatch.map(c => c.replace(/"/g, "")).join(", ");
-          }
-        }
+        const { stdout } = await execAsync(
+          "xdotool getactivewindow getwindowname getwindowclassname 2>/dev/null || echo ''"
+        );
+        const lines = stdout.trim().split("\n");
+        title   = (lines[0] || "").trim();
+        wmClass = (lines[1] || "").trim();
       } catch {
         // Fallback for non-X11/headless environments
-        title = "Active Linux Workspace";
+        title   = "Active Linux Workspace";
         wmClass = "system";
       }
 

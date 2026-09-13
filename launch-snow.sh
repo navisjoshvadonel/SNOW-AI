@@ -77,7 +77,7 @@ launch_hud_window() {
   # Ensure microphone capture volume is optimal (>=85%) so Snow can hear voice
   wpctl set-volume @DEFAULT_AUDIO_SOURCE@ 0.85 2>/dev/null || amixer set Capture 85% 2>/dev/null || true
 
-  local APP_FLAGS="--app=$URL --user-data-dir=$HOME/.config/snow-hud-profile --class=SNOW --window-size=1260,820 --window-position=center --no-first-run --disable-sync --disable-translate --disable-features=Translate --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream --unsafely-treat-insecure-origin-as-secure=http://127.0.0.1:$PORT,http://localhost:$PORT"
+  local APP_FLAGS="--app=$URL --user-data-dir=$HOME/.config/snow-hud-profile --class=SNOW --window-size=1260,820 --window-position=center --no-first-run --disable-sync --disable-translate --disable-features=Translate --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream"
 
   log "⚡ Summoning SNOW HUD window..."
   if [ -x "/snap/bin/chromium" ]; then

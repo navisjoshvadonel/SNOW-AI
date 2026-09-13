@@ -59,8 +59,47 @@ import { audioSynthesis } from "./services/audioSynthesis";
 import { telemetryBridge } from "./services/telemetryBridge";
 import { workshopProfiles } from "./services/workshopProfiles";
 import { agentSwarm } from "./files claude/agentSwarm";
+import {
+  verifyFingerprint,
+  verifyPasscode,
+  issueSessionToken,
+  validateSessionToken,
+  authMiddleware,
+  checkRateLimit,
+  recordFailedAttempt,
+  resetRateLimit,
+} from "./services/fingerprintAuth";
 
 dotenv.config();
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FIX 5 — MODULE-LEVEL GoogleGenAI SINGLETON
+// Re-instantiating GoogleGenAI on every request creates a new HTTP client and
+// connection pool each time. Create it once at module load instead.
+// ─────────────────────────────────────────────────────────────────────────────
+const _GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+const geminiClient = _GEMINI_API_KEY ? new GoogleGenAI({ apiKey: _GEMINI_API_KEY }) : null;
+
+// FIX 9 — VALID GEMINI MODEL CASCADE (only real model names, no 3.x phantom models)
+// gemini-3.6-flash / gemini-3.5-flash do not exist and always 404, wasting retry time.
+const GEMINI_MODELS_DEFAULT = [
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-lite",
+  "gemini-1.5-flash-latest",
+  "gemini-1.5-flash",
+];
+
+// FIX 10 — ragStats 30-second TTL cache
+// ragStats() runs 3 COUNT queries on every single chat response — purely for display.
+let _ragStatsCache: { total: number; byCategory: Record<string, number>; ftsIndexed: number } | null = null;
+let _ragStatsCacheAt = 0;
+function ragStatsCached() {
+  if (!_ragStatsCache || Date.now() - _ragStatsCacheAt > 30_000) {
+    _ragStatsCache = ragStats();
+    _ragStatsCacheAt = Date.now();
+  }
+  return _ragStatsCache;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
@@ -630,13 +669,20 @@ async function callAI(
   contextText: string,
   history?: { role: string; text: string }[],
   requestedModel?: string,
-  images?: string[]
+  images?: string[],
+  /** Fix 1: optional pre-resolved context block — skip getUnifiedContext when already computed */
+  preResolvedContext?: string
 ): Promise<{ text: string; model: string }> {
-  // Load real-time temporal situation, persistent memories & brain state directives dynamically
+  // Fix 1: use pre-resolved context if provided; otherwise resolve now (standalone callAI usage)
   const temporal = getTemporalContext();
   const brainState = loadBrainState();
-  const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
-  const memoryContext = unifiedMemory.contextBlock;
+  let memoryContext: string;
+  if (preResolvedContext !== undefined) {
+    memoryContext = preResolvedContext;
+  } else {
+    const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
+    memoryContext = unifiedMemory.contextBlock;
+  }
 
   const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent female autonomous executive assistant and operations intelligence system engineered for NJ.
 VOICE & IDENTITY: You are female. You speak with a polished, articulate, warm feminine tone. All your answers will be read aloud through speech synthesis, so keep spoken answers direct, natural, crisp, and conversational.
@@ -668,8 +714,8 @@ RULES:
     ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}`
     : userPrompt;
 
-  const apiKey = process.env.GEMINI_API_KEY || "";
-  let GEMINI_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
+  // Fix 9: use validated model list; prepend requestedModel if provided
+  let GEMINI_MODELS = [...GEMINI_MODELS_DEFAULT];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
@@ -717,12 +763,12 @@ RULES:
     }
   }
 
-  if (apiKey) {
-    const ai = new GoogleGenAI({ apiKey });
+  // Fix 5: use module-level singleton instead of re-instantiating every call
+  if (geminiClient) {
     for (const model of GEMINI_MODELS) {
       try {
-        console.log(`[SNOW] Trying Gemini ${model} (Multi-turn turn context: ${geminiContents.length} turns, Visual inputs: ${images?.length || 0})...`);
-        const res = await ai.models.generateContent({
+        console.log(`[SNOW] Trying Gemini ${model} (Multi-turn context: ${geminiContents.length} turns, Visual inputs: ${images?.length || 0})...`);
+        const res = await geminiClient.models.generateContent({
           model,
           contents: geminiContents,
           config: { systemInstruction: SNOW_PERSONA }
@@ -779,6 +825,7 @@ RULES:
   return { text: offlineReply, model: "Snow (Offline Brain)" };
 }
 
+
 /** Streaming implementation of callAI for real-time token delivery via Server-Sent Events */
 async function callAIStream(
   userPrompt: string,
@@ -786,13 +833,20 @@ async function callAIStream(
   history: { role: string; text: string }[] | undefined,
   requestedModel: string | undefined,
   onChunk: (chunk: string) => void,
-  images?: string[]
+  images?: string[],
+  /** Fix 1: optional pre-resolved context block — skip getUnifiedContext when already computed */
+  preResolvedContext?: string
 ): Promise<{ fullText: string; model: string }> {
-  // Load persistent memories & brain state directives dynamically via Unified Hybrid Retriever
+  // Fix 1: use pre-resolved context if provided; otherwise resolve now
   const temporal = getTemporalContext();
   const brainState = loadBrainState();
-  const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
-  const memoryContext = unifiedMemory.contextBlock;
+  let memoryContext: string;
+  if (preResolvedContext !== undefined) {
+    memoryContext = preResolvedContext;
+  } else {
+    const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
+    memoryContext = unifiedMemory.contextBlock;
+  }
 
   const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent female autonomous executive assistant and operations intelligence system engineered for NJ.
 USER ADDRESS: Always address the user formally as "NJ" (or Sir).
@@ -815,9 +869,8 @@ RULES:
 - Keep responses concise — 2 to 4 sentences is ideal unless detailed step-by-step guidance is requested.`;
 
   const fullPrompt = contextText ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}` : userPrompt;
-  const apiKey = process.env.GEMINI_API_KEY || "";
-  // High-performance active Gemini model cascade
-  let GEMINI_MODELS = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
+  // Fix 9: use validated model list; prepend requestedModel if provided
+  let GEMINI_MODELS = [...GEMINI_MODELS_DEFAULT];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
@@ -859,12 +912,12 @@ RULES:
     }
   }
 
-  if (apiKey) {
-    const ai = new GoogleGenAI({ apiKey });
+  // Fix 5: use module-level singleton instead of re-instantiating every call
+  if (geminiClient) {
     for (const model of GEMINI_MODELS) {
       try {
         console.log(`[SNOW STREAM] Trying Gemini Stream ${model} (Visual inputs: ${images?.length || 0})...`);
-        const streamResult = await ai.models.generateContentStream({
+        const streamResult = await geminiClient.models.generateContentStream({
           model,
           contents: geminiContents,
           config: { systemInstruction: SNOW_PERSONA }
@@ -993,13 +1046,20 @@ async function runReActAgenticLoop(
   userPrompt: string,
   history?: { role: string; text: string }[],
   requestedModel?: string,
-  images?: string[]
+  images?: string[],
+  /** Fix 1: optional pre-resolved context block — skip getUnifiedContext when already computed */
+  preResolvedContext?: string
 ): Promise<{ text: string; toolsUsed: string[]; toolSteps: ToolStepTelemetry[]; model: string }> {
-  // Load persistent memories & brain state directives dynamically via Unified Hybrid Retriever
+  // Fix 1: use pre-resolved context if provided; otherwise resolve now
   const temporal = getTemporalContext();
   const brainState = loadBrainState();
-  const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
-  const memoryContext = unifiedMemory.contextBlock;
+  let memoryContext: string;
+  if (preResolvedContext !== undefined) {
+    memoryContext = preResolvedContext;
+  } else {
+    const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
+    memoryContext = unifiedMemory.contextBlock;
+  }
 
   const { specialist, directive, priorityTools } = routeToSpecialist(userPrompt);
 
@@ -1202,6 +1262,126 @@ async function startServer() {
     res.setHeader("X-XSS-Protection", "1; mode=block");
     next();
   });
+
+  // ── Strict Local Origin Validation (Anti-CSRF & Anti-DNS Rebinding) ─────────
+  app.use((req, res, next) => {
+    const origin = req.headers["origin"] || req.headers["referer"];
+    if (origin) {
+      try {
+        const url = new URL(String(origin));
+        const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+        if (!isLocal) {
+          console.warn(`[SECURITY] Blocked cross-origin request from untrusted origin: ${origin}`);
+          return res.status(403).json({ error: "Forbidden: Cross-Origin Access Denied" });
+        }
+      } catch {}
+    }
+    next();
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // BIOMETRIC AUTH ROUTES (public — gates the rest of the OS)
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /** Trigger fingerprint scan. Returns { token } on success, 403 on wrong finger, 429 on rate limit. */
+  app.post("/api/auth/fingerprint", async (req, res) => {
+    const clientKey = (req.ip || "global");
+    const rateCheck = checkRateLimit("fingerprint", clientKey);
+    if (!rateCheck.allowed) {
+      console.warn(`[AUTH] Fingerprint rate limited for ${clientKey}. Retry in ${rateCheck.retryAfter}s`);
+      res.status(429).json({ success: false, error: "Too many attempts", retryAfter: rateCheck.retryAfter });
+      return;
+    }
+
+    console.log("[AUTH] Fingerprint verification requested");
+    const ac = new AbortController();
+    req.on("close", () => {
+      if (!res.writableEnded) {
+        console.log("[AUTH] Client disconnected during fingerprint scan — aborting");
+        ac.abort();
+      }
+    });
+
+    try {
+      const result = await verifyFingerprint(undefined, ac.signal);
+      if (result.matched) {
+        resetRateLimit("fingerprint", clientKey);
+        const token = issueSessionToken();
+        console.log("[AUTH] ✔ Fingerprint matched — session token issued");
+        res.json({ success: true, token, status: "matched" });
+      } else {
+        const failure = recordFailedAttempt("fingerprint", clientKey);
+        console.warn(`[AUTH] ✘ Fingerprint verification failed: ${result.status} (${result.message})`);
+        
+        if (result.status === "timeout") {
+          res.status(408).json({ success: false, status: "timeout", error: result.message });
+        } else if (result.status === "device_claimed") {
+          res.status(409).json({ success: false, status: "device_claimed", error: result.message });
+        } else if (result.status === "no_device") {
+          res.status(503).json({ success: false, status: "no_device", error: result.message });
+        } else if (result.status === "cancelled") {
+          res.status(499).json({ success: false, status: "cancelled", error: "Cancelled" });
+        } else {
+          res.status(403).json({
+            success: false,
+            status: "no_match",
+            error: failure.locked ? "Too many attempts. Locked." : "Fingerprint not recognized",
+            locked: failure.locked,
+            retryAfter: failure.retryAfter,
+          });
+        }
+      }
+    } catch (e: any) {
+      console.error("[AUTH] Fingerprint verification unhandled exception:", e.message);
+      res.status(500).json({ success: false, status: "error", error: "Sensor internal error" });
+    }
+  });
+
+  /** Fallback: Master Passcode / PIN authentication with rate limiting. */
+  app.post("/api/auth/passcode", (req, res) => {
+    const clientKey = (req.ip || "global");
+    const rateCheck = checkRateLimit("passcode", clientKey);
+    if (!rateCheck.allowed) {
+      console.warn(`[AUTH] Passcode rate limited for ${clientKey}. Retry in ${rateCheck.retryAfter}s`);
+      res.status(429).json({ success: false, error: "Too many attempts", retryAfter: rateCheck.retryAfter });
+      return;
+    }
+
+    const { passcode } = req.body || {};
+    if (!passcode) {
+      res.status(400).json({ success: false, error: "Passcode required" });
+      return;
+    }
+
+    if (verifyPasscode(String(passcode))) {
+      resetRateLimit("passcode", clientKey);
+      const token = issueSessionToken(undefined, "passcode");
+      console.log("[AUTH] ✔ Master passcode verified — session token issued");
+      res.json({ success: true, token });
+    } else {
+      const failure = recordFailedAttempt("passcode", clientKey);
+      console.warn("[AUTH] ✘ Invalid master passcode attempt");
+      res.status(403).json({
+        success: false,
+        error: failure.locked ? "Too many failed attempts. Locked for 60 seconds." : "Invalid passcode",
+        locked: failure.locked,
+        retryAfter: failure.retryAfter,
+      });
+    }
+  });
+
+  /** Check whether a session token is still valid (used by frontend on page load). */
+  app.get("/api/auth/status", (req, res) => {
+    const authHeader = (req.headers["authorization"] || req.headers["x-snow-token"]) as string | undefined;
+    const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : authHeader;
+    if (!token) return res.json({ authenticated: false });
+    const session = validateSessionToken(token);
+    res.json({ authenticated: !!session, user: session?.user });
+  });
+
+  // ── Global Biometric / Passcode Auth Enforcement for all sensitive endpoints ──
+  app.use("/api/snow", authMiddleware);
+  app.use("/api/system", authMiddleware);
 
   // Optional API key enforcement if configured in .env (SNOW_API_KEY)
   const configuredApiKey = process.env.SNOW_API_KEY;
@@ -1577,8 +1757,16 @@ async function startServer() {
       });
     }
 
-    // Dynamic Intent & Slot resolution (No hardcoding)
-    const intent = await resolveIntent(effectivePrompt);
+    // Fix 1 & 3: run intent resolution and unified context retrieval IN PARALLEL.
+    // Previously resolveIntent fired a serial Gemini call before the main response
+    // and getUnifiedContext was computed twice (once here, once inside callAI/runReAct).
+    // Now both run together, and the resolved contextBlock is passed down so the
+    // inner functions skip their own getUnifiedContext call entirely.
+    const [intent, unifiedMemoryResult] = await Promise.all([
+      resolveIntent(effectivePrompt),
+      getUnifiedContext(effectivePrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 })
+    ]);
+    const preResolvedContext = unifiedMemoryResult.contextBlock;
     console.log("[SNOW] Dynamic Neural Intent:", JSON.stringify(intent));
 
     // Gather live tool data in parallel
@@ -1668,7 +1856,7 @@ async function startServer() {
     let matchingVisualMemories: VisualEpisode[] = [];
 
     if (isVisualRecall) {
-      const objMatch = effectivePrompt.match(/\b(?:my|the)\s+([a-zA-Z0-9_\- ]+?)(?:\?|$|\.|\,)/i);
+      const objMatch = effectivePrompt.match(/\b(?:my|the)\s+([a-zA-Z0-9_\- ]+?)(?:\?|$|\.|,)/i);
       const queryTarget = objMatch ? objMatch[1].trim() : effectivePrompt;
       matchingVisualMemories = searchVisualEpisodes(queryTarget, 4);
       if (matchingVisualMemories.length === 0) {
@@ -1699,12 +1887,14 @@ async function startServer() {
 
     if (isSimpleConversation) {
       console.log(`[SNOW] Conversational route active (Vision frames: ${images.length}, Visual memories: ${matchingVisualMemories.length}) — invoking direct persona AI caller...`);
-      const res = await callAI(effectivePrompt, contextLines.join("\n"), history, requestedModel, images);
+      // Fix 1: pass preResolvedContext so callAI skips its own getUnifiedContext call
+      const res = await callAI(effectivePrompt, contextLines.join("\n"), history, requestedModel, images, preResolvedContext);
       aiRaw = res.text;
       model = res.model;
     } else {
       console.log(`[SNOW AGENT] Multi-step agent route active (Vision frames: ${images.length}) — running ReAct engine...`);
-      const res = await runReActAgenticLoop(effectivePrompt, history, requestedModel, images);
+      // Fix 1: pass preResolvedContext so runReActAgenticLoop skips its own getUnifiedContext call
+      const res = await runReActAgenticLoop(effectivePrompt, history, requestedModel, images, preResolvedContext);
       aiRaw = res.text;
       reactTools = res.toolsUsed;
       toolSteps = res.toolSteps || [];
@@ -1761,7 +1951,7 @@ async function startServer() {
       model,
       brainLevel: brainState.level,
       memoriesCount: loadMemories().length,
-      ragStats: ragStats(),
+      ragStats: ragStatsCached(), // Fix 10: cached, not 3 live COUNT queries per response
       sentinel: system?.sentinel,
       timestamp: new Date().toISOString(),
     });
