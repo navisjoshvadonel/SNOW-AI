@@ -63,7 +63,7 @@ class AudioSynthesisService {
     try {
       const escaped = cleanSpoken.replace(/"/g, '\\"').replace(/[\r\n]+/g, " ");
       const speedParam = urgency === "calm" ? 0 : urgency === "alert" ? 25 : 40;
-      await execAsync(`spd-say -t female1 -p 15 -r ${speedParam} "${escaped}" 2>/dev/null`);
+      await execAsync(`spd-say -w -t female1 -p 15 -r ${speedParam} "${escaped}" 2>/dev/null`);
       dispatched = true;
     } catch {}
 
