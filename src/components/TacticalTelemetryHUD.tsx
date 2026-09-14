@@ -36,12 +36,13 @@ export interface TacticalTelemetryHUDProps {
   onRefreshStats: () => void;
 }
 
-// Circular SVG Arc Meter Component
+// Circular SVG Arc Meter Component with dynamic glowing gradients
 const CircularGauge = ({
   value,
   label,
   sublabel,
   color,
+  gradientId,
   size = 76,
   strokeWidth = 6,
 }: {
@@ -49,6 +50,7 @@ const CircularGauge = ({
   label: string;
   sublabel: string;
   color: string;
+  gradientId?: string;
   size?: number;
   strokeWidth?: number;
 }) => {
@@ -56,27 +58,38 @@ const CircularGauge = ({
   const circumference = 2 * Math.PI * radius;
   const safePct = Math.min(100, Math.max(0, value));
   const strokeDashoffset = circumference - (safePct / 100) * circumference;
+  const gid = gradientId || `gauge-grad-${label.toLowerCase()}`;
 
   return (
-    <div className="flex flex-col items-center justify-center p-2 rounded-2xl bg-slate-950/80 border border-cyan-500/20 shadow-inner relative group hover:border-cyan-400/50 transition">
+    <div className="flex flex-col items-center justify-center p-2 rounded-2xl bg-slate-950/85 border border-cyan-500/25 shadow-inner relative group hover:border-cyan-400/60 transition-all duration-300">
       <div className="relative" style={{ width: size, height: size }}>
         <svg className="w-full h-full -rotate-90" viewBox={`0 0 ${size} ${size}`}>
+          <defs>
+            <linearGradient id={gid} x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stopColor={color} stopOpacity="1" />
+              <stop offset="100%" stopColor="#38bdf8" stopOpacity="0.8" />
+            </linearGradient>
+            <filter id={`glow-${gid}`} x="-20%" y="-20%" width="140%" height="140%">
+              <feDropShadow dx="0" dy="0" stdDeviation="2.5" floodColor={color} floodOpacity="0.8" />
+            </filter>
+          </defs>
+
           {/* Track background */}
           <circle
             cx={size / 2}
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke="rgba(15, 23, 42, 0.9)"
+            stroke="rgba(15, 23, 42, 0.95)"
             strokeWidth={strokeWidth}
           />
-          {/* Subtle Outer Tick Ring */}
+          {/* Outer Precision Tick Ring */}
           <circle
             cx={size / 2}
             cy={size / 2}
             r={radius + 3}
             fill="none"
-            stroke="rgba(6, 182, 212, 0.15)"
+            stroke="rgba(6, 182, 212, 0.2)"
             strokeWidth="1"
             strokeDasharray="2 6"
           />
@@ -86,21 +99,21 @@ const CircularGauge = ({
             cy={size / 2}
             r={radius}
             fill="none"
-            stroke={color}
+            stroke={`url(#${gid})`}
             strokeWidth={strokeWidth}
             strokeLinecap="round"
             strokeDasharray={circumference}
             animate={{ strokeDashoffset }}
-            transition={{ duration: 0.8, ease: "easeOut" }}
-            style={{
-              filter: `drop-shadow(0 0 6px ${color})`,
-            }}
+            transition={{ duration: 0.9, ease: "easeOut" }}
+            filter={`url(#glow-${gid})`}
           />
         </svg>
 
         {/* Center Percentage Display */}
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-          <span className="font-mono text-xs font-bold text-white tracking-tight">{Math.round(safePct)}%</span>
+          <span className="font-mono text-xs font-bold text-white tracking-tight flex items-center">
+            {Math.round(safePct)}%
+          </span>
         </div>
       </div>
 
@@ -158,19 +171,53 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
             label="CPU"
             sublabel={`${cpuPct}% Load`}
             color="#22d3ee"
+            gradientId="grad-cpu"
           />
           <CircularGauge
             value={ramPct}
             label="RAM"
             sublabel={ramUsed.split(" ")[0] + " GB"}
             color="#34d399"
+            gradientId="grad-ram"
           />
           <CircularGauge
             value={Math.round((parseFloat(diskUsage.split("/")[0]) / parseFloat(diskUsage.split("/")[1] || "157")) * 100) || 54}
             label="DISK"
             sublabel={diskUsage.split("/")[0] + "G"}
             color="#a78bfa"
+            gradientId="grad-disk"
           />
+        </div>
+
+        {/* Live Dynamic Bus Activity Wave / Sparkline */}
+        <div className="mt-3 p-2 rounded-xl bg-slate-950/80 border border-cyan-500/20 overflow-hidden relative">
+          <div className="flex items-center justify-between text-[9px] font-mono text-slate-400 mb-1">
+            <span className="text-cyan-300 font-bold uppercase tracking-wider">DYNAMIC WORKLOAD WAVE</span>
+            <span className="text-emerald-400 font-semibold">{cpuPct > 50 ? "ACTIVE BUS" : "NOMINAL"}</span>
+          </div>
+          <div className="h-6 w-full flex items-center justify-between gap-1">
+            {Array.from({ length: 24 }).map((_, i) => {
+              const baseHeight = Math.max(3, Math.min(22, Math.sin(i * 0.6) * 8 + (cpuPct / 100) * 14 + (i % 3) * 2));
+              return (
+                <motion.div
+                  key={i}
+                  animate={{ height: [baseHeight * 0.6, baseHeight, baseHeight * 0.4] }}
+                  transition={{
+                    duration: 1.2 + (i % 4) * 0.2,
+                    repeat: Infinity,
+                    repeatType: "reverse",
+                    ease: "easeInOut",
+                    delay: i * 0.05,
+                  }}
+                  className="flex-1 rounded-full"
+                  style={{
+                    backgroundColor: i % 4 === 0 ? "#22d3ee" : i % 3 === 0 ? "#34d399" : "rgba(6, 182, 212, 0.45)",
+                    boxShadow: i % 4 === 0 ? "0 0 6px rgba(34, 211, 238, 0.8)" : undefined,
+                  }}
+                />
+              );
+            })}
+          </div>
         </div>
 
         {/* Dynamic Hardware Health Strip */}
@@ -178,7 +225,7 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
           <span className="text-slate-400">SYSTEM HEALTH:</span>
           <span className="text-emerald-300 font-bold flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-            <span>HEALTHY</span>
+            <span>OPTIMAL & PROTECTED</span>
           </span>
         </div>
       </div>

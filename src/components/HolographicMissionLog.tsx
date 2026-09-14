@@ -122,8 +122,11 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
 
       {/* ─── Scrollable Message Feed ─── */}
       <div className="flex-1 p-3.5 overflow-y-auto space-y-3 font-sans scrollbar-none">
-        {chatHistory.map((msg) => {
+        {chatHistory.map((msg, index) => {
           const isUser = msg.sender === "user";
+          const isLast = index === chatHistory.length - 1;
+          const isSnowSpeaking = !isUser && isSpeaking && isLast;
+
           return (
             <div
               key={msg.id}
@@ -133,24 +136,47 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
               <div className="text-[10px] text-slate-400 px-1 font-mono flex items-center gap-1.5">
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${
-                    isUser ? "bg-cyan-400" : "bg-emerald-400"
+                    isUser ? "bg-cyan-400" : isSnowSpeaking ? "bg-emerald-400 animate-ping" : "bg-emerald-400"
                   }`}
                 />
                 <span className="font-bold tracking-wider uppercase text-cyan-300">
                   {isUser ? "NJ" : "SNOW"}
                 </span>
+
+                {/* Vocal Equalizer Pills when S.N.O.W. is Speaking */}
+                {isSnowSpeaking && (
+                  <div className="flex items-center gap-0.5 ml-1 px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/40">
+                    {[...Array(4)].map((_, i) => (
+                      <motion.span
+                        key={i}
+                        animate={{ height: [3, 10, 4, 12, 3] }}
+                        transition={{
+                          duration: 0.4 + i * 0.1,
+                          repeat: Infinity,
+                          repeatType: "reverse",
+                          ease: "easeInOut",
+                        }}
+                        className="w-0.5 bg-emerald-300 rounded-full"
+                      />
+                    ))}
+                    <span className="text-[8px] font-mono text-emerald-300 ml-1 font-bold uppercase">VOICE</span>
+                  </div>
+                )}
+
                 <span className="text-slate-500">•</span>
                 <span className="text-slate-400">{msg.timestamp}</span>
               </div>
 
               {/* Message Bubble Card */}
               <motion.div
-                initial={{ opacity: 0, y: 10, scale: 0.98 }}
+                initial={{ opacity: 0, y: 12, scale: 0.97 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
-                className={`max-w-[92%] p-3.5 rounded-2xl leading-relaxed text-xs shadow-xl backdrop-blur-md relative border ${
+                transition={{ type: "spring", stiffness: 350, damping: 25 }}
+                className={`max-w-[92%] p-3.5 rounded-2xl leading-relaxed text-xs shadow-xl backdrop-blur-md relative border transition-all duration-300 ${
                   isUser
                     ? "bg-gradient-to-br from-cyan-950/80 to-slate-900/90 border-cyan-500/40 text-cyan-50 rounded-tr-none shadow-[0_0_20px_rgba(6,182,212,0.12)] hover:border-cyan-400"
+                    : isSnowSpeaking
+                    ? "bg-slate-950/95 border-emerald-400/60 text-slate-100 rounded-tl-none shadow-[0_0_28px_rgba(52,211,153,0.3)] snow-speech-active"
                     : "bg-slate-950/90 border-cyan-500/25 text-slate-100 rounded-tl-none shadow-[0_0_20px_rgba(0,0,0,0.6)] hover:border-cyan-500/40"
                 }`}
               >
@@ -225,14 +251,29 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
           );
         })}
 
-        {/* Live Autonomous Processing Loader */}
+        {/* Live Autonomous Quantum Processing Loader */}
         {isLoading && (
-          <div className="flex items-start gap-2">
-            <div className="p-3 rounded-2xl bg-slate-950/90 border border-cyan-500/30 rounded-tl-none flex items-center gap-2 text-xs font-mono text-cyan-300 shadow-[0_0_20px_rgba(6,182,212,0.15)]">
-              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-              <span>Snow is thinking...</span>
+          <motion.div
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="flex items-start gap-2"
+          >
+            <div className="p-3 rounded-2xl bg-slate-950/95 border border-cyan-500/40 rounded-tl-none flex items-center gap-3 text-xs font-mono text-cyan-300 shadow-[0_0_25px_rgba(6,182,212,0.25)] relative overflow-hidden">
+              <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-cyan-400 to-transparent animate-scanline" />
+              <div className="relative flex items-center justify-center">
+                <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
+                <span className="absolute w-1.5 h-1.5 rounded-full bg-cyan-200" />
+              </div>
+              <div className="flex flex-col">
+                <span className="font-bold tracking-wider uppercase text-[11px] text-cyan-200">
+                  Synthesizing Neural Response...
+                </span>
+                <span className="text-[9px] text-cyan-400/60 font-medium tracking-wide">
+                  Processing situational context & telemetry
+                </span>
+              </div>
             </div>
-          </div>
+          </motion.div>
         )}
 
         <div ref={chatEndRef} />

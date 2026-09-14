@@ -643,7 +643,7 @@ Return ONLY valid JSON matching this schema:
 }`;
 
       const res = await ai.models.generateContent({
-        model: "gemini-flash-latest",
+        model: "gemini-2.5-flash",
         contents: [{ role: "user", parts: [{ text: prompt }] }],
         config: {
           systemInstruction,

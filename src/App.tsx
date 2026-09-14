@@ -2029,6 +2029,7 @@ export default function App() {
                   cpuPct={liveStats.cpuPct || 12}
                   isMuted={isMuted}
                   micVolume={micVolume}
+                  onCoreClick={toggleSpeechRecognition}
                 />
               </div>
 

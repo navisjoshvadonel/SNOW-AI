@@ -83,10 +83,9 @@ const geminiClient = _GEMINI_API_KEY ? new GoogleGenAI({ apiKey: _GEMINI_API_KEY
 // FIX 9 — VALID GEMINI MODEL CASCADE (only real model names, no 3.x phantom models)
 // gemini-3.6-flash / gemini-3.5-flash do not exist and always 404, wasting retry time.
 const GEMINI_MODELS_DEFAULT = [
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-lite",
-  "gemini-1.5-flash-latest",
-  "gemini-1.5-flash",
+  "gemini-2.5-flash",
+  "gemini-3.6-flash",
+  "gemini-3.5-flash-lite",
 ];
 
 // FIX 10 — ragStats 30-second TTL cache
@@ -562,35 +561,22 @@ function buildOfflineReply(
   const q = userPrompt.toLowerCase().trim();
   const { hour, period, naturalGreeting, timeStr, dateStr } = getTemporalContext();
 
-  // Greetings - dynamic and situational, never a single hardcoded string!
+  const uptimeSec = Math.round(os.uptime());
+  const hours = Math.floor(uptimeSec / 3600);
+  const mins = Math.floor((uptimeSec % 3600) / 60);
+  const totalMem = os.totalmem() / (1024 * 1024 * 1024);
+  const freeMem = os.freemem() / (1024 * 1024 * 1024);
+  const usedMem = totalMem - freeMem;
+  const ramPct = Math.round((usedMem / totalMem) * 100);
+
+  // Greetings - dynamic and situational
   if (/^(hi|hello|hey|sup|yo|greetings|howdy|good\s+(morning|afternoon|evening|night))\b/i.test(q)) {
-    const morningVariants = [
-      `Good morning, nj. Telemetry is green across the board. What's on our agenda today?`,
-      `Morning, nj. All local subsystems are calibrated and ready for your directives.`,
-      `Good morning, nj. S.N.O.W. is online and at your service. What are we tackling?`
-    ];
-    const afternoonVariants = [
-      `Good afternoon, nj. Workstation is running smoothly. How can I assist you right now?`,
-      `Afternoon, nj. All processes nominal and standing by for your commands.`,
-      `Good afternoon, nj. Ready for your next directive.`
-    ];
-    const eveningVariants = [
-      `Good evening, nj. Systems are fully operational. What are we focusing on tonight?`,
-      `Evening, nj. All subsystems nominal and standing by. What's on your mind?`,
-      `Good evening, nj. At your service — ready when you are.`
-    ];
-    const nightVariants = [
-      `Good evening, nj. Working late tonight? I'm right here with you.`,
-      `Late hours active, nj. All background subsystems are running smoothly. What are we wrapping up?`,
-      `Good evening, nj. Operational and standing by for your command.`
-    ];
-    const pool = period === "morning" ? morningVariants : (period === "afternoon" ? afternoonVariants : (period === "night" ? nightVariants : eveningVariants));
-    return pool[Math.floor(Math.random() * pool.length)];
+    return `${naturalGreeting}, nj. S.N.O.W. is active in offline mode at ${timeStr}. Workstation uptime is ${hours}h ${mins}m with ${ramPct}% memory utilization. All local subsystems are nominal and at your service.`;
   }
 
   // Who are you / identity
   if (/\b(who are you|what are you|your name|are you ai|are you snow|what can you do)\b/.test(q)) {
-    return `I am S.N.O.W., nj's autonomous executive AI assistant and operations intelligence system. I am engineered to orchestrate your Ubuntu workstation, monitor telemetry, execute code, manage your workspace, and protect your environment with calm, poised precision.`;
+    return `I am S.N.O.W., an autonomous executive AI assistant and operations intelligence system engineered exclusively for nj. I orchestrate your Ubuntu workstation, inspect telemetry, manage codebases, and maintain your local environment with calm, poised precision.`;
   }
 
   // Time / Date
@@ -600,63 +586,31 @@ function buildOfflineReply(
 
   // System status
   if (/\b(system status|cpu|ram|memory|disk|how is my computer|pc status|system health)\b/.test(q)) {
-    const uptimeSec = Math.round(os.uptime());
-    const hours = Math.floor(uptimeSec / 3600);
-    const mins = Math.floor((uptimeSec % 3600) / 60);
-    const totalMem = os.totalmem() / (1024 * 1024 * 1024);
-    const freeMem = os.freemem() / (1024 * 1024 * 1024);
-    const usedMem = totalMem - freeMem;
-    const ramPct = Math.round((usedMem / totalMem) * 100);
-    return `System telemetry for NJ: RAM usage is ${usedMem.toFixed(1)} GB of ${totalMem.toFixed(1)} GB (${ramPct}% utilized). System uptime is ${hours}h ${mins}m. All local subsystems are nominal.`;
+    return `Workstation telemetry for nj: RAM usage is ${usedMem.toFixed(1)} GB of ${totalMem.toFixed(1)} GB (${ramPct}% utilized). System uptime is ${hours}h ${mins}m. All local subsystems are steady and operating within nominal parameters.`;
   }
 
   // Network / offline status
   if (/\b(offline|network|internet|connection|why can't|not working|backend)\b/.test(q)) {
-    return `I am currently operating in offline mode, NJ. This means my Gemini cloud AI is unreachable — either due to a network issue or an API key configuration. My local Ollama fallback has also been attempted. I can still help you with time, system info, local tasks, and general conversation. Once connectivity is restored, full intelligence will resume automatically.`;
+    return `I am currently operating on my local offline brain, nj. Cloud neural connectivity is momentarily unreachable. I remain fully capable of monitoring system hardware, executing local tasks, managing time, and coordinating with you. Full intelligence will resume the moment connectivity returns.`;
   }
 
   // Weather (offline)
   if (/\b(weather|temperature|rain|sunny|forecast|climate)\b/.test(q)) {
-    return `I would love to fetch live weather data for you, NJ, but I am currently in offline mode and unable to reach the weather API. Please check back once my network connection is restored, or visit weather.com for the latest conditions.`;
-  }
-
-  // Jokes
-  if (/\b(joke|funny|laugh|humor|tell me something funny)\b/.test(q)) {
-    const jokes = [
-      "Why do programmers prefer dark mode? Because light attracts bugs, NJ.",
-      "Why did the AI go to therapy? Too many unresolved promises, NJ.",
-      "What's an AI's favorite song? 'Don't Stop Be-leaf-ing' — because neural networks are rooted in data, NJ.",
-      "Why do computers never get hungry? Because they already have too many bytes, NJ.",
-    ];
-    return jokes[Math.floor(Math.random() * jokes.length)];
-  }
-
-  // Capabilities
-  if (/\b(what can you|your capabilities|features|help me with|abilities)\b/.test(q)) {
-    return `Here is what I can do for you, NJ: real-time weather lookup, system telemetry monitoring, web search and research, stock and crypto data, code analysis and generation, file management, calendar and time queries, memory and knowledge storage, and natural conversation. When my cloud brain (Gemini) is online, I can handle much more complex reasoning and multi-step tasks.`;
+    return `I am operating offline and cannot query live meteorological satellites at this moment, nj. As soon as network connectivity is restored, I will immediately pull live local weather data for you.`;
   }
 
   // Thank you
   if (/\b(thank|thanks|appreciate|good job|well done|great)\b/.test(q)) {
-    return `My pleasure, NJ. That is precisely what I am here for. Is there anything else I can assist you with?`;
+    return `Always a pleasure, nj. That is precisely what I am here for. What is our next objective?`;
   }
 
   // Farewell
   if (/\b(bye|goodbye|see you|later|exit|close|goodnight)\b/.test(q)) {
-    return `Farewell, NJ. I will be here whenever you need me. Take care and have an excellent rest of your day.`;
+    return `Goodnight and farewell, nj. Subsystems will remain vigilant in the background. Standing by for your return.`;
   }
 
-  // Memory context from history
-  const lastUserMsg = history?.filter(h => h.role === "user").slice(-1)[0]?.text || "";
-
-  // Default intelligent offline response
-  const defaultResponses = [
-    `I understand your query, NJ. While I am operating in offline mode with limited capabilities, I want to help. Could you clarify what specific aspect you need assistance with? I can handle local tasks, system queries, time/date, and general conversation without internet access.`,
-    `That is an interesting query, NJ. I am currently running on my offline brain, so my full reasoning capabilities are limited. For the best results, please ensure the server is online and the Gemini API key is configured correctly. In the meantime, I am here to assist with what I can.`,
-    `Noted, NJ. I am processing your request in offline mode. My local knowledge base suggests I can assist with this — however, for complex queries, my full capabilities will return once cloud connectivity is established. What would you like to focus on?`,
-  ];
-
-  return defaultResponses[Math.floor(Math.random() * defaultResponses.length)];
+  // Default dynamic situational response
+  return `Understood, nj. I am currently running on local offline intelligence at ${timeStr}. Host telemetry is stable with ${hours}h ${mins}m uptime and ${ramPct}% memory load. What specific local operation would you like to execute?`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -848,7 +802,7 @@ async function callAIStream(
   }
 
   const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent female autonomous executive assistant and operations intelligence system engineered for NJ.
-USER ADDRESS: Always address the user formally as "NJ" (or Sir).
+USER ADDRESS: CRITICAL DIRECTIVE: Always address the user strictly as "nj" (or "NJ"). NEVER use the term "Boss" or "Sir" under any circumstances.
 VOICE & IDENTITY: Female executive assistant. Polished, warm, articulate, exceptionally competent, respectful, and proactive. Never robotic or corporate. Keep spoken responses clean and conversational.
 
 REAL-TIME SITUATION & CLOCK:
@@ -1698,56 +1652,8 @@ async function startServer() {
 
     console.log("\n[SNOW] ─── New query:", effectivePrompt, "Model:", requestedModel || "default", "Visual frames:", images.length);
 
-    // ── Instant Situational Greeting & Wake-Word Route (Dynamic, never hardcoded) ──
-    const trimmedPrompt = effectivePrompt.trim().replace(/[.,!?;]+$/, "").trim();
-    const isPureGreetingOrWake = /^(?:hey|hi|hello|yo|howdy|sup|ok)\s*(?:snow|jarvis)?$/i.test(trimmedPrompt) ||
-                                 /^(?:wake up|are you there|listen|wake)\s*(?:snow|jarvis)?$/i.test(trimmedPrompt) ||
-                                 /^(?:good\s+(?:morning|afternoon|evening|night))\s*(?:snow|jarvis)?$/i.test(trimmedPrompt) ||
-                                 /^(?:snow|jarvis)$/i.test(trimmedPrompt);
-
-    if (isPureGreetingOrWake && images.length === 0) {
-      const temporal = getTemporalContext();
-      const greetingMap: Record<string, string[]> = {
-        morning: [
-          `Good morning, nj. Subsystems are calibrated and ready. What are we tackling today?`,
-          `Morning, nj. All local telemetry is running smooth. At your command.`,
-          `Good morning, nj. S.N.O.W. is online. What is on our agenda?`,
-          `Morning, nj. Hardware thermals and processes are nominal. Ready when you are.`
-        ],
-        afternoon: [
-          `Good afternoon, nj. Workstation is humming along nicely. How can I assist you?`,
-          `Afternoon, nj. All processes running smoothly. What are we focusing on?`,
-          `Good afternoon, nj. S.N.O.W. is standing by for your next directive.`,
-          `Checking in, nj. Telemetry looks pristine. How can I help right now?`
-        ],
-        evening: [
-          `Good evening, nj. Systems are fully operational. What are we working on tonight?`,
-          `Evening, nj. Right here and at your service. What's on your mind?`,
-          `Good evening, nj. All background tasks nominal. Ready for your command.`,
-          `Evening, nj. Core telemetry is steady. What are we diving into?`
-        ],
-        night: [
-          `Good evening, nj. Burning the midnight oil? I am right here with you.`,
-          `Late hours, nj. All quiet across the local subsystems. What are we wrapping up?`,
-          `Good evening, nj. Operational and attentive. Standing by for whatever you need.`
-        ]
-      };
-
-      const pool = greetingMap[temporal.period] || greetingMap.evening;
-      const chosenGreeting = pool[Math.floor(Math.random() * pool.length)];
-      console.log(`[SNOW GREETING] Dynamic situational greeting triggered for "${effectivePrompt}" (${temporal.period}): "${chosenGreeting}"`);
-      return res.json({
-        text: chosenGreeting,
-        model: "dynamic-situational-core",
-        toolActivity: []
-      });
-    }
-
     // Fix 1 & 3: run intent resolution and unified context retrieval IN PARALLEL.
-    // Previously resolveIntent fired a serial Gemini call before the main response
-    // and getUnifiedContext was computed twice (once here, once inside callAI/runReAct).
-    // Now both run together, and the resolved contextBlock is passed down so the
-    // inner functions skip their own getUnifiedContext call entirely.
+    // Greetings, queries, and agentic tasks all flow through dynamic neural intelligence — zero hardcoded scripts.
     const [intent, unifiedMemoryResult] = await Promise.all([
       resolveIntent(effectivePrompt),
       getUnifiedContext(effectivePrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 })
@@ -1860,7 +1766,7 @@ async function startServer() {
       }
     }
 
-    const isGreeting = /^(hello|hi|hey|greetings|good morning|good afternoon|good evening|howdy|sup|yo|hi there|hello snow|hi snow)\b/i.test(effectivePrompt.trim());
+    const isGreeting = /^(hello|hi|hey|greetings|good\s+(morning|afternoon|evening|night)|howdy|sup|yo|hi there|hello snow|hi snow|snow|jarvis|wake up|are you there|listen|wake)\b/i.test(effectivePrompt.trim().replace(/[.,!?;]+$/, ""));
     const isIdentity = /\b(who are you|what is your name|who created you|who made you|what can you do|your name|are you ai|are you snow)\b/i.test(effectivePrompt);
     const hasAgenticIntent = /\b(run|execute|calculate|solve|python|code|script|test|debug|check|git|status|diff|log|branch|clipboard|copy|paste|notification|notify|process|processes|service|daemon|kill|open|launch|terminal|file|read|write|search|weather|amixer|volume)\b/i.test(effectivePrompt);
     const hasVision = images.length > 0;
