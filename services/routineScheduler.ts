@@ -200,7 +200,7 @@ class RoutineSchedulerService {
     const hour = now.getHours();
     const timeGreeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
-    let spokenScript = `${timeGreeting}, Boss. Weather in ${weather.location} is currently ${weather.condition} at ${weather.tempC}. System hardware is running smoothly at ${system.tempC} degrees with ${system.cpuPct} percent CPU load. In your repository, branch ${git.branch} has ${git.modifiedFiles + git.untrackedFiles} active working file changes.`;
+    let spokenScript = `${timeGreeting}, nj. Weather in ${weather.location} is currently ${weather.condition} at ${weather.tempC}. System hardware is running smoothly at ${system.tempC} degrees with ${system.cpuPct} percent CPU load. In your repository, branch ${git.branch} has ${git.modifiedFiles + git.untrackedFiles} active working file changes.`;
     let summary = `Live telemetry compiled at ${now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}.`;
     let directives: string[] = [
       git.modifiedFiles > 0 ? `Review and commit ${git.modifiedFiles} modified file(s) on ${git.branch}` : "Git working tree is clean",
@@ -211,7 +211,7 @@ class RoutineSchedulerService {
     if (apiKey) {
       try {
         const ai = new GoogleGenAI({ apiKey });
-        const prompt = `You are S.N.O.W., a highly sophisticated, calm, and soothing female autonomous AI assistant engineered for Boss (tag: NJ).
+        const prompt = `You are S.N.O.W., a highly sophisticated, calm, and soothing female autonomous AI assistant engineered strictly for nj.
 Analyze this REAL live workstation intelligence:
 - Time: ${timeGreeting} (${now.toLocaleTimeString()})
 - Weather: ${weather.tempC}, ${weather.condition} in ${weather.location} (Humidity: ${weather.humidity}, Wind: ${weather.windSpeed})
@@ -222,10 +222,10 @@ Analyze this REAL live workstation intelligence:
 
 Generate a STRICT JSON response in this exact format with NO markdown wrapping:
 {
-  "greeting": "${timeGreeting}, Boss.",
-  "spokenScript": "A cinematic, crisp 3-sentence spoken morning briefing addressing Boss aloud with calm, poised elegance. Include weather, thermal health, and repo activity.",
+  "greeting": "${timeGreeting}, nj.",
+  "spokenScript": "A cinematic, crisp 3-sentence spoken morning briefing addressing nj aloud with calm, poised elegance. Include weather, thermal health, and repo activity.",
   "summary": "1-sentence executive overview of system and development state.",
-  "directives": ["3 actionable priority bullets for Boss's session today"]
+  "directives": ["3 actionable priority bullets for nj's session today"]
 }`;
 
         const res = await ai.models.generateContent({
@@ -247,7 +247,7 @@ Generate a STRICT JSON response in this exact format with NO markdown wrapping:
     }
 
     const briefing: DailyBriefingData = {
-      greeting: `${timeGreeting}, Boss.`,
+      greeting: `${timeGreeting}, nj.`,
       spokenScript,
       summary,
       weather,

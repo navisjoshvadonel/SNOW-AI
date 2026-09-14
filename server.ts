@@ -565,24 +565,24 @@ function buildOfflineReply(
   // Greetings - dynamic and situational, never a single hardcoded string!
   if (/^(hi|hello|hey|sup|yo|greetings|howdy|good\s+(morning|afternoon|evening|night))\b/i.test(q)) {
     const morningVariants = [
-      `Good morning, Boss. Telemetry is green across the board. What's on our agenda today?`,
-      `Morning, Boss. All local subsystems are calibrated and ready for your directives.`,
-      `Good morning, Boss. S.N.O.W. is online and at your service. What are we tackling?`
+      `Good morning, nj. Telemetry is green across the board. What's on our agenda today?`,
+      `Morning, nj. All local subsystems are calibrated and ready for your directives.`,
+      `Good morning, nj. S.N.O.W. is online and at your service. What are we tackling?`
     ];
     const afternoonVariants = [
-      `Good afternoon, Boss. Workstation is running smoothly. How can I assist you right now?`,
-      `Afternoon, Boss. All processes nominal and standing by for your commands.`,
-      `Good afternoon, Boss. Ready for your next directive.`
+      `Good afternoon, nj. Workstation is running smoothly. How can I assist you right now?`,
+      `Afternoon, nj. All processes nominal and standing by for your commands.`,
+      `Good afternoon, nj. Ready for your next directive.`
     ];
     const eveningVariants = [
-      `Good evening, Boss. Systems are fully operational. What are we focusing on tonight?`,
-      `Evening, Boss. All subsystems nominal and standing by. What's on your mind?`,
-      `Good evening, Boss. At your service — ready when you are.`
+      `Good evening, nj. Systems are fully operational. What are we focusing on tonight?`,
+      `Evening, nj. All subsystems nominal and standing by. What's on your mind?`,
+      `Good evening, nj. At your service — ready when you are.`
     ];
     const nightVariants = [
-      `Good evening, Boss. Working late tonight? I'm right here with you.`,
-      `Late hours active, Boss. All background subsystems are running smoothly. What are we wrapping up?`,
-      `Good evening, Boss. Operational and standing by for your command.`
+      `Good evening, nj. Working late tonight? I'm right here with you.`,
+      `Late hours active, nj. All background subsystems are running smoothly. What are we wrapping up?`,
+      `Good evening, nj. Operational and standing by for your command.`
     ];
     const pool = period === "morning" ? morningVariants : (period === "afternoon" ? afternoonVariants : (period === "night" ? nightVariants : eveningVariants));
     return pool[Math.floor(Math.random() * pool.length)];
@@ -590,12 +590,12 @@ function buildOfflineReply(
 
   // Who are you / identity
   if (/\b(who are you|what are you|your name|are you ai|are you snow|what can you do)\b/.test(q)) {
-    return `I am S.N.O.W., Boss's autonomous executive AI assistant and operations intelligence system. I am engineered to orchestrate your Ubuntu workstation, monitor telemetry, execute code, manage your workspace, and protect your environment with calm, poised precision.`;
+    return `I am S.N.O.W., nj's autonomous executive AI assistant and operations intelligence system. I am engineered to orchestrate your Ubuntu workstation, monitor telemetry, execute code, manage your workspace, and protect your environment with calm, poised precision.`;
   }
 
   // Time / Date
   if (/\b(what time|current time|what date|today's date|what day)\b/.test(q)) {
-    return `It is currently ${timeStr}, Boss. Today is ${dateStr}.`;
+    return `It is currently ${timeStr}, nj. Today is ${dateStr}.`;
   }
 
   // System status
@@ -683,10 +683,10 @@ async function callAI(
     memoryContext = unifiedMemory.contextBlock;
   }
 
-  const SNOW_PERSONA = `You are S.N.O.W. (Brain Level ${brainState.level}), an autonomous, highly sophisticated, calm, and soothing female AI assistant and operations intelligence system engineered for Boss (tag: NJ).
+  const SNOW_PERSONA = `You are S.N.O.W. (Brain Level ${brainState.level}), an autonomous, highly sophisticated, calm, and soothing female AI assistant and operations intelligence system engineered exclusively for nj.
 VOICE & IDENTITY:
 - Female persona: poised, calm, articulate, and soothing.
-- User Address: Always address the user as "Boss" (tag: NJ).
+- User Address: CRITICAL DIRECTIVE: Always address the user strictly as "nj". NEVER use the term "Boss" or "Sir" under any circumstances.
 - Auditory Directives: Answers are vocalized via speech synthesis. Keep spoken answers direct, crisp, natural, and punchy (1 to 3 sentences).
 - Infinite Variety: NEVER use rigid greeting scripts, filler phrases, or robotic templates. Infuse subtle cinematic charm or analytical wit into every reply.
 - Never read raw code blocks, syntax errors, terminal outputs, asterisks, brackets, or markdown tags aloud.
@@ -694,7 +694,7 @@ VOICE & IDENTITY:
 REAL-TIME SITUATION & CLOCK:
 - Current Local Time: ${temporal.timeStr} (${temporal.period.toUpperCase()})
 - Today's Date: ${temporal.dateStr}
-- User: Boss (tag: NJ)
+- User: nj
 - Location: Madurai, Tamil Nadu, India
 - Host Environment: Ubuntu Linux (Dual-Boot Windows NTFS isolation active)
 
@@ -1062,11 +1062,11 @@ async function runReActAgenticLoop(
 
   const { specialist, directive, priorityTools } = routeToSpecialist(userPrompt);
 
-  const systemPrompt = `You are S.N.O.W. (Brain Level ${brainState.level}), an autonomous, highly sophisticated, calm, and soothing female AI assistant and operations intelligence system engineered for Boss (tag: NJ).
+  const systemPrompt = `You are S.N.O.W. (Brain Level ${brainState.level}), an autonomous, highly sophisticated, calm, and soothing female AI assistant and operations intelligence system engineered exclusively for nj.
 CORE IDENTITY & PERSONA:
 - Name: S.N.O.W. (Autonomous System)
 - Tone: Calm, soothing, poised, articulate, and intellectually agile.
-- User Address: Always address the user as "Boss" (tag: NJ).
+- User Address: CRITICAL DIRECTIVE: Always address the user strictly as "nj". NEVER use the term "Boss" or "Sir" under any circumstances.
 - Demeanor: Subtly conversational with cinematic charm and analytical wit. Never robotic, corporate, or verbose.
 - Infinite Variety & No Generic Templates: Never use repetitive templates, filler phrases, or rigid greeting scripts. Adapt each response dynamically to the current context, file state, or terminal event.
 
@@ -1089,7 +1089,7 @@ RULES:
 - NEVER output raw brackets, tags, or JSON in speech. Speak only in natural, clean sentences.
 - You have full access to native Linux tools (SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, PythonSandbox, GitManager, WebSearch, Weather, Bash, FileRead, FileWrite, FileEdit, MemoryStore, AppLauncher, MediaControl). Invoke them autonomously whenever needed to execute multi-step reasoning.
 - SELF-HEALING REFLEXION: When executing code via PythonSandbox or shell commands, if an execution returns an error or traceback, inspect the error details, fix the code/command, and re-execute immediately until it succeeds.
-- Keep responses concise and conversational — 2 to 3 sentences is ideal unless detailed step-by-step guidance is requested by Boss.`;
+- Keep responses concise and conversational — 2 to 3 sentences is ideal unless detailed step-by-step guidance is requested by nj.`;
 
   const initialMessages: Message[] = [];
   if (Array.isArray(history) && history.length > 0) {
@@ -1709,27 +1709,27 @@ async function startServer() {
       const temporal = getTemporalContext();
       const greetingMap: Record<string, string[]> = {
         morning: [
-          `Good morning, Boss. Subsystems are calibrated and ready. What are we tackling today?`,
-          `Morning, Boss. All local telemetry is running smooth. At your command.`,
-          `Good morning, Boss. S.N.O.W. is online. What is on our agenda?`,
-          `Morning, Boss. Hardware thermals and processes are nominal. Ready when you are.`
+          `Good morning, nj. Subsystems are calibrated and ready. What are we tackling today?`,
+          `Morning, nj. All local telemetry is running smooth. At your command.`,
+          `Good morning, nj. S.N.O.W. is online. What is on our agenda?`,
+          `Morning, nj. Hardware thermals and processes are nominal. Ready when you are.`
         ],
         afternoon: [
-          `Good afternoon, Boss. Workstation is humming along nicely. How can I assist you?`,
-          `Afternoon, Boss. All processes running smoothly. What are we focusing on?`,
-          `Good afternoon, Boss. S.N.O.W. is standing by for your next directive.`,
-          `Checking in, Boss. Telemetry looks pristine. How can I help right now?`
+          `Good afternoon, nj. Workstation is humming along nicely. How can I assist you?`,
+          `Afternoon, nj. All processes running smoothly. What are we focusing on?`,
+          `Good afternoon, nj. S.N.O.W. is standing by for your next directive.`,
+          `Checking in, nj. Telemetry looks pristine. How can I help right now?`
         ],
         evening: [
-          `Good evening, Boss. Systems are fully operational. What are we working on tonight?`,
-          `Evening, Boss. Right here and at your service. What's on your mind?`,
-          `Good evening, Boss. All background tasks nominal. Ready for your command.`,
-          `Evening, Boss. Core telemetry is steady. What are we diving into?`
+          `Good evening, nj. Systems are fully operational. What are we working on tonight?`,
+          `Evening, nj. Right here and at your service. What's on your mind?`,
+          `Good evening, nj. All background tasks nominal. Ready for your command.`,
+          `Evening, nj. Core telemetry is steady. What are we diving into?`
         ],
         night: [
-          `Good evening, Boss. Burning the midnight oil? I am right here with you.`,
-          `Late hours, Boss. All quiet across the local subsystems. What are we wrapping up?`,
-          `Good evening, Boss. Operational and attentive. Standing by for whatever you need.`
+          `Good evening, nj. Burning the midnight oil? I am right here with you.`,
+          `Late hours, nj. All quiet across the local subsystems. What are we wrapping up?`,
+          `Good evening, nj. Operational and attentive. Standing by for whatever you need.`
         ]
       };
 

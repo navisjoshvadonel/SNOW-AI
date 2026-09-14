@@ -813,16 +813,16 @@ export default function App() {
       const now = new Date();
       const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
       const hour = now.getHours();
-      let timeGreeting = "Good morning, Boss";
+      let timeGreeting = "Good morning, nj";
       let period = "morning";
       if (hour >= 12 && hour < 17) {
-        timeGreeting = "Good afternoon, Boss";
+        timeGreeting = "Good afternoon, nj";
         period = "afternoon";
       } else if (hour >= 17 && hour < 22) {
-        timeGreeting = "Good evening, Boss";
+        timeGreeting = "Good evening, nj";
         period = "evening";
       } else if (hour >= 22 || hour < 5) {
-        timeGreeting = "Good evening, Boss";
+        timeGreeting = "Good evening, nj";
         period = "tonight";
       }
 
@@ -830,7 +830,7 @@ export default function App() {
         `${timeGreeting}. S.N.O.W. is online and operational. What are we focusing on ${period === "tonight" ? "tonight" : `this ${period}`}?`,
         `${timeGreeting}. All local systems nominal and ready for your directives.`,
         `${timeGreeting}. S.N.O.W. is standing by — what's on your mind?`,
-        `Good ${period}, Boss. All telemetry is nominal. Ready for your next directive.`
+        `Good ${period}, nj. All telemetry is nominal. Ready for your next directive.`
       ];
       const selectedWelcome = welcomePool[Math.floor(Math.random() * welcomePool.length)];
 
