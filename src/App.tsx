@@ -23,7 +23,7 @@ import TacticalTelemetryHUD from "./components/TacticalTelemetryHUD";
 import HolographicMissionLog from "./components/HolographicMissionLog";
 import SnowfallBackground from "./components/SnowfallBackground";
 import { MemoryNode, CodeFile } from "./types";
-import FingerprintGate from "./components/FingerprintGate";
+import PasswordGate from "./components/PasswordGate";
 
 type WeatherType = "default" | "sunny" | "rain" | "cloudy" | "snow" | "storm";
 type ActiveTab = "hud" | "graph" | "vector" | "compiler" | "sandbox" | "models";
@@ -1760,10 +1760,10 @@ export default function App() {
 
   return (
     <>
-      {/* Biometric gate — shown until NJ's fingerprint is verified */}
+      {/* Password authentication gate — shown until access key is verified */}
       <AnimatePresence>
         {!isAuthenticated && (
-          <FingerprintGate onAuthenticated={handleAuthenticated} />
+          <PasswordGate onAuthenticated={handleAuthenticated} />
         )}
       </AnimatePresence>
 

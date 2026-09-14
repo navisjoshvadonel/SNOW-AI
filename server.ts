@@ -60,7 +60,7 @@ import { telemetryBridge } from "./services/telemetryBridge";
 import { workshopProfiles } from "./services/workshopProfiles";
 import { agentSwarm } from "./files claude/agentSwarm";
 import {
-  verifyFingerprint,
+  verifyPassword,
   verifyPasscode,
   issueSessionToken,
   validateSessionToken,
@@ -68,7 +68,7 @@ import {
   checkRateLimit,
   recordFailedAttempt,
   resetRateLimit,
-} from "./services/fingerprintAuth";
+} from "./services/authService";
 
 dotenv.config();
 
@@ -1280,92 +1280,75 @@ async function startServer() {
   });
 
   // ──────────────────────────────────────────────────────────────────────────
-  // BIOMETRIC AUTH ROUTES (public — gates the rest of the OS)
+  // PASSWORD AUTH ROUTES (public — gates the rest of the OS)
   // ──────────────────────────────────────────────────────────────────────────
 
-  /** Trigger fingerprint scan. Returns { token } on success, 403 on wrong finger, 429 on rate limit. */
-  app.post("/api/auth/fingerprint", async (req, res) => {
+  /** Password login endpoint. Accepts { password } or { passcode }. */
+  app.post("/api/auth/login", (req, res) => {
     const clientKey = (req.ip || "global");
-    const rateCheck = checkRateLimit("fingerprint", clientKey);
+    const rateCheck = checkRateLimit(clientKey);
     if (!rateCheck.allowed) {
-      console.warn(`[AUTH] Fingerprint rate limited for ${clientKey}. Retry in ${rateCheck.retryAfter}s`);
+      console.warn(`[AUTH] Login rate limited for ${clientKey}. Retry in ${rateCheck.retryAfter}s`);
       res.status(429).json({ success: false, error: "Too many attempts", retryAfter: rateCheck.retryAfter });
       return;
     }
 
-    console.log("[AUTH] Fingerprint verification requested");
-    const ac = new AbortController();
-    req.on("close", () => {
-      if (!res.writableEnded) {
-        console.log("[AUTH] Client disconnected during fingerprint scan — aborting");
-        ac.abort();
-      }
-    });
+    const { password, passcode } = req.body || {};
+    const inputPassword = password !== undefined ? password : passcode;
+    if (!inputPassword) {
+      res.status(400).json({ success: false, error: "Password required" });
+      return;
+    }
 
-    try {
-      const result = await verifyFingerprint(undefined, ac.signal);
-      if (result.matched) {
-        resetRateLimit("fingerprint", clientKey);
-        const token = issueSessionToken();
-        console.log("[AUTH] ✔ Fingerprint matched — session token issued");
-        res.json({ success: true, token, status: "matched" });
-      } else {
-        const failure = recordFailedAttempt("fingerprint", clientKey);
-        console.warn(`[AUTH] ✘ Fingerprint verification failed: ${result.status} (${result.message})`);
-        
-        if (result.status === "timeout") {
-          res.status(408).json({ success: false, status: "timeout", error: result.message });
-        } else if (result.status === "device_claimed") {
-          res.status(409).json({ success: false, status: "device_claimed", error: result.message });
-        } else if (result.status === "no_device") {
-          res.status(503).json({ success: false, status: "no_device", error: result.message });
-        } else if (result.status === "cancelled") {
-          res.status(499).json({ success: false, status: "cancelled", error: "Cancelled" });
-        } else {
-          res.status(403).json({
-            success: false,
-            status: "no_match",
-            error: failure.locked ? "Too many attempts. Locked." : "Fingerprint not recognized",
-            locked: failure.locked,
-            retryAfter: failure.retryAfter,
-          });
-        }
-      }
-    } catch (e: any) {
-      console.error("[AUTH] Fingerprint verification unhandled exception:", e.message);
-      res.status(500).json({ success: false, status: "error", error: "Sensor internal error" });
+    if (verifyPassword(String(inputPassword))) {
+      resetRateLimit(clientKey);
+      const token = issueSessionToken();
+      console.log("[AUTH] ✔ Password verified — session token issued");
+      res.json({ success: true, token });
+    } else {
+      const failure = recordFailedAttempt(clientKey);
+      console.warn(`[AUTH] ✘ Invalid password attempt from ${clientKey} (${failure.attemptsRemaining} remaining)`);
+      res.status(403).json({
+        success: false,
+        error: failure.locked ? "Too many failed attempts. Locked for 60 seconds." : "Invalid password",
+        locked: failure.locked,
+        retryAfter: failure.retryAfter,
+        attemptsRemaining: failure.attemptsRemaining,
+      });
     }
   });
 
-  /** Fallback: Master Passcode / PIN authentication with rate limiting. */
+  /** Backwards compatibility alias for /api/auth/passcode */
   app.post("/api/auth/passcode", (req, res) => {
     const clientKey = (req.ip || "global");
-    const rateCheck = checkRateLimit("passcode", clientKey);
+    const rateCheck = checkRateLimit(clientKey);
     if (!rateCheck.allowed) {
       console.warn(`[AUTH] Passcode rate limited for ${clientKey}. Retry in ${rateCheck.retryAfter}s`);
       res.status(429).json({ success: false, error: "Too many attempts", retryAfter: rateCheck.retryAfter });
       return;
     }
 
-    const { passcode } = req.body || {};
-    if (!passcode) {
+    const { passcode, password } = req.body || {};
+    const input = passcode !== undefined ? passcode : password;
+    if (!input) {
       res.status(400).json({ success: false, error: "Passcode required" });
       return;
     }
 
-    if (verifyPasscode(String(passcode))) {
-      resetRateLimit("passcode", clientKey);
-      const token = issueSessionToken(undefined, "passcode");
-      console.log("[AUTH] ✔ Master passcode verified — session token issued");
+    if (verifyPassword(String(input))) {
+      resetRateLimit(clientKey);
+      const token = issueSessionToken();
+      console.log("[AUTH] ✔ Passcode verified — session token issued");
       res.json({ success: true, token });
     } else {
-      const failure = recordFailedAttempt("passcode", clientKey);
-      console.warn("[AUTH] ✘ Invalid master passcode attempt");
+      const failure = recordFailedAttempt(clientKey);
+      console.warn(`[AUTH] ✘ Invalid passcode attempt from ${clientKey}`);
       res.status(403).json({
         success: false,
         error: failure.locked ? "Too many failed attempts. Locked for 60 seconds." : "Invalid passcode",
         locked: failure.locked,
         retryAfter: failure.retryAfter,
+        attemptsRemaining: failure.attemptsRemaining,
       });
     }
   });
