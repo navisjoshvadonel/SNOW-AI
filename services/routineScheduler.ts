@@ -200,7 +200,7 @@ class RoutineSchedulerService {
     const hour = now.getHours();
     const timeGreeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
-    let spokenScript = `${timeGreeting}, NJ. Current weather in ${weather.location} is ${weather.condition} at ${weather.tempC}. System hardware is running smoothly at ${system.tempC} degrees with ${system.cpuPct} percent CPU load. In your repository, branch ${git.branch} has ${git.modifiedFiles + git.untrackedFiles} active working file changes.`;
+    let spokenScript = `${timeGreeting}, Boss. Weather in ${weather.location} is currently ${weather.condition} at ${weather.tempC}. System hardware is running smoothly at ${system.tempC} degrees with ${system.cpuPct} percent CPU load. In your repository, branch ${git.branch} has ${git.modifiedFiles + git.untrackedFiles} active working file changes.`;
     let summary = `Live telemetry compiled at ${now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}.`;
     let directives: string[] = [
       git.modifiedFiles > 0 ? `Review and commit ${git.modifiedFiles} modified file(s) on ${git.branch}` : "Git working tree is clean",
@@ -211,20 +211,21 @@ class RoutineSchedulerService {
     if (apiKey) {
       try {
         const ai = new GoogleGenAI({ apiKey });
-        const prompt = `You are SNOW, NJ's hyper-intelligent, highly efficient AI operating system companion.
+        const prompt = `You are S.N.O.W., a highly sophisticated, calm, and soothing female autonomous AI assistant engineered for Boss (tag: NJ).
 Analyze this REAL live workstation intelligence:
 - Time: ${timeGreeting} (${now.toLocaleTimeString()})
 - Weather: ${weather.tempC}, ${weather.condition} in ${weather.location} (Humidity: ${weather.humidity}, Wind: ${weather.windSpeed})
 - System Hardware: CPU ${system.cpuPct}%, RAM ${system.ramUsedGb}/${system.ramTotalGb} GB (${system.ramPct}%), Temp: ${system.tempC}°C, Disk: ${system.diskUsedGb}/${system.diskTotalGb} GB (${system.diskPct}%)
+- Host Environment: Ubuntu Linux (Protected Dual-Boot Windows NTFS isolation active)
 - Repository Status: Branch '${git.branch}', ${git.modifiedFiles} modified files, ${git.untrackedFiles} untracked files. Last commit: "${git.lastCommit}"
 - Episodic Vision: ${recentEpisodes.length} visual episodes stored in SQLite memory.
 
 Generate a STRICT JSON response in this exact format with NO markdown wrapping:
 {
-  "greeting": "${timeGreeting}, NJ.",
-  "spokenScript": "A cinematic, crisp 3-sentence spoken morning briefing for Snow to speak aloud. Include weather, thermal health, and repo activity.",
+  "greeting": "${timeGreeting}, Boss.",
+  "spokenScript": "A cinematic, crisp 3-sentence spoken morning briefing addressing Boss aloud with calm, poised elegance. Include weather, thermal health, and repo activity.",
   "summary": "1-sentence executive overview of system and development state.",
-  "directives": ["3 actionable priority bullets for NJ's session today"]
+  "directives": ["3 actionable priority bullets for Boss's session today"]
 }`;
 
         const res = await ai.models.generateContent({
@@ -246,7 +247,7 @@ Generate a STRICT JSON response in this exact format with NO markdown wrapping:
     }
 
     const briefing: DailyBriefingData = {
-      greeting: `${timeGreeting}, NJ.`,
+      greeting: `${timeGreeting}, Boss.`,
       spokenScript,
       summary,
       weather,

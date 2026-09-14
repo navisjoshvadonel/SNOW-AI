@@ -77,7 +77,38 @@ launch_hud_window() {
   # Ensure microphone capture volume is optimal (>=85%) so Snow can hear voice
   wpctl set-volume @DEFAULT_AUDIO_SOURCE@ 0.85 2>/dev/null || amixer set Capture 85% 2>/dev/null || true
 
-  local APP_FLAGS="--app=$URL --user-data-dir=$HOME/.config/snow-hud-profile --class=SNOW --window-size=1260,820 --window-position=center --no-first-run --disable-sync --disable-translate --disable-features=Translate --autoplay-policy=no-user-gesture-required --use-fake-ui-for-media-stream"
+  # Determine proper user data directory (Snap Chromium requires paths inside ~/snap/chromium/common/)
+  local PROFILE_DIR="$HOME/.config/snow-hud-profile"
+  if [ -d "$HOME/snap/chromium/common" ] || [ -x "/snap/bin/chromium" ]; then
+    PROFILE_DIR="$HOME/snap/chromium/common/snow-hud-profile"
+  fi
+  # Ensure profile exists and configure dark theme + microphone/camera permissions
+  mkdir -p "$PROFILE_DIR/Default" 2>/dev/null || true
+  node -e '
+    const fs = require("fs");
+    const p = process.argv[1];
+    const port = process.argv[2];
+    let pref = {};
+    if (fs.existsSync(p)) {
+      try { pref = JSON.parse(fs.readFileSync(p, "utf8")); } catch (_) { pref = {}; }
+    }
+    pref.browser = pref.browser || {};
+    pref.browser.theme = pref.browser.theme || {};
+    pref.browser.theme.color_scheme = 2; // Dark Mode
+    pref.profile = pref.profile || {};
+    pref.profile.content_settings = pref.profile.content_settings || {};
+    pref.profile.content_settings.exceptions = pref.profile.content_settings.exceptions || {};
+    const exc = pref.profile.content_settings.exceptions;
+    for (const media of ["media_stream_mic", "media_stream_camera"]) {
+      exc[media] = exc[media] || {};
+      exc[media][`http://127.0.0.1:${port},*`] = { setting: 1 };
+      exc[media][`http://localhost:${port},*`] = { setting: 1 };
+    }
+    fs.writeFileSync(p, JSON.stringify(pref, null, 2));
+  ' "$PROFILE_DIR/Default/Preferences" "$PORT" 2>/dev/null || true
+
+  # Dark mode flags — matches HUD slate-950 theme, with no unsupported flags or infobars
+  local APP_FLAGS="--app=$URL --user-data-dir=$PROFILE_DIR --class=SNOW --window-size=1260,820 --window-position=center --no-first-run --no-default-browser-check --disable-sync --disable-translate --disable-features=Translate --autoplay-policy=no-user-gesture-required --force-dark-mode --enable-features=WebUIDarkMode"
 
   log "⚡ Summoning SNOW HUD window..."
   if [ -x "/snap/bin/chromium" ]; then

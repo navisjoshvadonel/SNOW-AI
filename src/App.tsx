@@ -813,24 +813,24 @@ export default function App() {
       const now = new Date();
       const timeStr = now.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
       const hour = now.getHours();
-      let timeGreeting = "Good morning, NJ";
+      let timeGreeting = "Good morning, Boss";
       let period = "morning";
       if (hour >= 12 && hour < 17) {
-        timeGreeting = "Good afternoon, NJ";
+        timeGreeting = "Good afternoon, Boss";
         period = "afternoon";
       } else if (hour >= 17 && hour < 22) {
-        timeGreeting = "Good evening, NJ";
+        timeGreeting = "Good evening, Boss";
         period = "evening";
       } else if (hour >= 22 || hour < 5) {
-        timeGreeting = "Good evening, NJ";
+        timeGreeting = "Good evening, Boss";
         period = "tonight";
       }
 
       const welcomePool = [
-        `${timeGreeting}. Snow is online and operational. What are we focusing on ${period === "tonight" ? "tonight" : `this ${period}`}?`,
+        `${timeGreeting}. S.N.O.W. is online and operational. What are we focusing on ${period === "tonight" ? "tonight" : `this ${period}`}?`,
         `${timeGreeting}. All local systems nominal and ready for your directives.`,
-        `${timeGreeting}. At your command — what's on your mind?`,
-        `Hey NJ, ${timeGreeting.toLowerCase()}. Ready for your next directive.`
+        `${timeGreeting}. S.N.O.W. is standing by — what's on your mind?`,
+        `Good ${period}, Boss. All telemetry is nominal. Ready for your next directive.`
       ];
       const selectedWelcome = welcomePool[Math.floor(Math.random() * welcomePool.length)];
 
@@ -1216,20 +1216,24 @@ export default function App() {
             lastSpeechTimestampRef.current = Date.now();
           }
 
-          // Smart silence detection: 950ms of sustained silence after speaking, or 5.5s safety cutoff
+          // Adaptive conversational silence detection:
+          // 1,800ms of sustained pause after speaking (or 2,400ms if ending on a connecting thought)
+          // Extended maximum speaking duration: 25,000ms (25 seconds) to allow complete thoughts without cutoff
           if (hasSpokenRef.current && lastSpeechTimestampRef.current > 0) {
             const silentDuration = Date.now() - lastSpeechTimestampRef.current;
             const totalSpeakingDuration = firstSpeechTimestampRef.current > 0 ? (Date.now() - firstSpeechTimestampRef.current) : 0;
+            const currentTranscript = accumulatedTranscriptRef.current.trim();
+            const endsWithConnector = /(?:and|or|then|but|if|because|like|with|also|to|for)\s*$/i.test(currentTranscript);
+            const silenceThreshold = endsWithConnector ? 2400 : 1800;
 
-            if (silentDuration > 950 || totalSpeakingDuration > 5500) {
+            if (silentDuration > silenceThreshold || totalSpeakingDuration > 25000) {
               hasSpokenRef.current = false;
               lastSpeechTimestampRef.current = 0;
               firstSpeechTimestampRef.current = 0;
 
               // Check if Web Speech transcript is already available
-              const webSpeechText = accumulatedTranscriptRef.current.trim();
-              if (webSpeechText) {
-                const toSubmit = webSpeechText;
+              if (currentTranscript) {
+                const toSubmit = currentTranscript;
                 stopSnowVoiceListening(true);
                 handleSendMessageRef.current(toSubmit);
                 return;
