@@ -35,7 +35,7 @@ wait_for_server() {
       log "✅ SNOW server ready (${ELAPSED}s)"
       return 0
     fi
-    sleep 0.5
+    sleep 1
     ELAPSED=$((ELAPSED + 1))
   done
   log "⚠️ Server did not respond within ${MAX_WAIT}s"

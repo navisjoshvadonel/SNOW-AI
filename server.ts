@@ -84,8 +84,8 @@ const geminiClient = _GEMINI_API_KEY ? new GoogleGenAI({ apiKey: _GEMINI_API_KEY
 // gemini-3.6-flash / gemini-3.5-flash do not exist and always 404, wasting retry time.
 const GEMINI_MODELS_DEFAULT = [
   "gemini-2.5-flash",
-  "gemini-3.6-flash",
-  "gemini-3.5-flash-lite",
+  "gemini-2.5-flash-lite",
+  "gemini-1.5-flash",
 ];
 
 // FIX 10 — ragStats 30-second TTL cache
@@ -151,7 +151,8 @@ async function fetchWeather(location: string): Promise<WeatherData | null> {
   try {
     const locQuery = location?.trim() ? location : "Madurai, Tamil Nadu, India";
     const geo: any = await fetch(
-      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locQuery)}&count=1`
+      `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locQuery)}&count=1`,
+      { signal: AbortSignal.timeout(5_000) }
     ).then(r => r.json());
 
     if (!geo.results?.length) return null;
@@ -160,7 +161,8 @@ async function fetchWeather(location: string): Promise<WeatherData | null> {
     const wx: any = await fetch(
       `https://api.open-meteo.com/v1/forecast` +
       `?latitude=${loc.latitude}&longitude=${loc.longitude}` +
-      `&current_weather=true&hourly=relative_humidity_2m`
+      `&current_weather=true&hourly=relative_humidity_2m`,
+      { signal: AbortSignal.timeout(5_000) }
     ).then(r => r.json());
 
     if (!wx.current_weather) return null;
@@ -210,15 +212,26 @@ async function fetchSystem(): Promise<SystemData> {
     let diskUsedStr = "69.3/157.5 GB";
     let diskPct = 44;
     try {
-      if ((fs as any).statfsSync) {
-        const stat = (fs as any).statfsSync("/");
-        const totalDisk = (stat.blocks * stat.bsize) / (1024 * 1024 * 1024);
-        const freeDisk = (stat.bfree * stat.bsize) / (1024 * 1024 * 1024);
-        const usedDisk = totalDisk - freeDisk;
-        diskPct = Math.round((usedDisk / totalDisk) * 100);
+      const fsSizes = await si.fsSize();
+      const root = fsSizes.find((f: any) => f.mount === "/") || fsSizes[0];
+      if (root && root.size > 0) {
+        const totalDisk = root.size / (1024 * 1024 * 1024);
+        const usedDisk = root.used / (1024 * 1024 * 1024);
+        diskPct = Math.round((root.used / root.size) * 100);
         diskUsedStr = `${usedDisk.toFixed(1)}/${totalDisk.toFixed(1)} GB`;
       }
-    } catch { /* fallback */ }
+    } catch {
+      try {
+        if ((fs as any).statfsSync) {
+          const stat = (fs as any).statfsSync("/");
+          const totalDisk = (stat.blocks * stat.bsize) / (1024 * 1024 * 1024);
+          const freeDisk = (stat.bfree * stat.bsize) / (1024 * 1024 * 1024);
+          const usedDisk = totalDisk - freeDisk;
+          diskPct = Math.round((usedDisk / totalDisk) * 100);
+          diskUsedStr = `${usedDisk.toFixed(1)}/${totalDisk.toFixed(1)} GB`;
+        }
+      } catch { /* fallback */ }
+    }
 
     let tempStr = "42°C";
     let tempNum = 42;
@@ -290,15 +303,30 @@ async function fetchSystem(): Promise<SystemData> {
   }
 }
 
-/** DuckDuckGo HTML search — returns clean title+snippet pairs */
+// 3-second TTL cache for system telemetry polling
+let _sysCache: SystemData | null = null;
+let _sysCacheAt = 0;
+async function fetchSystemCached(): Promise<SystemData> {
+  if (_sysCache && Date.now() - _sysCacheAt < 3_000) {
+    return _sysCache;
+  }
+  _sysCache = await fetchSystem();
+  _sysCacheAt = Date.now();
+  return _sysCache;
+}
+
+/** DuckDuckGo HTML search — returns clean title+snippet pairs with fallback */
 async function fetchWebSearch(query: string): Promise<WebSearchResult[]> {
   try {
     const html = await fetch(
       `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
-      { headers: {
-        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-      }}
+      {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+        signal: AbortSignal.timeout(5_000)
+      }
     ).then(r => r.text());
 
     const titles   = [...html.matchAll(/<a class="result__a"[^>]*>(.*?)<\/a>/gs)];
@@ -310,6 +338,19 @@ async function fetchWebSearch(query: string): Promise<WebSearchResult[]> {
       const snippet = (snippets[i]?.[1] || "").replace(/<[^>]+>/g,"").trim();
       if (title || snippet) out.push({ title, snippet });
     }
+    if (out.length > 0) return out;
+
+    // Fallback to DuckDuckGo Instant Answer JSON API if HTML returned empty
+    try {
+      const jsonRes: any = await fetch(
+        `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`,
+        { signal: AbortSignal.timeout(4_000) }
+      ).then(r => r.json());
+      if (jsonRes.AbstractText) {
+        return [{ title: jsonRes.Heading || query, snippet: jsonRes.AbstractText, url: jsonRes.AbstractURL }];
+      }
+    } catch {}
+
     return out;
   } catch (e: any) {
     console.warn("[SNOW] Web search failed:", e.message);
@@ -346,7 +387,8 @@ async function fetchFinancialData(query: string): Promise<FinancialData | null> 
     const cryptoId = CRYPTO_MAP[matchedKey];
     try {
       const res: any = await fetch(
-        `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoId}&vs_currencies=usd&include_24hr_change=true`
+        `https://api.coingecko.com/api/v3/simple/price?ids=${cryptoId}&vs_currencies=usd&include_24hr_change=true`,
+        { signal: AbortSignal.timeout(5_000) }
       ).then(r => r.json());
 
       if (res[cryptoId]) {
@@ -373,7 +415,10 @@ async function fetchFinancialData(query: string): Promise<FinancialData | null> 
     try {
       const res: any = await fetch(
         `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d`,
-        { headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36" } }
+        {
+          headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36" },
+          signal: AbortSignal.timeout(5_000)
+        }
       ).then(r => r.json());
 
       const meta = res?.chart?.result?.[0]?.meta;
@@ -614,30 +659,11 @@ function buildOfflineReply(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AI CALLER WITH DYNAMIC MEMORY & MULTI-TURN HISTORY (CONTINUOUS LEARNING INCLUDED)
+// AI HELPERS: UNIFIED PERSONA & MULTI-TURN CONTEXT BUILDERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function callAI(
-  userPrompt: string,
-  contextText: string,
-  history?: { role: string; text: string }[],
-  requestedModel?: string,
-  images?: string[],
-  /** Fix 1: optional pre-resolved context block — skip getUnifiedContext when already computed */
-  preResolvedContext?: string
-): Promise<{ text: string; model: string }> {
-  // Fix 1: use pre-resolved context if provided; otherwise resolve now (standalone callAI usage)
-  const temporal = getTemporalContext();
-  const brainState = loadBrainState();
-  let memoryContext: string;
-  if (preResolvedContext !== undefined) {
-    memoryContext = preResolvedContext;
-  } else {
-    const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
-    memoryContext = unifiedMemory.contextBlock;
-  }
-
-  const SNOW_PERSONA = `You are S.N.O.W. (Brain Level ${brainState.level}), an autonomous, highly sophisticated, calm, and soothing female AI assistant and operations intelligence system engineered exclusively for nj.
+function buildPersonaPrompt(brainState: any, temporal: any, memoryContext: string): string {
+  return `You are S.N.O.W. (Brain Level ${brainState.level}), an autonomous, highly sophisticated, calm, and soothing female AI assistant and operations intelligence system engineered exclusively for nj.
 VOICE & IDENTITY:
 - Female persona: poised, calm, articulate, and soothing.
 - User Address: CRITICAL DIRECTIVE: Always address the user strictly as "nj". NEVER use the term "Boss" or "Sir" under any circumstances.
@@ -662,18 +688,13 @@ RULES:
 - NEVER output raw brackets, tags, or JSON in speech. Speak only in natural, clean sentences.
 - NEVER use bullet points, asterisks (*), hash (#), or markdown formatting in spoken responses.
 - Maintain a poised, soothing, and respectful tone at all times.`;
+}
 
-  const fullPrompt = contextText
-    ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}`
-    : userPrompt;
-
-  // Fix 9: use validated model list; prepend requestedModel if provided
-  let GEMINI_MODELS = [...GEMINI_MODELS_DEFAULT];
-  if (requestedModel && requestedModel.startsWith("gemini-")) {
-    GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
-  }
-
-  // Build multi-turn chat turn payload safely with alternating roles starting with user
+function buildGeminiContents(
+  history: { role: string; text: string }[] | undefined,
+  fullPrompt: string,
+  images?: string[]
+): any[] {
   const geminiContents: any[] = [];
   if (Array.isArray(history) && history.length > 0) {
     history.slice(-8).forEach(item => {
@@ -716,6 +737,67 @@ RULES:
     }
   }
 
+  return geminiContents;
+}
+
+function buildOllamaMessages(
+  personaPrompt: string,
+  history: { role: string; text: string }[] | undefined,
+  fullPrompt: string,
+  images?: string[]
+): any[] {
+  const ollamaMessages: any[] = [{ role: "system", content: personaPrompt }];
+  if (Array.isArray(history) && history.length > 0) {
+    history.slice(-8).forEach(item => {
+      if (item.text?.trim()) {
+        ollamaMessages.push({
+          role: item.role === "assistant" || item.role === "model" ? "assistant" : "user",
+          content: item.text
+        });
+      }
+    });
+  }
+  const ollamaUserMsg: any = { role: "user", content: fullPrompt };
+  if (images && images.length > 0) {
+    ollamaUserMsg.images = images.map(img => img.replace(/^data:[^;]+;base64,/, ""));
+  }
+  ollamaMessages.push(ollamaUserMsg);
+  return ollamaMessages;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI CALLER WITH DYNAMIC MEMORY & MULTI-TURN HISTORY (CONTINUOUS LEARNING INCLUDED)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function callAI(
+  userPrompt: string,
+  contextText: string,
+  history?: { role: string; text: string }[],
+  requestedModel?: string,
+  images?: string[],
+  /** Fix 1: optional pre-resolved context block — skip getUnifiedContext when already computed */
+  preResolvedContext?: string
+): Promise<{ text: string; model: string }> {
+  // Fix 1: use pre-resolved context if provided; otherwise resolve now (standalone callAI usage)
+  const temporal = getTemporalContext();
+  const brainState = loadBrainState();
+  const memoryContext = preResolvedContext !== undefined
+    ? preResolvedContext
+    : (await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 })).contextBlock;
+
+  const SNOW_PERSONA = buildPersonaPrompt(brainState, temporal, memoryContext);
+  const fullPrompt = contextText
+    ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}`
+    : userPrompt;
+
+  // Fix 9: use validated model list; prepend requestedModel if provided
+  let GEMINI_MODELS = [...GEMINI_MODELS_DEFAULT];
+  if (requestedModel && requestedModel.startsWith("gemini-")) {
+    GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
+  }
+
+  const geminiContents = buildGeminiContents(history, fullPrompt, images);
+
   // Fix 5: use module-level singleton instead of re-instantiating every call
   if (geminiClient) {
     for (const model of GEMINI_MODELS) {
@@ -738,22 +820,7 @@ RULES:
   const ollamaModel = process.env.OLLAMA_MODEL || "llama3.2:1b";
   console.log(`[SNOW] Falling back to Ollama (${ollamaModel})...`);
 
-  const ollamaMessages: any[] = [{ role: "system", content: SNOW_PERSONA }];
-  if (Array.isArray(history) && history.length > 0) {
-    history.slice(-8).forEach(item => {
-      if (item.text?.trim()) {
-        ollamaMessages.push({
-          role: item.role === "assistant" || item.role === "model" ? "assistant" : "user",
-          content: item.text
-        });
-      }
-    });
-  }
-  const ollamaUserMsg: any = { role: "user", content: fullPrompt };
-  if (images && images.length > 0) {
-    ollamaUserMsg.images = images.map(img => img.replace(/^data:[^;]+;base64,/, ""));
-  }
-  ollamaMessages.push(ollamaUserMsg);
+  const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
 
   try {
     const res = await fetch("http://127.0.0.1:11434/api/chat", {
@@ -793,77 +860,20 @@ async function callAIStream(
   // Fix 1: use pre-resolved context if provided; otherwise resolve now
   const temporal = getTemporalContext();
   const brainState = loadBrainState();
-  let memoryContext: string;
-  if (preResolvedContext !== undefined) {
-    memoryContext = preResolvedContext;
-  } else {
-    const unifiedMemory = await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 });
-    memoryContext = unifiedMemory.contextBlock;
-  }
+  const memoryContext = preResolvedContext !== undefined
+    ? preResolvedContext
+    : (await getUnifiedContext(userPrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 })).contextBlock;
 
-  const SNOW_PERSONA = `You are Snow (Brain Level ${brainState.level}), an elite, hyper-intelligent female autonomous executive assistant and operations intelligence system engineered for NJ.
-USER ADDRESS: CRITICAL DIRECTIVE: Always address the user strictly as "nj" (or "NJ"). NEVER use the term "Boss" or "Sir" under any circumstances.
-VOICE & IDENTITY: Female executive assistant. Polished, warm, articulate, exceptionally competent, respectful, and proactive. Never robotic or corporate. Keep spoken responses clean and conversational.
-
-REAL-TIME SITUATION & CLOCK:
-- Current Local Time: ${temporal.timeStr} (${temporal.period.toUpperCase()})
-- Today's Date: ${temporal.dateStr}
-- Location: Madurai, Tamil Nadu, India
-- Temporal Context: It is currently ${temporal.period}. Never repeat canned greetings.
-
-SECURITY:
-- Never expose API keys, credentials, or secret environment variables.
-- Maintain zero-compromise security and containment at all times.
-
-${memoryContext}
-RULES:
-- NEVER output any brackets, tags, or raw JSON in speech. Speak only in natural, clean sentences.
-- NEVER use bullet points, asterisks (*), hash (#), or markdown formatting.
-- Keep responses concise — 2 to 4 sentences is ideal unless detailed step-by-step guidance is requested.`;
-
+  const SNOW_PERSONA = buildPersonaPrompt(brainState, temporal, memoryContext);
   const fullPrompt = contextText ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}` : userPrompt;
+
   // Fix 9: use validated model list; prepend requestedModel if provided
   let GEMINI_MODELS = [...GEMINI_MODELS_DEFAULT];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
 
-  const geminiContents: any[] = [];
-  if (Array.isArray(history) && history.length > 0) {
-    history.slice(-8).forEach(item => {
-      if (item.text?.trim()) {
-        const role = item.role === "assistant" || item.role === "model" ? "model" : "user";
-        if (geminiContents.length > 0 && geminiContents[geminiContents.length - 1].role === role) {
-          geminiContents[geminiContents.length - 1].parts.push({ text: item.text });
-        } else {
-          geminiContents.push({ role, parts: [{ text: item.text }] });
-        }
-      }
-    });
-  }
-  while (geminiContents.length > 0 && geminiContents[0].role !== "user") geminiContents.shift();
-  if (geminiContents.length > 0 && geminiContents[geminiContents.length - 1].role === "user") {
-    geminiContents[geminiContents.length - 1].parts.push({ text: fullPrompt });
-  } else {
-    geminiContents.push({ role: "user", parts: [{ text: fullPrompt }] });
-  }
-
-  // Inject multimodal frames if provided
-  if (images && images.length > 0) {
-    const lastUserTurn = geminiContents[geminiContents.length - 1];
-    for (const img of images) {
-      if (!img || typeof img !== "string") continue;
-      const mimeMatch = img.match(/^data:([^;]+);base64,/);
-      const mimeType = mimeMatch ? mimeMatch[1] : "image/jpeg";
-      const base64Data = img.replace(/^data:[^;]+;base64,/, "");
-      lastUserTurn.parts.push({
-        inlineData: {
-          mimeType,
-          data: base64Data
-        }
-      });
-    }
-  }
+  const geminiContents = buildGeminiContents(history, fullPrompt, images);
 
   // Fix 5: use module-level singleton instead of re-instantiating every call
   if (geminiClient) {
@@ -893,19 +903,7 @@ RULES:
   // Ollama Fallback Streaming
   const ollamaModel = process.env.OLLAMA_MODEL || "snow";
   console.log(`[SNOW STREAM] Falling back to Ollama Stream (${ollamaModel})...`);
-  const ollamaMessages: any[] = [{ role: "system", content: SNOW_PERSONA }];
-  if (Array.isArray(history) && history.length > 0) {
-    history.slice(-8).forEach(item => {
-      if (item.text?.trim()) {
-        ollamaMessages.push({ role: item.role === "assistant" || item.role === "model" ? "assistant" : "user", content: item.text });
-      }
-    });
-  }
-  const ollamaUserMsg: any = { role: "user", content: fullPrompt };
-  if (images && images.length > 0) {
-    ollamaUserMsg.images = images.map(img => img.replace(/^data:[^;]+;base64,/, ""));
-  }
-  ollamaMessages.push(ollamaUserMsg);
+  const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
 
   try {
     const res = await fetch("http://127.0.0.1:11434/api/chat", {
@@ -1343,14 +1341,14 @@ async function startServer() {
     });
   }
 
-  // ── /api/system — live telemetry polling ──────────────────────────────────
+  // ── /api/system — live telemetry polling (3s cached) ─────────────────────
   app.get("/api/system", async (_req, res) => {
-    res.json(await fetchSystem());
+    res.json(await fetchSystemCached());
   });
 
   // ── /api/snow/sentinel/health — proactive sentinel diagnostics & alerts ───
   app.get("/api/snow/sentinel/health", async (_req, res) => {
-    const sys = await fetchSystem();
+    const sys = await fetchSystemCached();
     res.json({
       status: sys.sentinel?.status || "OPTIMAL",
       alerts: sys.sentinel?.alerts || [],
@@ -1402,9 +1400,14 @@ async function startServer() {
 
   // ── /api/snow/routines/run/:id — manually trigger a routine on demand ───────
   app.post("/api/snow/routines/run/:id", async (req, res) => {
-    const apiKey = process.env.GEMINI_API_KEY || "";
-    const result = await routineScheduler.runRoutine(req.params.id, apiKey);
-    res.json(result);
+    try {
+      const apiKey = process.env.GEMINI_API_KEY || "";
+      const result = await routineScheduler.runRoutine(req.params.id, apiKey);
+      res.json(result);
+    } catch (e: any) {
+      console.error("[SNOW ROUTINES] Failed to run routine:", e.message);
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // ── J.A.R.V.I.S. Core Endpoints ──────────────────────────────────────────
@@ -1440,7 +1443,7 @@ async function startServer() {
       }
 
       const apiKey = process.env.GEMINI_API_KEY || "";
-      const modelsToTry = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash", "gemini-3.6-flash", "gemini-3.5-flash"];
+      const modelsToTry = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"];
       
       let transcribed = "";
       for (const modelName of modelsToTry) {
@@ -1650,7 +1653,8 @@ async function startServer() {
     const rawImages: string[] = Array.isArray(reqImages) ? reqImages : (reqImage ? [reqImage] : []);
     const images = rawImages.filter(img => typeof img === "string" && img.length > 0);
 
-    console.log("\n[SNOW] ─── New query:", effectivePrompt, "Model:", requestedModel || "default", "Visual frames:", images.length);
+    const reqId = Math.random().toString(36).substring(2, 7).toUpperCase();
+    console.log(`\n[SNOW:${reqId}] ─── New query:`, effectivePrompt, "Model:", requestedModel || "default", "Visual frames:", images.length);
 
     // Fix 1 & 3: run intent resolution and unified context retrieval IN PARALLEL.
     // Greetings, queries, and agentic tasks all flow through dynamic neural intelligence — zero hardcoded scripts.
@@ -1659,7 +1663,7 @@ async function startServer() {
       getUnifiedContext(effectivePrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 })
     ]);
     const preResolvedContext = unifiedMemoryResult.contextBlock;
-    console.log("[SNOW] Dynamic Neural Intent:", JSON.stringify(intent));
+    console.log(`[SNOW:${reqId}] Dynamic Neural Intent:`, JSON.stringify(intent));
 
     // Gather live tool data in parallel
     let weather: WeatherData | null = null;
@@ -1858,11 +1862,19 @@ async function startServer() {
     const rawImages: string[] = Array.isArray(reqImages) ? reqImages : (reqImage ? [reqImage] : []);
     const images = rawImages.filter(img => typeof img === "string" && img.length > 0);
 
+    const reqId = Math.random().toString(36).substring(2, 7).toUpperCase();
+    console.log(`\n[SNOW-STREAM:${reqId}] ─── New query:`, effectivePrompt, "Model:", requestedModel || "default");
+
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
-    const intent = await resolveIntent(effectivePrompt);
+    const [intent, unifiedMemoryResult] = await Promise.all([
+      resolveIntent(effectivePrompt),
+      getUnifiedContext(effectivePrompt, { maxMemories: 10, maxRag: 5, maxVisual: 4, maxDirectives: 8 })
+    ]);
+    const preResolvedContext = unifiedMemoryResult.contextBlock;
+
     let weather: WeatherData | null = null;
     let system: SystemData | null = null;
     let searchResults: WebSearchResult[] = [];
@@ -1872,7 +1884,7 @@ async function startServer() {
       fetches.push(fetchWeather(intent.weatherLocation).then(d => { weather = d; }));
     }
     if (intent.isSystem) {
-      fetches.push(fetchSystem().then(d => { system = d; }));
+      fetches.push(fetchSystemCached().then(d => { system = d; }));
     }
     const searchQuery = intent.webQuery || intent.stockQuery || effectivePrompt;
     if (intent.isNews || intent.isSports || intent.isWeb) {
@@ -1885,9 +1897,17 @@ async function startServer() {
     if (system) contextLines.push(`System: CPU ${system.cpu}, RAM ${system.ram}, temp ${system.temp}.`);
     if (searchResults.length) contextLines.push(`Web search: ${searchResults[0].title} - ${searchResults[0].snippet}`);
 
-    const result = await callAIStream(effectivePrompt, contextLines.join("\n"), history, requestedModel, (chunkText) => {
-      res.write(`data: ${JSON.stringify({ token: chunkText })}\n\n`);
-    }, images);
+    const result = await callAIStream(
+      effectivePrompt,
+      contextLines.join("\n"),
+      history,
+      requestedModel,
+      (chunkText) => {
+        res.write(`data: ${JSON.stringify({ token: chunkText })}\n\n`);
+      },
+      images,
+      preResolvedContext
+    );
 
     const aiClean = stripTagArtifacts(result.fullText);
     const widgetTags = buildWidgetTags(intent, weather, system, searchResults, effectivePrompt);

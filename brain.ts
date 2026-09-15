@@ -612,8 +612,45 @@ export function recordFeedback(prompt: string, response: string, feedback: "thum
 // DYNAMIC NEURAL INTENT RESOLVER (NO BRITTLE HARDCODED REGEXES!)
 // ─────────────────────────────────────────────────────────────────────────────
 
+let _brainGenAI: GoogleGenAI | null = null;
+function getBrainGenAI(apiKey: string): GoogleGenAI {
+  if (!_brainGenAI) {
+    _brainGenAI = new GoogleGenAI({ apiKey });
+  }
+  return _brainGenAI;
+}
+
 export async function resolveIntent(prompt: string): Promise<ResolvedIntent> {
   const pLower = prompt.toLowerCase().trim();
+
+  // Fast-track common high-confidence intents to skip 500-1000ms LLM classification roundtrip
+  const isHighConfidenceTime = /^(?:what(?:\s+is|\x27s)?\s+(?:the\s+)?(?:time|date)|current\s+(?:time|date)|what\s+time\s+is\s+it|what\s+day\s+is\s+(?:it|today)|today\x27s\s+date|tell\s+me\s+the\s+time)[.!?\s]*$/i.test(pLower);
+  if (isHighConfidenceTime) {
+    return {
+      isTime: true, isWeather: false, isSystem: false, isStock: false,
+      isNews: false, isSports: false, isJoke: false, isMusic: false,
+      isWeb: false, isTrainRequest: false
+    };
+  }
+
+  const isHighConfidenceSystem = /^(?:(?:system|hardware|pc|cpu|ram|memory|battery|disk|specs|performance)\s*(?:status|stats|info|health|load|usage)?|how(?:\s+is|\x27s)\s+the\s+system)[.!?\s]*$/i.test(pLower);
+  if (isHighConfidenceSystem) {
+    return {
+      isSystem: true, isWeather: false, isStock: false, isNews: false,
+      isSports: false, isTime: false, isJoke: false, isMusic: false,
+      isWeb: false, isTrainRequest: false
+    };
+  }
+
+  const isHighConfidenceWeather = /^(?:what(?:\s+is|\x27s)?\s+(?:the\s+)?weather(?:\s+(?:like|today|forecast))?|weather\s+report|how(?:\s+is|\x27s)\s+the\s+weather)[.!?\s]*$/i.test(pLower);
+  if (isHighConfidenceWeather) {
+    return {
+      isWeather: true, weatherLocation: "Madurai, Tamil Nadu, India",
+      isSystem: false, isStock: false, isNews: false, isSports: false,
+      isTime: false, isJoke: false, isMusic: false, isWeb: false,
+      isTrainRequest: false
+    };
+  }
 
   // Fast-track simple greetings, casual talk, and wake calls without burning Gemini API quota
   const isSimpleGreetingOrChat = /^(?:hello|hi|hey|yo|sup|greetings|howdy|good\s+(?:morning|afternoon|evening|night)|who are you|what is your name|are you there|snow|jarvis)[.!?\s]*$/i.test(pLower);
@@ -622,7 +659,7 @@ export async function resolveIntent(prompt: string): Promise<ResolvedIntent> {
   const apiKey = process.env.GEMINI_API_KEY || "";
   if (apiKey && !isSimpleGreetingOrChat) {
     try {
-      const ai = new GoogleGenAI({ apiKey });
+      const ai = getBrainGenAI(apiKey);
       const systemInstruction = `You are a dynamic neural intent parser for Snow OS. Analyze the user input and extract intents and slots in JSON format.
 Return ONLY valid JSON matching this schema:
 {

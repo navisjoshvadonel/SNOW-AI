@@ -11,11 +11,34 @@
 import jwt from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
 import crypto from "crypto";
+import fs from "fs";
+import path from "path";
 
 // ─── JWT Secret & Config ──────────────────────────────────────────────────────
-const JWT_SECRET =
-  process.env.SNOW_AUTH_SECRET ||
-  crypto.randomBytes(48).toString("hex");
+function getOrGenerateJwtSecret(): string {
+  if (process.env.SNOW_AUTH_SECRET) {
+    return process.env.SNOW_AUTH_SECRET;
+  }
+  const secretFile = path.join(process.cwd(), "data", ".snow_secret");
+  try {
+    if (fs.existsSync(secretFile)) {
+      const saved = fs.readFileSync(secretFile, "utf-8").trim();
+      if (saved.length >= 32) return saved;
+    }
+    const generated = crypto.randomBytes(48).toString("hex");
+    const dataDir = path.dirname(secretFile);
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+    fs.writeFileSync(secretFile, generated, { encoding: "utf-8", mode: 0o600 });
+    return generated;
+  } catch (e: any) {
+    console.warn("[SNOW AUTH] Failed to persist JWT secret to disk, using in-memory secret:", e.message);
+    return crypto.randomBytes(48).toString("hex");
+  }
+}
+
+const JWT_SECRET = getOrGenerateJwtSecret();
 
 const AUTHORIZED_USER = process.env.SNOW_AUTH_USER || process.env.USER || "snowjd";
 const MASTER_PASSWORD = process.env.SNOW_AUTH_PASSWORD || process.env.SNOW_AUTH_PIN || "2026";

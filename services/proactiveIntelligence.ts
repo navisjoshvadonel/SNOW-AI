@@ -68,7 +68,7 @@ class ProactiveIntelligenceService {
 
       // 2. Autonomous TypeScript / Lint Verification
       try {
-        const { stderr: lintErr } = await execAsync("npm run lint", { cwd: WORKSPACE_DIR });
+        const { stderr: lintErr } = await execAsync("npm run lint", { cwd: WORKSPACE_DIR, timeout: 15_000 });
         if (!lintErr || !lintErr.includes("error TS")) {
           newInsights.push({
             id: `tsc-${Date.now()}`,

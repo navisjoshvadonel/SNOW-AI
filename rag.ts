@@ -28,6 +28,14 @@ export const EMBED_DIM = 768; // Standard 768-dim vector space for both Ollama &
 const EMBEDDING_CACHE = new Map<string, number[]>();
 const MAX_CACHE_ENTRIES = 500;
 
+let _geminiAi: GoogleGenAI | null = null;
+function getGeminiAi(): GoogleGenAI | null {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) return null;
+  if (!_geminiAi) _geminiAi = new GoogleGenAI({ apiKey: key });
+  return _geminiAi;
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface RagChunk {
@@ -205,9 +213,12 @@ export async function embedText(text: string): Promise<number[]> {
   const clean = text.trim();
   if (!clean) return new Array(EMBED_DIM).fill(0);
 
-  // Check cache
+  // Check cache (LRU: re-insert on hit to maintain access order)
   if (EMBEDDING_CACHE.has(clean)) {
-    return EMBEDDING_CACHE.get(clean)!;
+    const cached = EMBEDDING_CACHE.get(clean)!;
+    EMBEDDING_CACHE.delete(clean);
+    EMBEDDING_CACHE.set(clean, cached);
+    return cached;
   }
 
   let resultVec: number[] | null = null;
@@ -233,14 +244,16 @@ export async function embedText(text: string): Promise<number[]> {
   // 2. Try Gemini API (Cloud) if Ollama is not active
   if (!resultVec && process.env.GEMINI_API_KEY) {
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-      const res: any = await ai.models.embedContent({
-        model: "text-embedding-004",
-        contents: [{ parts: [{ text: clean }] }]
-      });
-      const values = res.embedding?.values || res.embeddings?.[0]?.values;
-      if (Array.isArray(values) && values.length > 0) {
-        resultVec = values;
+      const ai = getGeminiAi();
+      if (ai) {
+        const res: any = await ai.models.embedContent({
+          model: "text-embedding-004",
+          contents: [{ parts: [{ text: clean }] }]
+        });
+        const values = res.embedding?.values || res.embeddings?.[0]?.values;
+        if (Array.isArray(values) && values.length > 0) {
+          resultVec = values;
+        }
       }
     } catch {}
   }
@@ -250,10 +263,10 @@ export async function embedText(text: string): Promise<number[]> {
     resultVec = offlineEmbed(clean);
   }
 
-  // Cache normalized vector
+  // Cache normalized vector with LRU eviction
   if (EMBEDDING_CACHE.size >= MAX_CACHE_ENTRIES) {
     const firstKey = EMBEDDING_CACHE.keys().next().value;
-    if (firstKey) EMBEDDING_CACHE.delete(firstKey);
+    if (firstKey !== undefined) EMBEDDING_CACHE.delete(firstKey);
   }
   EMBEDDING_CACHE.set(clean, resultVec);
 
