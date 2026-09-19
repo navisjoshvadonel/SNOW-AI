@@ -37,8 +37,13 @@ import {
   getAutonomousGoals,
   getGoalWithSubtasks,
   updateGoalStatus,
-  deleteAutonomousGoal
+  deleteAutonomousGoal,
+  addEpisodicMemory,
+  getConsolidationLogs,
+  getMemoryHealthSnapshot,
+  purgeConsolidatedEpisodes,
 } from "../brain.js";
+import { dreamCycle } from "../services/dreamCycle.js";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -1818,6 +1823,97 @@ export const GoalManagerTool: ToolDefinition<GoalManagerInput> = {
 
 // ─── Registry builder ─────────────────────────────────────────────────────────
 
+// ─── MemoryConsolidationTool ─────────────────────────────────────────────────
+// Phase 4: Expose dream cycle operations to the agent core
+
+type MemoryConsolidationAction =
+  | "status"        // Get dream cycle + memory health status
+  | "trigger_dream" // Manually trigger a dream consolidation cycle
+  | "add_episode"   // Record a raw episodic memory
+  | "get_logs"      // Get consolidation activity logs
+  | "purge_old";    // Purge old consolidated episodes
+
+interface MemoryConsolidationInput {
+  action: MemoryConsolidationAction;
+  content?: string;     // For add_episode
+  context?: string;     // For add_episode
+  olderThanDays?: number; // For purge_old
+}
+
+export const MemoryConsolidationTool: ToolDefinition<MemoryConsolidationInput> = {
+  name: "MemoryConsolidation",
+  description: [
+    "Controls Snow's Tri-Tier Memory Consolidation & Dream Cycle (Phase 4).",
+    "Actions:",
+    "  status       — Show dream daemon status and memory health snapshot.",
+    "  trigger_dream — Manually force a consolidation dream cycle now.",
+    "  add_episode  — Record a raw episodic memory for later consolidation (requires content).",
+    "  get_logs     — Retrieve recent dream cycle activity logs.",
+    "  purge_old    — Purge consolidated episode records older than N days (default: 7).",
+  ].join("\n"),
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["status", "trigger_dream", "add_episode", "get_logs", "purge_old"],
+        description: "The consolidation action to perform."
+      },
+      content: { type: "string", description: "Episodic memory content (for add_episode)." },
+      context: { type: "string", description: "Domain context tag: chat, goal, vision, code (for add_episode)." },
+      olderThanDays: { type: "number", description: "Purge episodes older than this many days (for purge_old, default 7)." },
+    },
+    required: ["action"]
+  },
+
+  async *execute(input: MemoryConsolidationInput, _ctx: ToolUseContext) {
+    yield { type: "progress" as const, data: null, label: `MemoryConsolidation: ${input.action}` };
+    const { action } = input;
+
+    try {
+      if (action === "status") {
+        const daemonStatus = dreamCycle.getStatus();
+        const memHealth = getMemoryHealthSnapshot();
+        const report = { dreamDaemon: daemonStatus, memoryHealth: memHealth };
+        return { content: JSON.stringify(report, null, 2), isError: false };
+      }
+
+      if (action === "trigger_dream") {
+        const apiKey = process.env.GEMINI_API_KEY || "";
+        const result = await dreamCycle.triggerNow(apiKey);
+        return {
+          content: `🌙 Dream cycle complete: +${result.consolidated} consolidated, -${result.decayed} decayed, ~${result.resolved} resolved.`,
+          isError: false
+        };
+      }
+
+      if (action === "add_episode") {
+        if (!input.content) return { content: "Error: content is required for add_episode.", isError: true };
+        const ep = addEpisodicMemory(input.content, "episodic", input.context);
+        return { content: `Episodic memory recorded: ${ep.id}`, isError: false };
+      }
+
+      if (action === "get_logs") {
+        const logs = getConsolidationLogs(20);
+        return { content: JSON.stringify(logs, null, 2), isError: false };
+      }
+
+      if (action === "purge_old") {
+        const days = input.olderThanDays ?? 7;
+        const count = purgeConsolidatedEpisodes(days);
+        return { content: `Purged ${count} consolidated episode record(s) older than ${days} days.`, isError: false };
+      }
+
+      return { content: `Unknown action: ${action}`, isError: true };
+    } catch (err: any) {
+      return { content: `MemoryConsolidation error: ${err.message}`, isError: true };
+    }
+  }
+};
+
+
+
+
 export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>> {
   const registry = new Map<string, ToolDefinition<unknown>>();
   for (const tool of [
@@ -1826,7 +1922,7 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
     SystemTelemetryTool, MemoryStoreTool, AppLauncherTool, MediaControlTool,
     PythonSandboxTool, ClipboardTool, NotificationTool, ProcessManagerTool,
     ServiceManagerTool, GitManagerTool, ComputerUseTool, LinuxSystemTool,
-    SkillSynthesizerTool, GoalManagerTool
+    SkillSynthesizerTool, GoalManagerTool, MemoryConsolidationTool
   ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }

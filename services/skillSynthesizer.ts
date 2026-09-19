@@ -17,7 +17,7 @@ import {
   deleteSynthesizedSkill,
   SynthesizedSkill
 } from "../brain";
-import type { ToolDefinition } from "../files claude/types";
+import type { ToolDefinition } from "../agent_core/types";
 
 const SKILLS_DIR = path.join(process.cwd(), "data", "skills");
 

@@ -48,6 +48,7 @@ export {
   LinuxSystemTool,
   SkillSynthesizerTool,
   GoalManagerTool,
+  MemoryConsolidationTool,
   createDefaultToolRegistry,
 } from "./builtins.js";
 

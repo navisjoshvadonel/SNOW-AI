@@ -52,8 +52,8 @@ import {
   ragClear,
   ragLoadAll,
 } from "./rag.js";
-import { connectMcpServers } from "./files claude/McpClient.ts";
-import { createAgent, Message } from "./files claude/index.ts";
+import { connectMcpServers } from "./agent_core/McpClient.ts";
+import { createAgent, Message } from "./agent_core/index.ts";
 import { exportFineTuningDatasets } from "./dataset_exporter";
 import { routineScheduler } from "./services/routineScheduler";
 import { desktopActuator } from "./services/desktopActuator";
@@ -66,10 +66,11 @@ import { cleanSlateProtocol } from "./services/cleanSlateProtocol";
 import { audioSynthesis } from "./services/audioSynthesis";
 import { telemetryBridge } from "./services/telemetryBridge";
 import { workshopProfiles } from "./services/workshopProfiles";
-import { agentSwarm } from "./files claude/agentSwarm";
+import { agentSwarm } from "./agent_core/agentSwarm";
 import { reflexionEngine } from "./services/reflexionEngine";
 import { skillSynthesizer } from "./services/skillSynthesizer";
 import { goalEngine } from "./services/goalEngine";
+import { dreamCycle } from "./services/dreamCycle";
 import {
   verifyPassword,
   verifyPasscode,
@@ -1772,6 +1773,46 @@ async function startServer() {
     res.json({ success: deleted });
   });
 
+  // ── /api/snow/memory — Phase 4: Memory & Dream Cycle REST API ─────────
+  app.get("/api/snow/memory/status", (_req, res) => {
+    const { getMemoryHealthSnapshot } = require("./brain");
+    res.json({
+      dreamDaemon: dreamCycle.getStatus(),
+      memoryHealth: getMemoryHealthSnapshot()
+    });
+  });
+
+  app.post("/api/snow/memory/dream", async (_req, res) => {
+    const apiKey = process.env.GEMINI_API_KEY || "";
+    try {
+      const result = await dreamCycle.triggerNow(apiKey);
+      res.json({ success: true, ...result });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get("/api/snow/memory/logs", (_req, res) => {
+    const { getConsolidationLogs } = require("./brain");
+    const logs = getConsolidationLogs(30);
+    res.json({ logs, count: logs.length });
+  });
+
+  app.post("/api/snow/memory/episode", (req, res) => {
+    const { addEpisodicMemory } = require("./brain");
+    const { content, context } = req.body;
+    if (!content) return res.status(400).json({ error: "content is required" });
+    const ep = addEpisodicMemory(content, "episodic", context);
+    res.json({ success: true, episode: ep });
+  });
+
+  app.delete("/api/snow/memory/purge", (req, res) => {
+    const { purgeConsolidatedEpisodes } = require("./brain");
+    const days = parseInt(req.query.days as string || "7", 10);
+    const count = purgeConsolidatedEpisodes(days);
+    res.json({ success: true, purged: count });
+  });
+
   // ── /api/snow/chat — main AI endpoint ────────────────────────────────────
   app.post("/api/snow/chat", async (req, res) => {
     const { prompt, history, model: requestedModel, images: reqImages, image: reqImage } = req.body;
@@ -1783,6 +1824,17 @@ async function startServer() {
 
     const reqId = Math.random().toString(36).substring(2, 7).toUpperCase();
     console.log(`\n[SNOW:${reqId}] ─── New query:`, effectivePrompt, "Model:", requestedModel || "default", "Visual frames:", images.length);
+
+    // Phase 4: Record this interaction as an episodic memory
+    try {
+      const { addEpisodicMemory } = require("./brain");
+      addEpisodicMemory(
+        `User asked: "${effectivePrompt.slice(0, 200)}"\ (${new Date().toLocaleTimeString()})`,
+        "episodic",
+        "chat"
+      );
+      dreamCycle.recordActivity();
+    } catch {}
 
     // Fix 1 & 3: run intent resolution and unified context retrieval IN PARALLEL.
     // Greetings, queries, and agentic tasks all flow through dynamic neural intelligence — zero hardcoded scripts.
@@ -2379,6 +2431,7 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
     routineScheduler.startScheduler(process.env.GEMINI_API_KEY || "");
     ambientPerception.start(10000);
     goalEngine.start(4000);
+    dreamCycle.start(3 * 60 * 1000); // 3-minute check interval, triggers after 5 min idle
   });
 }
 

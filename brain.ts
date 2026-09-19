@@ -109,6 +109,26 @@ export interface GoalLog {
   timestamp: string;
 }
 
+// ── Phase 4: Episodic Memory (raw experience log) ────────────────────────────
+export type EpisodicTier = "working" | "episodic" | "semantic";
+export interface EpisodicMemory {
+  id: string;
+  tier: EpisodicTier;
+  content: string;       // raw event / observation text
+  context?: string;      // domain tag: "chat", "goal", "vision", "code"
+  isConsolidated: number; // 0 = raw, 1 = promoted to semantic
+  timestamp: string;
+}
+
+export type ConsolidationPhase = "slow_wave" | "rem_conflict" | "decay" | "procedural_replay";
+export interface ConsolidationLog {
+  id: string;
+  cycleId: string;
+  phase: ConsolidationPhase;
+  summary: string;
+  timestamp: string;
+}
+
 export interface FeedbackEntry {
   id: string;
   prompt: string;
@@ -289,7 +309,37 @@ function getDb(): Database.Database {
         message TEXT NOT NULL,
         timestamp TEXT NOT NULL
       );
+
+      -- Phase 4: Episodic memory buffer (raw experience stream)
+      CREATE TABLE IF NOT EXISTS episodic_memories (
+        id TEXT PRIMARY KEY,
+        tier TEXT NOT NULL DEFAULT 'episodic',
+        content TEXT NOT NULL,
+        context TEXT,
+        is_consolidated INTEGER DEFAULT 0,
+        timestamp TEXT NOT NULL
+      );
+
+      -- Phase 4: Dream cycle activity log
+      CREATE TABLE IF NOT EXISTS consolidation_logs (
+        id TEXT PRIMARY KEY,
+        cycle_id TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        summary TEXT NOT NULL,
+        timestamp TEXT NOT NULL
+      );
     `);
+
+    // Phase 4 migration: add confidence column to memories for decay tracking
+    try {
+      dbInstance.exec(`ALTER TABLE memories ADD COLUMN confidence REAL DEFAULT 1.0;`);
+    } catch { /* already exists */ }
+    try {
+      dbInstance.exec(`ALTER TABLE memories ADD COLUMN access_count INTEGER DEFAULT 0;`);
+    } catch { /* already exists */ }
+    try {
+      dbInstance.exec(`ALTER TABLE memories ADD COLUMN last_accessed TEXT;`);
+    } catch { /* already exists */ }
 
     try {
       dbInstance.exec(`ALTER TABLE visual_episodes ADD COLUMN thumbnail TEXT;`);
@@ -1544,4 +1594,189 @@ export function deleteAutonomousGoal(goalId: string): boolean {
   const res = db.prepare("DELETE FROM autonomous_goals WHERE id = ?").run(goalId);
   return res.changes > 0;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 4: TRI-TIER MEMORY CONSOLIDATION & DREAM CYCLE REPOSITORY
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Export getDb for dream cycle service to manage procedural rule pruning
+ */
+export { getDb };
+
+/**
+ * Record a raw episodic memory event (working/episodic tier)
+ */
+export function addEpisodicMemory(
+  content: string,
+  tier: EpisodicTier = "episodic",
+  context?: string
+): EpisodicMemory {
+  const db = getDb();
+  const id = `ep-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  const timestamp = new Date().toISOString();
+  db.prepare(
+    "INSERT INTO episodic_memories (id, tier, content, context, is_consolidated, timestamp) VALUES (?, ?, ?, ?, 0, ?)"
+  ).run(id, tier, content, context || null, timestamp);
+  return { id, tier, content, context, isConsolidated: 0, timestamp };
+}
+
+/**
+ * Fetch unconsolidated episodic memories for dream cycle processing
+ */
+export function getRecentEpisodicMemories(limit: number = 20): EpisodicMemory[] {
+  const db = getDb();
+  const rows: any[] = db.prepare(
+    "SELECT * FROM episodic_memories WHERE is_consolidated = 0 ORDER BY timestamp ASC LIMIT ?"
+  ).all(limit);
+  return rows.map(r => ({
+    id: r.id,
+    tier: r.tier as EpisodicTier,
+    content: r.content,
+    context: r.context || undefined,
+    isConsolidated: r.is_consolidated,
+    timestamp: r.timestamp,
+  }));
+}
+
+/**
+ * Mark episodic memory as consolidated (promoted to semantic tier)
+ */
+export function markEpisodicConsolidated(episodeId: string): void {
+  const db = getDb();
+  db.prepare("UPDATE episodic_memories SET is_consolidated = 1 WHERE id = ?").run(episodeId);
+}
+
+/**
+ * Purge old consolidated episodes (keep buffer lean)
+ */
+export function purgeConsolidatedEpisodes(olderThanDays: number = 7): number {
+  const db = getDb();
+  const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString();
+  const res = db.prepare(
+    "DELETE FROM episodic_memories WHERE is_consolidated = 1 AND timestamp < ?"
+  ).run(cutoff);
+  return res.changes;
+}
+
+/**
+ * Log a dream cycle phase activity
+ */
+export function logConsolidation(
+  cycleId: string,
+  phase: ConsolidationPhase,
+  summary: string
+): void {
+  try {
+    const db = getDb();
+    const id = `clog-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    db.prepare(
+      "INSERT INTO consolidation_logs (id, cycle_id, phase, summary, timestamp) VALUES (?, ?, ?, ?, ?)"
+    ).run(id, cycleId, phase, summary, new Date().toISOString());
+  } catch {}
+}
+
+/**
+ * Retrieve recent consolidation logs (for status display)
+ */
+export function getConsolidationLogs(limit: number = 20): ConsolidationLog[] {
+  const db = getDb();
+  const rows: any[] = db.prepare(
+    "SELECT * FROM consolidation_logs ORDER BY timestamp DESC LIMIT ?"
+  ).all(limit);
+  return rows.map(r => ({
+    id: r.id,
+    cycleId: r.cycle_id,
+    phase: r.phase as ConsolidationPhase,
+    summary: r.summary,
+    timestamp: r.timestamp,
+  }));
+}
+
+/**
+ * Apply decay to semantic memory nodes based on age and access frequency.
+ * Removes nodes whose confidence decays below eviction threshold.
+ * Returns count of evicted nodes.
+ *
+ * Decay formula: newConfidence = currentConfidence * (1 - decayRate)
+ * Nodes accessed recently or frequently are protected from decay.
+ */
+export function decayMemories(
+  decayRate: number = 0.05,
+  evictionThreshold: number = 0.15
+): number {
+  const db = getDb();
+  let evicted = 0;
+
+  try {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+
+    // Apply decay to nodes not accessed in the last 7 days
+    db.prepare(`
+      UPDATE memories
+      SET confidence = MAX(0.0, confidence * (1.0 - ?))
+      WHERE (last_accessed IS NULL OR last_accessed < ?)
+      AND confidence > ?
+    `).run(decayRate, sevenDaysAgo, evictionThreshold);
+
+    // Evict nodes below threshold (but never evict core identity nodes)
+    const toEvict: any[] = db.prepare(`
+      SELECT id FROM memories
+      WHERE confidence <= ?
+      AND source NOT IN ('system', 'User', 'Snow')
+    `).all(evictionThreshold);
+
+    for (const row of toEvict) {
+      db.prepare("DELETE FROM memories WHERE id = ?").run(row.id);
+      evicted++;
+    }
+  } catch (err: any) {
+    console.warn("[Brain] decayMemories error:", err.message);
+  }
+
+  return evicted;
+}
+
+/**
+ * Record access to a memory node (used for decay protection)
+ */
+export function touchMemory(memoryId: string): void {
+  try {
+    const db = getDb();
+    db.prepare(
+      "UPDATE memories SET access_count = access_count + 1, last_accessed = ? WHERE id = ?"
+    ).run(new Date().toISOString(), memoryId);
+  } catch {}
+}
+
+/**
+ * Get dream cycle health snapshot
+ */
+export function getMemoryHealthSnapshot(): {
+  totalMemories: number;
+  averageConfidence: number;
+  lowConfidenceCount: number;
+  unconsolidatedEpisodes: number;
+  consolidationLogCount: number;
+} {
+  const db = getDb();
+  try {
+    const memStats = db.prepare("SELECT COUNT(*) as total, AVG(COALESCE(confidence, 1.0)) as avg_conf FROM memories").get() as any;
+    const lowConf = db.prepare("SELECT COUNT(*) as cnt FROM memories WHERE COALESCE(confidence, 1.0) < 0.5").get() as any;
+    const unconsolidated = db.prepare("SELECT COUNT(*) as cnt FROM episodic_memories WHERE is_consolidated = 0").get() as any;
+    const logCount = db.prepare("SELECT COUNT(*) as cnt FROM consolidation_logs").get() as any;
+
+    return {
+      totalMemories: memStats?.total || 0,
+      averageConfidence: Math.round((memStats?.avg_conf || 1.0) * 100) / 100,
+      lowConfidenceCount: lowConf?.cnt || 0,
+      unconsolidatedEpisodes: unconsolidated?.cnt || 0,
+      consolidationLogCount: logCount?.cnt || 0,
+    };
+  } catch {
+    return { totalMemories: 0, averageConfidence: 1.0, lowConfidenceCount: 0, unconsolidatedEpisodes: 0, consolidationLogCount: 0 };
+  }
+}
+
+
 

@@ -2,7 +2,7 @@ import { execFile } from "child_process";
 import fs from "fs";
 import path from "path";
 import { promisify } from "util";
-import { scrubSecrets } from "./files claude/builtins";
+import { scrubSecrets } from "./agent_core/builtins";
 
 const execFileAsync = promisify(execFile);
 const SANDBOX_DIR = path.join(process.cwd(), "data", "sandbox");
