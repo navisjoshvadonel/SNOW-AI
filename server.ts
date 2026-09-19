@@ -34,7 +34,12 @@ import {
   loadRecentDecisions,
   getAllProceduralRules,
   deleteSynthesizedSkill,
-  loadSynthesizedSkills
+  loadSynthesizedSkills,
+  createAutonomousGoal,
+  getAutonomousGoals,
+  getGoalWithSubtasks,
+  updateGoalStatus,
+  deleteAutonomousGoal
 } from "./brain";
 import {
   ragIngest,
@@ -64,6 +69,7 @@ import { workshopProfiles } from "./services/workshopProfiles";
 import { agentSwarm } from "./files claude/agentSwarm";
 import { reflexionEngine } from "./services/reflexionEngine";
 import { skillSynthesizer } from "./services/skillSynthesizer";
+import { goalEngine } from "./services/goalEngine";
 import {
   verifyPassword,
   verifyPasscode,
@@ -979,14 +985,25 @@ function routeToSpecialist(prompt: string): { specialist: AgentSpecialist; direc
     };
   }
 
-  // 3. SysAdmin Specialist
+  // 3. Autonomous Goal & Background Task Specialist
+  if (
+    /\b(goal|objective|background task|in the background|subtask|milestone|long running|pursue goal|create goal)\b/.test(p)
+  ) {
+    return {
+      specialist: "sysadmin",
+      directive: "SPECIALIST ROLE: Autonomous Executive Goal Architect. You orchestrate long-running, multi-step background objectives. When asked to pursue a goal or work in the background, use GoalManager (action: 'create', title: '...', description: '...') to register the objective. The continuous OODA cognitive daemon will handle autonomous decomposition and step execution.",
+      priorityTools: "GoalManager, SystemTelemetry, ProcessManager, Bash, SkillSynthesizer"
+    };
+  }
+
+  // 4. SysAdmin Specialist
   if (
     /\b(cpu|ram|memory|disk|hardware|temperature|temp|process|processes|top|kill|service|systemd|daemon|journalctl|status|clipboard|copy|paste|notification|notify|volume|mute|media|play|pause|app|launch|terminal|reboot|shutdown|uptime)\b/.test(p)
   ) {
     return {
       specialist: "sysadmin",
       directive: "SPECIALIST ROLE: Linux System Administrator & OS Automation Specialist. You MUST invoke tools immediately when asked to inspect or change system state, clipboard, processes, or notifications. Use Clipboard (action: 'write', text: '...') to copy, Clipboard (action: 'read') to read clipboard, Notification (title, message) to notify, ProcessManager to inspect/kill processes, and ServiceManager to check/restart services. Never simulate or reply without executing the appropriate tool.",
-      priorityTools: "SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, MediaControl, AppLauncher, ComputerUse, LinuxSystem, Bash"
+      priorityTools: "SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, MediaControl, AppLauncher, ComputerUse, LinuxSystem, Bash, GoalManager"
     };
   }
 
@@ -1068,10 +1085,11 @@ ${proceduralWisdom ? `\n${proceduralWisdom}\n` : ""}
 
 RULES:
 - NEVER output raw brackets, tags, or JSON in speech. Speak only in natural, clean sentences.
-- You have full access to native Linux tools (SkillSynthesizer, ComputerUse, LinuxSystem, SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, PythonSandbox, GitManager, WebSearch, Weather, Bash, FileRead, FileWrite, FileEdit, MemoryStore, AppLauncher, MediaControl). Invoke them autonomously whenever needed to execute multi-step reasoning.
+- You have full access to native Linux tools (GoalManager, SkillSynthesizer, ComputerUse, LinuxSystem, SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, PythonSandbox, GitManager, WebSearch, Weather, Bash, FileRead, FileWrite, FileEdit, MemoryStore, AppLauncher, MediaControl). Invoke them autonomously whenever needed to execute multi-step reasoning.
 - CLOSED-LOOP COMPUTER USE: When controlling the desktop via ComputerUse, examine the returned visual delta and verification report. If stateChanged is false or visual delta is minimal, adapt your coordinates or check if the target window needs focusing first.
 - SELF-HEALING REFLEXION: When executing code via PythonSandbox or shell commands, if an execution returns an error or traceback, inspect the error details, fix the code/command, and re-execute immediately until it succeeds.
 - DYNAMIC SKILL GENERATION: If you lack a specific tool to solve a computational or automation problem, use SkillSynthesizer to author, test, and register a Python tool on the fly.
+- AUTONOMOUS BACKGROUND GOALS: When nj requests a multi-step objective or asks to work on something in the background, use GoalManager (action: 'create', title: '...', description: '...') to launch it. The continuous OODA daemon will decompose and execute it without blocking the conversation.
 - Keep responses concise and conversational — 2 to 3 sentences is ideal unless detailed step-by-step guidance is requested by nj.`;
 
   const initialMessages: Message[] = [];
@@ -1719,6 +1737,41 @@ async function startServer() {
     res.json({ rules, count: rules.length });
   });
 
+  // ── Autonomous Hierarchical Goals Endpoints ──────────────────────────────
+  app.get("/api/snow/goals", (req, res) => {
+    const status = req.query.status ? String(req.query.status) as any : undefined;
+    const goals = getAutonomousGoals(status);
+    res.json({ goals, count: goals.length, daemon: goalEngine.getStatus() });
+  });
+
+  app.get("/api/snow/goals/:id", (req, res) => {
+    const goal = getGoalWithSubtasks(req.params.id);
+    if (!goal) return res.status(404).json({ error: "Goal not found" });
+    res.json(goal);
+  });
+
+  app.post("/api/snow/goals/create", (req, res) => {
+    const { title, description, priority } = req.body;
+    if (!title) return res.status(400).json({ error: "Title is required" });
+    const goal = createAutonomousGoal(title, description || title, priority || 3);
+    res.json(goal);
+  });
+
+  app.post("/api/snow/goals/:id/pause", (req, res) => {
+    updateGoalStatus(req.params.id, "paused");
+    res.json({ success: true, status: "paused" });
+  });
+
+  app.post("/api/snow/goals/:id/resume", (req, res) => {
+    updateGoalStatus(req.params.id, "active");
+    res.json({ success: true, status: "active" });
+  });
+
+  app.delete("/api/snow/goals/:id", (req, res) => {
+    const deleted = deleteAutonomousGoal(req.params.id);
+    res.json({ success: deleted });
+  });
+
   // ── /api/snow/chat — main AI endpoint ────────────────────────────────────
   app.post("/api/snow/chat", async (req, res) => {
     const { prompt, history, model: requestedModel, images: reqImages, image: reqImage } = req.body;
@@ -2325,6 +2378,7 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
     } catch {}
     routineScheduler.startScheduler(process.env.GEMINI_API_KEY || "");
     ambientPerception.start(10000);
+    goalEngine.start(4000);
   });
 }
 

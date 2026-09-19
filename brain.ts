@@ -72,6 +72,43 @@ export interface SynthesizedSkill {
   updatedAt: string;
 }
 
+export type GoalStatus = "pending" | "planning" | "active" | "paused" | "completed" | "failed";
+export type SubtaskStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+
+export interface AutonomousGoal {
+  id: string;
+  title: string;
+  description: string;
+  status: GoalStatus;
+  priority: number;
+  progressPct: number;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  subtasks?: GoalSubtask[];
+}
+
+export interface GoalSubtask {
+  id: string;
+  goalId: string;
+  stepOrder: number;
+  title: string;
+  assignedTool: string;
+  inputPayload: string; // JSON
+  status: SubtaskStatus;
+  resultSummary?: string;
+  retryCount: number;
+  executedAt?: string;
+}
+
+export interface GoalLog {
+  id: string;
+  goalId: string;
+  subtaskId?: string;
+  message: string;
+  timestamp: string;
+}
+
 export interface FeedbackEntry {
   id: string;
   prompt: string;
@@ -217,6 +254,40 @@ function getDb(): Database.Database {
         failure_count INTEGER DEFAULT 0,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS autonomous_goals (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL,
+        status TEXT NOT NULL,
+        priority INTEGER DEFAULT 3,
+        progress_pct INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS goal_subtasks (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL,
+        step_order INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        assigned_tool TEXT NOT NULL,
+        input_payload TEXT NOT NULL,
+        status TEXT NOT NULL,
+        result_summary TEXT,
+        retry_count INTEGER DEFAULT 0,
+        executed_at TEXT,
+        FOREIGN KEY (goal_id) REFERENCES autonomous_goals(id) ON DELETE CASCADE
+      );
+
+      CREATE TABLE IF NOT EXISTS goal_logs (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL,
+        subtask_id TEXT,
+        message TEXT NOT NULL,
+        timestamp TEXT NOT NULL
       );
     `);
 
@@ -1293,6 +1364,184 @@ export function updateSkillStats(name: string, success: boolean): void {
 export function deleteSynthesizedSkill(name: string): boolean {
   const db = getDb();
   const res = db.prepare("DELETE FROM synthesized_skills WHERE name = ?").run(name);
+  return res.changes > 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUTONOMOUS HIERARCHICAL GOALS REPOSITORY
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function createAutonomousGoal(
+  title: string,
+  description: string,
+  priority: number = 3
+): AutonomousGoal {
+  const db = getDb();
+  const id = `goal-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO autonomous_goals (id, title, description, status, priority, progress_pct, created_at, updated_at)
+    VALUES (?, ?, ?, 'pending', ?, 0, ?, ?)
+  `).run(id, title, description, priority, now, now);
+
+  logGoalEvent(id, `Autonomous goal initialized: "${title}"`);
+
+  return {
+    id,
+    title,
+    description,
+    status: "pending",
+    priority,
+    progressPct: 0,
+    createdAt: now,
+    updatedAt: now,
+    subtasks: []
+  };
+}
+
+export function getAutonomousGoals(statusFilter?: GoalStatus): AutonomousGoal[] {
+  const db = getDb();
+  let rows: any[];
+  if (statusFilter) {
+    rows = db.prepare("SELECT * FROM autonomous_goals WHERE status = ? ORDER BY priority ASC, created_at DESC").all(statusFilter);
+  } else {
+    rows = db.prepare("SELECT * FROM autonomous_goals ORDER BY priority ASC, created_at DESC").all();
+  }
+
+  return rows.map(r => ({
+    id: r.id,
+    title: r.title,
+    description: r.description,
+    status: r.status as GoalStatus,
+    priority: r.priority,
+    progressPct: r.progress_pct,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+    completedAt: r.completed_at || undefined
+  }));
+}
+
+export function getGoalWithSubtasks(goalId: string): AutonomousGoal | null {
+  const db = getDb();
+  const goal = db.prepare("SELECT * FROM autonomous_goals WHERE id = ?").get(goalId) as any;
+  if (!goal) return null;
+
+  const subtasks = db.prepare("SELECT * FROM goal_subtasks WHERE goal_id = ? ORDER BY step_order ASC").all(goalId) as any[];
+
+  return {
+    id: goal.id,
+    title: goal.title,
+    description: goal.description,
+    status: goal.status as GoalStatus,
+    priority: goal.priority,
+    progressPct: goal.progress_pct,
+    createdAt: goal.created_at,
+    updatedAt: goal.updated_at,
+    completedAt: goal.completed_at || undefined,
+    subtasks: subtasks.map(s => ({
+      id: s.id,
+      goalId: s.goal_id,
+      stepOrder: s.step_order,
+      title: s.title,
+      assignedTool: s.assigned_tool,
+      inputPayload: s.input_payload,
+      status: s.status as SubtaskStatus,
+      resultSummary: s.result_summary || undefined,
+      retryCount: s.retry_count,
+      executedAt: s.executed_at || undefined
+    }))
+  };
+}
+
+export function updateGoalStatus(
+  goalId: string,
+  status: GoalStatus,
+  progressPct?: number,
+  completedAt?: string
+): void {
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  if (progressPct !== undefined && completedAt !== undefined) {
+    db.prepare("UPDATE autonomous_goals SET status = ?, progress_pct = ?, completed_at = ?, updated_at = ? WHERE id = ?")
+      .run(status, progressPct, completedAt, now, goalId);
+  } else if (progressPct !== undefined) {
+    db.prepare("UPDATE autonomous_goals SET status = ?, progress_pct = ?, updated_at = ? WHERE id = ?")
+      .run(status, progressPct, now, goalId);
+  } else {
+    db.prepare("UPDATE autonomous_goals SET status = ?, updated_at = ? WHERE id = ?")
+      .run(status, now, goalId);
+  }
+}
+
+export function addGoalSubtasks(
+  goalId: string,
+  subtasks: Array<{ stepOrder: number; title: string; assignedTool: string; inputPayload?: any }>
+): GoalSubtask[] {
+  const db = getDb();
+  const created: GoalSubtask[] = [];
+
+  const stmt = db.prepare(`
+    INSERT INTO goal_subtasks (id, goal_id, step_order, title, assigned_tool, input_payload, status, retry_count)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', 0)
+  `);
+
+  const tx = db.transaction(() => {
+    subtasks.forEach(st => {
+      const id = `subtask-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const payloadStr = typeof st.inputPayload === "string" ? st.inputPayload : JSON.stringify(st.inputPayload || {});
+      stmt.run(id, goalId, st.stepOrder, st.title, st.assignedTool, payloadStr);
+      created.push({
+        id,
+        goalId,
+        stepOrder: st.stepOrder,
+        title: st.title,
+        assignedTool: st.assignedTool,
+        inputPayload: payloadStr,
+        status: "pending",
+        retryCount: 0
+      });
+    });
+    db.prepare("UPDATE autonomous_goals SET status = 'active', updated_at = ? WHERE id = ?").run(new Date().toISOString(), goalId);
+  });
+
+  tx();
+  logGoalEvent(goalId, `Decomposed into ${created.length} executable subtasks.`);
+  return created;
+}
+
+export function updateSubtaskStatus(
+  subtaskId: string,
+  status: SubtaskStatus,
+  resultSummary?: string
+): void {
+  const db = getDb();
+  const now = new Date().toISOString();
+
+  if (status === "failed") {
+    db.prepare("UPDATE goal_subtasks SET status = ?, result_summary = ?, retry_count = retry_count + 1, executed_at = ? WHERE id = ?")
+      .run(status, resultSummary || "", now, subtaskId);
+  } else {
+    db.prepare("UPDATE goal_subtasks SET status = ?, result_summary = ?, executed_at = ? WHERE id = ?")
+      .run(status, resultSummary || "", now, subtaskId);
+  }
+}
+
+export function logGoalEvent(goalId: string, message: string, subtaskId?: string): void {
+  try {
+    const db = getDb();
+    const id = `log-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+    db.prepare("INSERT INTO goal_logs (id, goal_id, subtask_id, message, timestamp) VALUES (?, ?, ?, ?, ?)")
+      .run(id, goalId, subtaskId || null, message, new Date().toISOString());
+  } catch {}
+}
+
+export function deleteAutonomousGoal(goalId: string): boolean {
+  const db = getDb();
+  db.prepare("DELETE FROM goal_logs WHERE goal_id = ?").run(goalId);
+  db.prepare("DELETE FROM goal_subtasks WHERE goal_id = ?").run(goalId);
+  const res = db.prepare("DELETE FROM autonomous_goals WHERE id = ?").run(goalId);
   return res.changes > 0;
 }
 

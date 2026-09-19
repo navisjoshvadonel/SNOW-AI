@@ -32,6 +32,13 @@ import { glob } from "glob"; // npm: glob
 import type { ToolDefinition, ToolUseContext } from "./types.js";
 import { desktopActuator } from "../services/desktopActuator.js";
 import { skillSynthesizer } from "../services/skillSynthesizer.js";
+import {
+  createAutonomousGoal,
+  getAutonomousGoals,
+  getGoalWithSubtasks,
+  updateGoalStatus,
+  deleteAutonomousGoal
+} from "../brain.js";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -1702,6 +1709,113 @@ export const SkillSynthesizerTool: ToolDefinition<SkillSynthesizerInput> = {
   }
 };
 
+// ─── GoalManagerTool ────────────────────────────────────────────────────────
+
+type GoalManagerInput = {
+  action: "create" | "list" | "get" | "pause" | "resume" | "cancel";
+  title?: string;
+  description?: string;
+  priority?: number;
+  goalId?: string;
+};
+
+export const GoalManagerTool: ToolDefinition<GoalManagerInput> = {
+  name: "GoalManager",
+  description:
+    "Autonomous Hierarchical Goal Lifecycle Manager (Continuous Cognitive Daemon). " +
+    "Allows Snow to establish high-level objectives that execute autonomously in the background (OODA loop). " +
+    "Can create goals ('create'), list active/completed goals ('list'), inspect subtasks ('get'), pause, resume, or cancel goals.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["create", "list", "get", "pause", "resume", "cancel"],
+        description: "Action to perform on autonomous goals"
+      },
+      title: { type: "string", description: "Objective title for 'create' action" },
+      description: { type: "string", description: "Detailed constraints and specifications for the goal" },
+      priority: { type: "number", description: "Priority level from 1 (highest) to 5 (default: 3)" },
+      goalId: { type: "string", description: "Target goal ID for 'get', 'pause', 'resume', or 'cancel'" }
+    },
+    required: ["action"]
+  },
+
+  validate(input) {
+    if (!input.action) return { valid: false, message: "action is required", code: 400 };
+    if (input.action === "create" && !input.title) {
+      return { valid: false, message: "title is required for create", code: 400 };
+    }
+    if (["get", "pause", "resume", "cancel"].includes(input.action) && !input.goalId) {
+      return { valid: false, message: "goalId is required for this action", code: 400 };
+    }
+    return { valid: true };
+  },
+
+  checkPermission(_input, _ctx) {
+    return { granted: true };
+  },
+
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: `GoalManager: ${input.action}` };
+
+    try {
+      if (input.action === "create") {
+        const goal = createAutonomousGoal(input.title!, input.description || input.title!, input.priority || 3);
+        return {
+          content: `🎯 Autonomous Goal Created:\n- Title: "${goal.title}"\n- ID: ${goal.id}\n- Status: PENDING\n- Priority: ${goal.priority}\n\nThe continuous OODA daemon will now autonomously decompose and execute this objective in the background.`,
+          isError: false
+        };
+      }
+
+      if (input.action === "list") {
+        const goals = getAutonomousGoals();
+        if (!goals.length) {
+          return { content: "No autonomous goals currently tracked. Use action: 'create' to launch one.", isError: false };
+        }
+        const lines = goals.map(g => `- [${g.status.toUpperCase()}] "${g.title}" (Progress: ${g.progressPct}%, ID: ${g.id})`);
+        return { content: `Autonomous Goals (${goals.length}):\n${lines.join("\n")}`, isError: false };
+      }
+
+      if (input.action === "get") {
+        const goal = getGoalWithSubtasks(input.goalId!);
+        if (!goal) return { content: `Goal '${input.goalId}' not found.`, isError: true };
+
+        const subtaskLines = (goal.subtasks || []).map(s =>
+          `  ${s.stepOrder}. [${s.status.toUpperCase()}] ${s.title} (Tool: ${s.assignedTool})${s.resultSummary ? ` -> ${s.resultSummary.slice(0, 80)}` : ""}`
+        );
+
+        return {
+          content: `Goal Details: "${goal.title}" [${goal.status.toUpperCase()}]\n` +
+            `- Progress: ${goal.progressPct}%\n` +
+            `- Description: ${goal.description}\n` +
+            `- Subtasks:\n${subtaskLines.length ? subtaskLines.join("\n") : "  (Pending decomposition)"}`,
+          isError: false
+        };
+      }
+
+      if (input.action === "pause") {
+        updateGoalStatus(input.goalId!, "paused");
+        return { content: `Goal '${input.goalId}' paused.`, isError: false };
+      }
+
+      if (input.action === "resume") {
+        updateGoalStatus(input.goalId!, "active");
+        return { content: `Goal '${input.goalId}' resumed.`, isError: false };
+      }
+
+      if (input.action === "cancel") {
+        const deleted = deleteAutonomousGoal(input.goalId!);
+        return { content: `Goal '${input.goalId}' ${deleted ? "cancelled and removed" : "not found"}.`, isError: !deleted };
+      }
+
+      return { content: `Unsupported action: ${input.action}`, isError: true };
+    } catch (err: any) {
+      return { content: `GoalManager error: ${err.message}`, isError: true };
+    }
+  }
+};
+
 // ─── Registry builder ─────────────────────────────────────────────────────────
 
 export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>> {
@@ -1712,7 +1826,7 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
     SystemTelemetryTool, MemoryStoreTool, AppLauncherTool, MediaControlTool,
     PythonSandboxTool, ClipboardTool, NotificationTool, ProcessManagerTool,
     ServiceManagerTool, GitManagerTool, ComputerUseTool, LinuxSystemTool,
-    SkillSynthesizerTool
+    SkillSynthesizerTool, GoalManagerTool
   ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }
@@ -1729,5 +1843,6 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
 
   return registry;
 }
+
 
 
