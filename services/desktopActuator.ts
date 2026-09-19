@@ -1,7 +1,8 @@
 /**
  * SNOW AI — Autonomous Desktop Actuator Service
  * Bridges Node.js backend with native Linux python automation (pyautogui + mss).
- * Powers Claude Computer Use & Rabbit Operator grade visual actuation.
+ * Powers Claude Computer Use & Rabbit Operator grade visual actuation with
+ * closed-loop state-change verification and active window tracking.
  */
 
 import path from "path";
@@ -19,6 +20,11 @@ export interface DesktopStatus {
   height: number;
   mouse: { x: number; y: number };
   display: string;
+  activeWindow?: {
+    id: string;
+    title: string;
+    class: string;
+  };
   error?: string;
 }
 
@@ -26,8 +32,6 @@ export interface ScreenshotResult {
   success: boolean;
   width: number;
   height: number;
-  scaledWidth: number;
-  scaledHeight: number;
   image: string; // base64 data URL
   error?: string;
 }
@@ -42,16 +46,35 @@ export interface DesktopActionResult {
   [key: string]: any;
 }
 
+export interface VerifiedActionResult extends DesktopActionResult {
+  stateChanged: boolean;
+  visualDeltaPct: number;
+  changedBbox?: number[] | null;
+  preWindow?: { id: string; title: string; class: string };
+  postWindow?: { id: string; title: string; class: string };
+  windowChanged?: boolean;
+  settleDelay?: number;
+  preScreenshot?: string;
+  postScreenshot?: string;
+  verificationAudit?: string;
+}
+
 export interface GroundAndActResult {
   success: boolean;
   directive: string;
   targetElement: string;
   action: string;
   coordinates: { x: number; y: number };
-  executionResult: DesktopActionResult;
+  executionResult: VerifiedActionResult;
+  stateChanged: boolean;
+  visualDeltaPct: number;
+  windowChanged: boolean;
+  verificationAudit: string;
   auditExplanation: string;
   timestamp: string;
   screenshotSnippet?: string;
+  postScreenshot?: string;
+  retryHint?: string;
 }
 
 class DesktopActuatorService {
@@ -113,8 +136,6 @@ class DesktopActuatorService {
         success: false,
         width: 0,
         height: 0,
-        scaledWidth: 0,
-        scaledHeight: 0,
         image: "",
         error: e.message
       };
@@ -122,16 +143,22 @@ class DesktopActuatorService {
   }
 
   /**
-   * 3. Execute Native Action (Click, Type, Hotkey, Move, Launch)
+   * 3. Execute Native Action (Click, Type, Hotkey, Move, Scroll, Drag, Launch)
    */
   public async executeAction(payload: {
-    action: "click" | "double_click" | "right_click" | "move" | "type" | "hotkey" | "scroll" | "launch";
+    action: "click" | "double_click" | "right_click" | "move" | "type" | "press" | "hotkey" | "scroll" | "drag" | "launch";
     x?: number;
     y?: number;
     text?: string;
     press_enter?: boolean;
+    key?: string;
     keys?: string[];
     amount?: number;
+    startX?: number;
+    startY?: number;
+    endX?: number;
+    endY?: number;
+    duration?: number;
     target?: string;
     button?: "left" | "middle" | "right";
   }): Promise<DesktopActionResult> {
@@ -183,8 +210,65 @@ class DesktopActuatorService {
   }
 
   /**
-   * 4. Multimodal Visual Grounding & Autonomous Actuation
-   * Perceives the desktop, locates target UI element coordinates, and actuates.
+   * 4. Closed-Loop Verified Action Execution
+   * Captures pre/post frames, computes pixel deltas, and validates UI state transition.
+   */
+  public async executeVerifiedAction(payload: {
+    action: "click" | "double_click" | "right_click" | "move" | "type" | "press" | "hotkey" | "scroll" | "drag" | "launch";
+    x?: number;
+    y?: number;
+    text?: string;
+    press_enter?: boolean;
+    key?: string;
+    keys?: string[];
+    amount?: number;
+    startX?: number;
+    startY?: number;
+    endX?: number;
+    endY?: number;
+    target?: string;
+    button?: "left" | "middle" | "right";
+    settleDelay?: number;
+    includeScreenshots?: boolean;
+    maxDim?: number;
+  }): Promise<VerifiedActionResult> {
+    if (this.emergencyKillSwitch) {
+      return {
+        success: false,
+        action: payload.action,
+        stateChanged: false,
+        visualDeltaPct: 0.0,
+        error: "SAFETY HALT: Desktop Actuator is locked by Emergency Kill-Switch."
+      };
+    }
+
+    try {
+      const { stdout } = await execFileAsync("python3", [SCRIPT_PATH, "verified_action", JSON.stringify(payload)]);
+      const result: VerifiedActionResult = JSON.parse(stdout.trim());
+
+      const auditMsg = result.stateChanged
+        ? `State change verified: ${result.visualDeltaPct}% visual delta${result.windowChanged ? ` (active window changed to "${result.postWindow?.title}")` : ""}.`
+        : `No state transition detected (visual delta ${result.visualDeltaPct}%).`;
+
+      result.verificationAudit = auditMsg;
+      this.logAudit({ payload, result, status: result.success ? "VERIFIED_SUCCESS" : "VERIFIED_FAILED" });
+      return result;
+    } catch (e: any) {
+      console.warn("[Snow Actuator] executeVerifiedAction error:", e.message);
+      return {
+        success: false,
+        action: payload.action,
+        stateChanged: false,
+        visualDeltaPct: 0.0,
+        error: e.message
+      };
+    }
+  }
+
+  /**
+   * 5. Multimodal Visual Grounding & Closed-Loop Autonomous Actuation
+   * Perceives the desktop, calculates normalized coordinates, actuates,
+   * and verifies whether the action successfully modified the workspace state.
    */
   public async groundAndActuate(directive: string, apiKey: string): Promise<GroundAndActResult> {
     const timestamp = new Date().toISOString();
@@ -196,7 +280,7 @@ class DesktopActuatorService {
     }
 
     let targetElement = "Target UI Element";
-    let actionType: "click" | "double_click" | "right_click" | "move" | "type" = "click";
+    let actionType: "click" | "double_click" | "right_click" | "move" | "type" | "press" | "hotkey" | "scroll" | "launch" = "click";
     let textToType = "";
     let normX = 0.5;
     let normY = 0.5;
@@ -257,26 +341,54 @@ Output a STRICT JSON object in this exact format with NO markdown wrapping:
     const actualX = Math.round(normX * shot.width);
     const actualY = Math.round(normY * shot.height);
 
-    // Step 2: Actuate on real Linux desktop
-    let executionResult: DesktopActionResult;
+    // Step 2: Actuate on real Linux desktop with closed-loop verification
+    let verifiedRes: VerifiedActionResult;
     if (actionType === "type" && textToType) {
-      // First click the element to focus, then type
+      // First click the element to focus
       await this.executeAction({ action: "click", x: actualX, y: actualY });
-      executionResult = await this.executeAction({ action: "type", text: textToType, press_enter: true });
+      // Then type and verify the visual change
+      verifiedRes = await this.executeVerifiedAction({
+        action: "type",
+        text: textToType,
+        press_enter: true,
+        settleDelay: 0.35,
+        includeScreenshots: true
+      });
     } else {
-      executionResult = await this.executeAction({ action: actionType, x: actualX, y: actualY });
+      verifiedRes = await this.executeVerifiedAction({
+        action: actionType,
+        x: actualX,
+        y: actualY,
+        settleDelay: 0.3,
+        includeScreenshots: true
+      });
+    }
+
+    const stateChanged = verifiedRes.stateChanged;
+    const visualDeltaPct = verifiedRes.visualDeltaPct;
+    const windowChanged = !!verifiedRes.windowChanged;
+
+    let retryHint: string | undefined;
+    if (!stateChanged && (actionType === "click" || actionType === "double_click")) {
+      retryHint = `Notice: Element click at (${actualX}, ${actualY}) did not alter the screen state (visual delta: ${visualDeltaPct}%). The UI element might be inactive, busy, or slightly offset.`;
     }
 
     return {
-      success: executionResult.success,
+      success: verifiedRes.success,
       directive,
       targetElement,
       action: actionType,
       coordinates: { x: actualX, y: actualY },
-      executionResult,
+      executionResult: verifiedRes,
+      stateChanged,
+      visualDeltaPct,
+      windowChanged,
+      verificationAudit: verifiedRes.verificationAudit || "Action performed",
       auditExplanation,
       timestamp,
-      screenshotSnippet: shot.image
+      screenshotSnippet: verifiedRes.preScreenshot || shot.image,
+      postScreenshot: verifiedRes.postScreenshot,
+      retryHint
     };
   }
 }

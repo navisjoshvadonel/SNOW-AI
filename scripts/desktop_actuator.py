@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 SNOW AI — Native Desktop Actuator Bridge
-100% Real Linux Desktop Automation via mss and pyautogui.
-Handles screenshot capture, pointer movements, clicks, typing, hotkeys, and app launches.
+100% Real Linux Desktop Automation via mss, pyautogui, and visual verification.
+Handles screenshot capture, pointer movements, clicks, typing, hotkeys, app launches,
+and closed-loop visual delta state verification.
 """
 
 import sys
@@ -10,6 +11,7 @@ import os
 import json
 import base64
 import glob
+import time
 import subprocess
 from io import BytesIO
 
@@ -29,57 +31,135 @@ try:
         if cookie:
             subprocess.run(f"xauth add :0 MIT-MAGIC-COOKIE-1 {cookie} 2>/dev/null", shell=True)
             subprocess.run(f"xauth add {os.uname().nodename}:0 MIT-MAGIC-COOKIE-1 {cookie} 2>/dev/null", shell=True)
-except Exception as e:
+except Exception:
     pass
 
 import mss
 import pyautogui
-from PIL import Image
+from PIL import Image, ImageChops
 
 pyautogui.FAILSAFE = True   # Standard fail-safe: moving mouse to corner triggers safety abort
 pyautogui.PAUSE = 0.05      # Snappy 50ms action cadence
 
+
+def get_active_window_info():
+    """Extract active Linux X11/Wayland window details using xprop or fallback."""
+    try:
+        out = subprocess.check_output(
+            "xprop -root _NET_ACTIVE_WINDOW 2>/dev/null",
+            shell=True, text=True
+        ).strip()
+        win_id = None
+        for part in out.split():
+            if part.startswith("0x") and part != "0x0":
+                win_id = part.rstrip(",")
+                break
+
+        if win_id:
+            win_out = subprocess.check_output(
+                f"xprop -id {win_id} WM_NAME WM_CLASS 2>/dev/null",
+                shell=True, text=True
+            ).strip()
+            title = "Unknown"
+            wm_class = "Unknown"
+            for line in win_out.splitlines():
+                if "WM_NAME(" in line or "WM_NAME =" in line:
+                    parts = line.split("=", 1)
+                    if len(parts) > 1:
+                        title = parts[1].strip().strip('"')
+                elif "WM_CLASS(" in line or "WM_CLASS =" in line:
+                    parts = line.split("=", 1)
+                    if len(parts) > 1:
+                        wm_class = parts[1].strip().replace('"', '')
+            return {"id": win_id, "title": title, "class": wm_class}
+    except Exception:
+        pass
+    return {"id": "0x0", "title": "Linux Desktop / Active Session", "class": "desktop"}
+
+
 def get_screen_status():
     size = pyautogui.size()
     pos = pyautogui.position()
+    active_win = get_active_window_info()
     return {
         "success": True,
         "width": size.width,
         "height": size.height,
         "mouse": {"x": pos.x, "y": pos.y},
-        "display": os.environ.get("DISPLAY", ":0")
+        "display": os.environ.get("DISPLAY", ":0"),
+        "activeWindow": active_win
     }
+
+
+def capture_pil_image():
+    """Captures raw PIL image directly from MSS display buffer."""
+    with mss.MSS() as sct:
+        monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+        sct_img = sct.grab(monitor)
+        img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
+        return img, img.size[0], img.size[1]
+
+
+def image_to_base64_jpeg(img: Image.Image, downscale_max: int = 1280, quality: int = 82) -> str:
+    """Encodes PIL Image to Base64 JPEG data URL with optional downscaling."""
+    orig_w, orig_h = img.size
+    if max(orig_w, orig_h) > downscale_max:
+        scale = downscale_max / max(orig_w, orig_h)
+        new_w = int(orig_w * scale)
+        new_h = int(orig_h * scale)
+        img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+
+    buffer = BytesIO()
+    img.save(buffer, format="JPEG", quality=quality)
+    b64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
+    return f"data:image/jpeg;base64,{b64_str}"
+
 
 def take_screenshot(downscale_max: int = 1280):
     try:
-        with mss.MSS() as sct:
-            # Monitor 1 is typically primary screen
-            monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
-            sct_img = sct.grab(monitor)
-            img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
-            
-            orig_w, orig_h = img.size
-            if max(orig_w, orig_h) > downscale_max:
-                scale = downscale_max / max(orig_w, orig_h)
-                new_w = int(orig_w * scale)
-                new_h = int(orig_h * scale)
-                img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
-
-            buffer = BytesIO()
-            img.save(buffer, format="JPEG", quality=82)
-            b64_str = base64.b64encode(buffer.getvalue()).decode("utf-8")
-            data_url = f"data:image/jpeg;base64,{b64_str}"
-
-            return {
-                "success": True,
-                "width": orig_w,
-                "height": orig_h,
-                "scaledWidth": img.size[0],
-                "scaledHeight": img.size[1],
-                "image": data_url
-            }
+        img, orig_w, orig_h = capture_pil_image()
+        data_url = image_to_base64_jpeg(img, downscale_max=downscale_max)
+        return {
+            "success": True,
+            "width": orig_w,
+            "height": orig_h,
+            "image": data_url
+        }
     except Exception as e:
         return {"success": False, "error": f"Screenshot failed: {str(e)}"}
+
+
+def calculate_visual_delta(img1: Image.Image, img2: Image.Image, threshold: int = 15) -> dict:
+    """
+    Computes high-speed perceptual visual delta between two frames.
+    Resizes both to a standardized 320x180 grayscale grid (~3ms).
+    """
+    try:
+        grid_w, grid_h = 320, 180
+        g1 = img1.resize((grid_w, grid_h), Image.Resampling.BILINEAR).convert("L")
+        g2 = img2.resize((grid_w, grid_h), Image.Resampling.BILINEAR).convert("L")
+        diff = ImageChops.difference(g1, g2)
+        histogram = diff.histogram()
+        changed_pixels = sum(histogram[threshold:])
+        total_pixels = grid_w * grid_h
+        delta_pct = round((changed_pixels / total_pixels) * 100, 2)
+        bbox = diff.getbbox()
+
+        # Any change >= 0.15% of screen indicates a meaningful visual transition
+        state_changed = delta_pct >= 0.15
+
+        return {
+            "deltaPct": delta_pct,
+            "stateChanged": state_changed,
+            "changedBbox": list(bbox) if bbox else None
+        }
+    except Exception as e:
+        return {
+            "deltaPct": 0.0,
+            "stateChanged": False,
+            "error": str(e)
+        }
+
 
 def execute_action(action: str, **kwargs):
     try:
@@ -118,6 +198,11 @@ def execute_action(action: str, **kwargs):
                 pyautogui.press("enter")
             return {"success": True, "action": "type", "chars": len(text), "press_enter": press_enter}
 
+        elif action == "press":
+            key = str(kwargs.get("key", "enter")).lower()
+            pyautogui.press(key)
+            return {"success": True, "action": "press", "key": key}
+
         elif action == "hotkey":
             keys = kwargs.get("keys", [])
             if isinstance(keys, list) and len(keys) > 0:
@@ -129,6 +214,16 @@ def execute_action(action: str, **kwargs):
             amount = int(kwargs.get("amount", -5))
             pyautogui.scroll(amount)
             return {"success": True, "action": "scroll", "amount": amount}
+
+        elif action == "drag":
+            start_x = int(kwargs.get("startX", pyautogui.position().x))
+            start_y = int(kwargs.get("startY", pyautogui.position().y))
+            end_x = int(kwargs.get("endX", start_x))
+            end_y = int(kwargs.get("endY", start_y))
+            duration = float(kwargs.get("duration", 0.3))
+            pyautogui.moveTo(start_x, start_y)
+            pyautogui.dragTo(end_x, end_y, duration=duration, button="left")
+            return {"success": True, "action": "drag", "from": {"x": start_x, "y": start_y}, "to": {"x": end_x, "y": end_y}}
 
         elif action == "launch":
             target = str(kwargs.get("target", "")).strip()
@@ -145,6 +240,70 @@ def execute_action(action: str, **kwargs):
     except Exception as e:
         return {"success": False, "error": f"Action failed: {str(e)}"}
 
+
+def execute_verified_action(action: str, **kwargs):
+    """
+    Closed-Loop Actuator Protocol:
+    1. Capture pre-action visual state & active window
+    2. Perform requested actuation
+    3. Settle delay (allow OS/UI animations to resolve)
+    4. Capture post-action visual state & active window
+    5. Compute visual delta & state change verification
+    """
+    try:
+        settle_delay = float(kwargs.pop("settleDelay", 0.25))
+        include_screenshots = bool(kwargs.pop("includeScreenshots", False))
+        max_dim = int(kwargs.pop("maxDim", 1280))
+
+        # 1. Pre-state capture
+        pre_img, w, h = capture_pil_image()
+        pre_window = get_active_window_info()
+
+        # 2. Actuation
+        action_res = execute_action(action, **kwargs)
+        if not action_res.get("success"):
+            return {
+                "success": False,
+                "action": action,
+                "error": action_res.get("error", "Action execution failed"),
+                "stateChanged": False,
+                "visualDeltaPct": 0.0
+            }
+
+        # 3. Settle
+        time.sleep(settle_delay)
+
+        # 4. Post-state capture
+        post_img, _, _ = capture_pil_image()
+        post_window = get_active_window_info()
+
+        # 5. Visual & Context Delta
+        delta_info = calculate_visual_delta(pre_img, post_img)
+        window_changed = (pre_window.get("id") != post_window.get("id")) or (pre_window.get("title") != post_window.get("title"))
+        state_changed = delta_info.get("stateChanged", False) or window_changed
+
+        result = {
+            "success": True,
+            "action": action,
+            "details": action_res,
+            "stateChanged": state_changed,
+            "visualDeltaPct": delta_info.get("deltaPct", 0.0),
+            "changedBbox": delta_info.get("changedBbox"),
+            "preWindow": pre_window,
+            "postWindow": post_window,
+            "windowChanged": window_changed,
+            "settleDelay": settle_delay
+        }
+
+        if include_screenshots:
+            result["preScreenshot"] = image_to_base64_jpeg(pre_img, downscale_max=max_dim)
+            result["postScreenshot"] = image_to_base64_jpeg(post_img, downscale_max=max_dim)
+
+        return result
+    except Exception as e:
+        return {"success": False, "error": f"Verified action failed: {str(e)}", "stateChanged": False}
+
+
 def main():
     if len(sys.argv) < 2:
         print(json.dumps({"success": False, "error": "Missing command argument"}))
@@ -160,24 +319,40 @@ def main():
         print(json.dumps(take_screenshot(max_dim)))
 
     elif cmd == "action":
-        # Read JSON payload from stdin or argument
         payload = {}
         if len(sys.argv) > 2:
             try:
                 payload = json.loads(sys.argv[2])
-            except:
+            except Exception:
                 pass
         if not payload and not sys.stdin.isatty():
             try:
                 payload = json.load(sys.stdin)
-            except:
+            except Exception:
                 pass
 
         action_name = payload.pop("action", "")
         print(json.dumps(execute_action(action_name, **payload)))
 
+    elif cmd == "verified_action":
+        payload = {}
+        if len(sys.argv) > 2:
+            try:
+                payload = json.loads(sys.argv[2])
+            except Exception:
+                pass
+        if not payload and not sys.stdin.isatty():
+            try:
+                payload = json.load(sys.stdin)
+            except Exception:
+                pass
+
+        action_name = payload.pop("action", "")
+        print(json.dumps(execute_verified_action(action_name, **payload)))
+
     else:
         print(json.dumps({"success": False, "error": f"Unknown command '{cmd}'"}))
+
 
 if __name__ == "__main__":
     main()

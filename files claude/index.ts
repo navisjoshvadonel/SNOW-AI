@@ -44,6 +44,8 @@ export {
   ProcessManagerTool,
   ServiceManagerTool,
   GitManagerTool,
+  ComputerUseTool,
+  LinuxSystemTool,
   createDefaultToolRegistry,
 } from "./builtins.js";
 

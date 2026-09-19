@@ -947,23 +947,34 @@ async function callAIStream(
 // AUTONOMOUS MULTI-AGENT SPECIALIST ROUTER & REACT REASONING ENGINE
 // ─────────────────────────────────────────────────────────────────────────────
 
-type AgentSpecialist = "sysadmin" | "coder" | "researcher" | "general";
+type AgentSpecialist = "sysadmin" | "coder" | "researcher" | "cua" | "general";
 
 function routeToSpecialist(prompt: string): { specialist: AgentSpecialist; directive: string; priorityTools: string } {
   const p = prompt.toLowerCase();
 
-  // 1. SysAdmin Specialist
+  // 1. Computer Use & Desktop Operator Specialist (CUA)
+  if (
+    /\b(click|double click|right click|mouse|cursor|screen|screenshot|desktop|window|type into|press enter|hotkey|drag|scroll|gui|button|menu|focus window)\b/.test(p)
+  ) {
+    return {
+      specialist: "cua",
+      directive: "SPECIALIST ROLE: Autonomous Computer-Using Agent (CUA) & Desktop Operator. You directly inspect, ground, and actuate the real Linux desktop using ComputerUse (Claude Computer Use / Rabbit Operator grade). Always check the returned visual delta percentage and stateChanged verification flags. If an element does not respond to a click, check if the window needs focusing (LinuxSystem/focus_window) or adjust your target coordinates.",
+      priorityTools: "ComputerUse, LinuxSystem, AppLauncher, Clipboard, Bash"
+    };
+  }
+
+  // 2. SysAdmin Specialist
   if (
     /\b(cpu|ram|memory|disk|hardware|temperature|temp|process|processes|top|kill|service|systemd|daemon|journalctl|status|clipboard|copy|paste|notification|notify|volume|mute|media|play|pause|app|launch|terminal|reboot|shutdown|uptime)\b/.test(p)
   ) {
     return {
       specialist: "sysadmin",
       directive: "SPECIALIST ROLE: Linux System Administrator & OS Automation Specialist. You MUST invoke tools immediately when asked to inspect or change system state, clipboard, processes, or notifications. Use Clipboard (action: 'write', text: '...') to copy, Clipboard (action: 'read') to read clipboard, Notification (title, message) to notify, ProcessManager to inspect/kill processes, and ServiceManager to check/restart services. Never simulate or reply without executing the appropriate tool.",
-      priorityTools: "SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, MediaControl, AppLauncher, Bash"
+      priorityTools: "SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, MediaControl, AppLauncher, ComputerUse, LinuxSystem, Bash"
     };
   }
 
-  // 2. Coder Specialist
+  // 3. Coder Specialist
   if (
     /\b(python|code|script|sandbox|function|class|git|branch|commit|diff|repository|repo|file|read file|write file|edit file|debug|traceback|syntax|compile|build|refactor)\b/.test(p)
   ) {
@@ -974,7 +985,7 @@ function routeToSpecialist(prompt: string): { specialist: AgentSpecialist; direc
     };
   }
 
-  // 3. Researcher Specialist
+  // 4. Researcher Specialist
   if (
     /\b(search|find out|google|web|weather|forecast|who is|what is|latest news|remember|recall|memory|knowledge|learn|history)\b/.test(p)
   ) {
@@ -985,7 +996,7 @@ function routeToSpecialist(prompt: string): { specialist: AgentSpecialist; direc
     };
   }
 
-  // 4. General Assistant
+  // 5. General Assistant
   return {
     specialist: "general",
     directive: "SPECIALIST ROLE: Universal Personal AI Assistant. You have full access to all system tools and seamlessly orchestrate multi-step tasks across the operating system, code, and knowledge base.",
@@ -1039,7 +1050,8 @@ ${memoryContext}
 
 RULES:
 - NEVER output raw brackets, tags, or JSON in speech. Speak only in natural, clean sentences.
-- You have full access to native Linux tools (SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, PythonSandbox, GitManager, WebSearch, Weather, Bash, FileRead, FileWrite, FileEdit, MemoryStore, AppLauncher, MediaControl). Invoke them autonomously whenever needed to execute multi-step reasoning.
+- You have full access to native Linux tools (ComputerUse, LinuxSystem, SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, PythonSandbox, GitManager, WebSearch, Weather, Bash, FileRead, FileWrite, FileEdit, MemoryStore, AppLauncher, MediaControl). Invoke them autonomously whenever needed to execute multi-step reasoning.
+- CLOSED-LOOP COMPUTER USE: When controlling the desktop via ComputerUse, examine the returned visual delta and verification report. If stateChanged is false or visual delta is minimal, adapt your coordinates or check if the target window needs focusing first.
 - SELF-HEALING REFLEXION: When executing code via PythonSandbox or shell commands, if an execution returns an error or traceback, inspect the error details, fix the code/command, and re-execute immediately until it succeeds.
 - Keep responses concise and conversational — 2 to 3 sentences is ideal unless detailed step-by-step guidance is requested by nj.`;
 

@@ -30,6 +30,7 @@ import { existsSync } from "fs";
 import { join, resolve, relative, extname } from "path";
 import { glob } from "glob"; // npm: glob
 import type { ToolDefinition, ToolUseContext } from "./types.js";
+import { desktopActuator } from "../services/desktopActuator.js";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -1374,39 +1375,57 @@ function countOccurrences(haystack: string, needle: string): number {
 // ─── ComputerUseTool ──────────────────────────────────────────────────────────
 
 type ComputerUseInput = {
-  action: "screenshot" | "click" | "double_click" | "right_click" | "move" | "type" | "hotkey" | "launch";
+  action: "status" | "screenshot" | "click" | "double_click" | "right_click" | "move" | "type" | "press" | "hotkey" | "scroll" | "drag" | "launch" | "ground_and_act";
   x?: number;
   y?: number;
   text?: string;
+  press_enter?: boolean;
+  key?: string;
   keys?: string[];
   target?: string;
+  directive?: string;
+  amount?: number;
+  startX?: number;
+  startY?: number;
+  endX?: number;
+  endY?: number;
+  settleDelay?: number;
 };
 
 export const ComputerUseTool: ToolDefinition<ComputerUseInput> = {
   name: "ComputerUse",
   description:
-    "Directly interact with and control the real Linux desktop (Claude Computer Use style). " +
-    "Can capture desktop screenshots, click buttons/windows at (x, y) coordinates, move the pointer, " +
-    "type text into active inputs, press hotkeys (e.g. ['ctrl', 't'], ['alt', 'tab']), or launch desktop applications.",
+    "Autonomous Closed-Loop Linux Desktop Interaction (Claude Computer Use & Rabbit Operator grade). " +
+    "Directly inspects the real desktop, captures screenshots, queries active window/app status, " +
+    "clicks coordinates, types text, presses hotkeys, drags, launches apps, or executes vision-grounded directives ('ground_and_act'). " +
+    "Every mouse/keyboard action executes closed-loop state-change verification, reporting visual delta percentages and window focus transitions.",
   inputSchema: {
     type: "object",
     properties: {
       action: {
         type: "string",
-        enum: ["screenshot", "click", "double_click", "right_click", "move", "type", "hotkey", "launch"],
-        description: "The desktop automation action to execute"
+        enum: ["status", "screenshot", "click", "double_click", "right_click", "move", "type", "press", "hotkey", "scroll", "drag", "launch", "ground_and_act"],
+        description: "Desktop automation action to execute with closed-loop verification."
       },
-      x: { type: "number", description: "Target X pixel coordinate on the 1920x1080 desktop" },
-      y: { type: "number", description: "Target Y pixel coordinate on the 1920x1080 desktop" },
-      text: { type: "string", description: "Text to type into the active window" },
-      keys: { type: "array", items: { type: "string" }, description: "List of keys for hotkey combinations (e.g. ['ctrl', 'c'])" },
-      target: { type: "string", description: "Application name, file path, or URL to open with xdg-open" }
+      directive: { type: "string", description: "Natural language instruction for 'ground_and_act' (e.g. 'Click the terminal menu' or 'Focus search bar')." },
+      x: { type: "number", description: "Target X pixel coordinate on the desktop." },
+      y: { type: "number", description: "Target Y pixel coordinate on the desktop." },
+      text: { type: "string", description: "Text string to type into the focused input." },
+      press_enter: { type: "boolean", description: "Whether to hit Enter after typing (default false)." },
+      key: { type: "string", description: "Single key name to press (e.g. 'enter', 'escape', 'tab')." },
+      keys: { type: "array", items: { type: "string" }, description: "Array of key names for hotkey combinations (e.g. ['ctrl', 't'])." },
+      target: { type: "string", description: "App command or path to open via xdg-open for 'launch' action." },
+      amount: { type: "number", description: "Scroll amount (positive = up, negative = down)." },
+      settleDelay: { type: "number", description: "Seconds to wait before taking post-action verification screenshot (default 0.25)." }
     },
     required: ["action"]
   },
 
   validate(input) {
     if (!input.action) return { valid: false, message: "Action is required", code: 400 };
+    if (input.action === "ground_and_act" && !input.directive) {
+      return { valid: false, message: "Directive string is required for ground_and_act", code: 400 };
+    }
     return { valid: true };
   },
 
@@ -1416,34 +1435,87 @@ export const ComputerUseTool: ToolDefinition<ComputerUseInput> = {
 
   async *execute(input, _ctx) {
     yield { type: "progress", data: null, label: `ComputerUse: ${input.action}` };
-    const SCRIPT_PATH = "/home/snowjd/Documents/Snow Jarvis/scripts/desktop_actuator.py";
 
     try {
-      if (input.action === "screenshot") {
-        const { stdout } = await execFileAsync("python3", [SCRIPT_PATH, "screenshot", "640"]);
-        const data = JSON.parse(stdout.trim());
+      if (input.action === "status") {
+        const status = await desktopActuator.getStatus();
         return {
-          content: `Screenshot captured (${data.width}x${data.height}). Screen state is active.`,
-          isError: false
+          content: `Desktop Status:\n- Resolution: ${status.width}x${status.height}\n- Mouse Pointer: (${status.mouse.x}, ${status.mouse.y})\n- Display: ${status.display}\n- Active Window: "${status.activeWindow?.title}" [Class: ${status.activeWindow?.class}]`,
+          isError: !status.success
         };
-      } else {
-        const { stdout } = await execFileAsync("python3", [SCRIPT_PATH, "action", JSON.stringify(input)]);
-        const data = JSON.parse(stdout.trim());
-        if (data.success) {
-          return {
-            content: `Desktop action '${input.action}' executed successfully. Details: ${JSON.stringify(data)}`,
-            isError: false
-          };
-        } else {
-          return {
-            content: `Desktop action failed: ${data.error || "Unknown error"}`,
-            isError: true
-          };
-        }
       }
+
+      if (input.action === "screenshot") {
+        const shot = await desktopActuator.getScreenshot(1280);
+        const status = await desktopActuator.getStatus();
+        return {
+          content: `Screenshot captured (${shot.width}x${shot.height}). Active window is "${status.activeWindow?.title}" [Class: ${status.activeWindow?.class}].`,
+          isError: !shot.success
+        };
+      }
+
+      if (input.action === "ground_and_act") {
+        const apiKey = process.env.GEMINI_API_KEY || "";
+        const result = await desktopActuator.groundAndActuate(input.directive!, apiKey);
+        const msg = [
+          `Ground-and-Act Directive: "${input.directive}"`,
+          `- Targeted: ${result.targetElement} at (${result.coordinates.x}, ${result.coordinates.y})`,
+          `- Action: ${result.action}`,
+          `- Verification: ${result.verificationAudit}`,
+          `- Visual Delta: ${result.visualDeltaPct}%`,
+          `- State Transition Confirmed: ${result.stateChanged ? "YES" : "NO"}`,
+          result.retryHint ? `\nADVICE: ${result.retryHint}` : ""
+        ].filter(Boolean).join("\n");
+
+        return { content: msg, isError: !result.success };
+      }
+
+      // Verified atomic desktop action
+      const verifiedRes = await desktopActuator.executeVerifiedAction({
+        action: input.action,
+        x: input.x,
+        y: input.y,
+        text: input.text,
+        press_enter: input.press_enter,
+        key: input.key,
+        keys: input.keys,
+        amount: input.amount,
+        startX: input.startX,
+        startY: input.startY,
+        endX: input.endX,
+        endY: input.endY,
+        target: input.target,
+        settleDelay: input.settleDelay || 0.25
+      });
+
+      if (!verifiedRes.success) {
+        return {
+          content: `Desktop action '${input.action}' failed: ${verifiedRes.error || "Unknown error"}`,
+          isError: true
+        };
+      }
+
+      const report = [
+        `Desktop Action '${input.action}' Completed:`,
+        `- Verification: ${verifiedRes.verificationAudit}`,
+        `- Visual Change Delta: ${verifiedRes.visualDeltaPct}%`,
+        `- State Changed: ${verifiedRes.stateChanged ? "YES" : "NO"}`,
+        verifiedRes.windowChanged
+          ? `- Active Window Switch: "${verifiedRes.preWindow?.title}" -> "${verifiedRes.postWindow?.title}"`
+          : `- Active Window: "${verifiedRes.postWindow?.title || 'Unchanged'}"`
+      ];
+
+      if (!verifiedRes.stateChanged && (input.action === "click" || input.action === "double_click")) {
+        report.push(`- WARNING: Zero or minimal visual change detected. If target did not respond, try alternative coordinates or verify if window needs focusing first.`);
+      }
+
+      return {
+        content: report.join("\n"),
+        isError: false
+      };
     } catch (err: any) {
       return {
-        content: `ComputerUse error: ${err.message}`,
+        content: `ComputerUse execution error: ${err.message}`,
         isError: true
       };
     }
