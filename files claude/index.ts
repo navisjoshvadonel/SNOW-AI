@@ -46,6 +46,7 @@ export {
   GitManagerTool,
   ComputerUseTool,
   LinuxSystemTool,
+  SkillSynthesizerTool,
   createDefaultToolRegistry,
 } from "./builtins.js";
 

@@ -46,6 +46,32 @@ export interface DecisionRecord {
   timestamp: string;
 }
 
+export interface ProceduralRule {
+  id: string;
+  triggerContext: string;
+  rule: string;
+  rationale?: string;
+  sourceFailure?: string;
+  confidence: number;
+  appliedCount: number;
+  timestamp: string;
+}
+
+export interface SynthesizedSkill {
+  id: string;
+  name: string;
+  description: string;
+  language: "python" | "node" | "bash";
+  code: string;
+  inputSchema: string; // JSON string
+  testCases: string;   // JSON string
+  isVerified: boolean;
+  successCount: number;
+  failureCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface FeedbackEntry {
   id: string;
   prompt: string;
@@ -165,6 +191,32 @@ function getDb(): Database.Database {
         git_commit TEXT,
         context_query TEXT,
         timestamp TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS procedural_rules (
+        id TEXT PRIMARY KEY,
+        trigger_context TEXT NOT NULL,
+        rule TEXT NOT NULL,
+        rationale TEXT,
+        source_failure TEXT,
+        confidence REAL DEFAULT 1.0,
+        applied_count INTEGER DEFAULT 0,
+        timestamp TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS synthesized_skills (
+        id TEXT PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
+        description TEXT NOT NULL,
+        language TEXT NOT NULL,
+        code TEXT NOT NULL,
+        input_schema TEXT NOT NULL,
+        test_cases TEXT NOT NULL,
+        is_verified INTEGER DEFAULT 0,
+        success_count INTEGER DEFAULT 0,
+        failure_count INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
     `);
 
@@ -1059,3 +1111,188 @@ export function compactMemoryDirectives(): { removedCount: number; remainingCoun
     remainingCount: state.learnedDirectives.length
   };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PROCEDURAL REFLEXION & DYNAMIC RULES REPOSITORY
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function recordProceduralRule(
+  triggerContext: string,
+  rule: string,
+  rationale?: string,
+  sourceFailure?: string,
+  confidence: number = 1.0
+): ProceduralRule {
+  const db = getDb();
+  const id = `rule-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  const timestamp = new Date().toISOString();
+
+  const existing = db.prepare("SELECT * FROM procedural_rules WHERE rule = ?").get(rule) as any;
+  if (existing) {
+    db.prepare("UPDATE procedural_rules SET confidence = MIN(confidence + 0.1, 2.0), applied_count = applied_count + 1 WHERE id = ?").run(existing.id);
+    return {
+      id: existing.id,
+      triggerContext: existing.trigger_context,
+      rule: existing.rule,
+      rationale: existing.rationale,
+      sourceFailure: existing.source_failure,
+      confidence: existing.confidence + 0.1,
+      appliedCount: existing.applied_count + 1,
+      timestamp: existing.timestamp
+    };
+  }
+
+  db.prepare(`
+    INSERT INTO procedural_rules (id, trigger_context, rule, rationale, source_failure, confidence, applied_count, timestamp)
+    VALUES (?, ?, ?, ?, ?, ?, 0, ?)
+  `).run(id, triggerContext, rule, rationale || "", sourceFailure || "", confidence, timestamp);
+
+  return { id, triggerContext, rule, rationale, sourceFailure, confidence, appliedCount: 0, timestamp };
+}
+
+export function getRelevantProceduralRules(query: string, limit: number = 4): ProceduralRule[] {
+  const db = getDb();
+  const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+  const all = db.prepare("SELECT * FROM procedural_rules ORDER BY confidence DESC, applied_count DESC LIMIT 50").all() as any[];
+
+  if (!all.length) return [];
+  if (!terms.length) return all.slice(0, limit).map(mapDbRule);
+
+  const scored = all.map(r => {
+    const text = `${r.trigger_context} ${r.rule} ${r.rationale || ""}`.toLowerCase();
+    let score = 0;
+    for (const term of terms) {
+      if (text.includes(term)) score += 1;
+    }
+    return { rule: mapDbRule(r), score };
+  });
+
+  scored.sort((a, b) => b.score - a.score || b.rule.confidence - a.rule.confidence);
+  return scored.filter(s => s.score > 0).slice(0, limit).map(s => s.rule);
+}
+
+export function getAllProceduralRules(): ProceduralRule[] {
+  const db = getDb();
+  const rows = db.prepare("SELECT * FROM procedural_rules ORDER BY timestamp DESC").all() as any[];
+  return rows.map(mapDbRule);
+}
+
+function mapDbRule(r: any): ProceduralRule {
+  return {
+    id: r.id,
+    triggerContext: r.trigger_context,
+    rule: r.rule,
+    rationale: r.rationale,
+    sourceFailure: r.source_failure,
+    confidence: r.confidence,
+    appliedCount: r.applied_count,
+    timestamp: r.timestamp
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SYNTHESIZED SKILLS REPOSITORY
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function saveSynthesizedSkill(skill: Omit<SynthesizedSkill, "id" | "createdAt" | "updatedAt" | "successCount" | "failureCount"> & { id?: string }): SynthesizedSkill {
+  const db = getDb();
+  const id = skill.id || `skill-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+  const now = new Date().toISOString();
+
+  db.prepare(`
+    INSERT INTO synthesized_skills (id, name, description, language, code, input_schema, test_cases, is_verified, success_count, failure_count, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+    ON CONFLICT(name) DO UPDATE SET
+      description = excluded.description,
+      language = excluded.language,
+      code = excluded.code,
+      input_schema = excluded.input_schema,
+      test_cases = excluded.test_cases,
+      is_verified = excluded.is_verified,
+      updated_at = excluded.updated_at
+  `).run(
+    id,
+    skill.name,
+    skill.description,
+    skill.language,
+    skill.code,
+    skill.inputSchema,
+    skill.testCases,
+    skill.isVerified ? 1 : 0,
+    now,
+    now
+  );
+
+  return {
+    id,
+    name: skill.name,
+    description: skill.description,
+    language: skill.language,
+    code: skill.code,
+    inputSchema: skill.inputSchema,
+    testCases: skill.testCases,
+    isVerified: skill.isVerified,
+    successCount: 0,
+    failureCount: 0,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+export function loadSynthesizedSkills(onlyVerified: boolean = false): SynthesizedSkill[] {
+  const db = getDb();
+  const query = onlyVerified
+    ? "SELECT * FROM synthesized_skills WHERE is_verified = 1 ORDER BY success_count DESC, updated_at DESC"
+    : "SELECT * FROM synthesized_skills ORDER BY updated_at DESC";
+  const rows = db.prepare(query).all() as any[];
+  return rows.map(r => ({
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    language: r.language,
+    code: r.code,
+    inputSchema: r.input_schema,
+    testCases: r.test_cases,
+    isVerified: !!r.is_verified,
+    successCount: r.success_count,
+    failureCount: r.failure_count,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  }));
+}
+
+export function getSynthesizedSkillByName(name: string): SynthesizedSkill | null {
+  const db = getDb();
+  const r = db.prepare("SELECT * FROM synthesized_skills WHERE name = ?").get(name) as any;
+  if (!r) return null;
+  return {
+    id: r.id,
+    name: r.name,
+    description: r.description,
+    language: r.language,
+    code: r.code,
+    inputSchema: r.input_schema,
+    testCases: r.test_cases,
+    isVerified: !!r.is_verified,
+    successCount: r.success_count,
+    failureCount: r.failure_count,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at
+  };
+}
+
+export function updateSkillStats(name: string, success: boolean): void {
+  const db = getDb();
+  if (success) {
+    db.prepare("UPDATE synthesized_skills SET success_count = success_count + 1 WHERE name = ?").run(name);
+  } else {
+    db.prepare("UPDATE synthesized_skills SET failure_count = failure_count + 1 WHERE name = ?").run(name);
+  }
+}
+
+export function deleteSynthesizedSkill(name: string): boolean {
+  const db = getDb();
+  const res = db.prepare("DELETE FROM synthesized_skills WHERE name = ?").run(name);
+  return res.changes > 0;
+}
+

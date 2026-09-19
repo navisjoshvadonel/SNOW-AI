@@ -31,6 +31,7 @@ import { join, resolve, relative, extname } from "path";
 import { glob } from "glob"; // npm: glob
 import type { ToolDefinition, ToolUseContext } from "./types.js";
 import { desktopActuator } from "../services/desktopActuator.js";
+import { skillSynthesizer } from "../services/skillSynthesizer.js";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -1601,6 +1602,106 @@ export const LinuxSystemTool: ToolDefinition<LinuxSystemInput> = {
   }
 };
 
+// ─── SkillSynthesizerTool ───────────────────────────────────────────────────
+
+type SkillSynthesizerInput = {
+  action: "synthesize" | "list" | "execute";
+  name?: string;
+  description?: string;
+  requirement?: string;
+  input?: any;
+};
+
+export const SkillSynthesizerTool: ToolDefinition<SkillSynthesizerInput> = {
+  name: "SkillSynthesizer",
+  description:
+    "Autonomous Runtime Tool Generator & Skill Synthesizer (Voyager/Eureka pattern). " +
+    "Allows Snow to generate brand new Python tools at runtime to overcome capability gaps. " +
+    "Can synthesize new tools from requirements ('synthesize'), list all verified tools ('list'), " +
+    "or run a synthesized tool ('execute'). Verified skills are automatically hot-registered into the toolset.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["synthesize", "list", "execute"],
+        description: "Action to perform on synthesized skills."
+      },
+      name: { type: "string", description: "Identifier name for the skill (e.g. 'json_stats_parser', 'matrix_calculator')" },
+      description: { type: "string", description: "Clear explanation of what the tool accomplishes" },
+      requirement: { type: "string", description: "Natural language specification of what logic the tool must execute" },
+      input: { type: "object", description: "Input payload to pass to the tool for 'execute' action" }
+    },
+    required: ["action"]
+  },
+
+  validate(input) {
+    if (!input.action) return { valid: false, message: "action is required", code: 400 };
+    if (input.action === "synthesize" && (!input.name || !input.requirement)) {
+      return { valid: false, message: "name and requirement are required for synthesize", code: 400 };
+    }
+    if (input.action === "execute" && !input.name) {
+      return { valid: false, message: "name is required for execute", code: 400 };
+    }
+    return { valid: true };
+  },
+
+  checkPermission(_input, _ctx) {
+    return { granted: true };
+  },
+
+  async *execute(input, _ctx) {
+    yield { type: "progress", data: null, label: `SkillSynthesizer: ${input.action}` };
+
+    try {
+      if (input.action === "list") {
+        const skills = skillSynthesizer.getDynamicTools();
+        const names = Array.from(skills.keys());
+        if (!names.length) {
+          return { content: "No dynamic skills synthesized yet. You can synthesize a new tool using action: 'synthesize'.", isError: false };
+        }
+        const listStr = names.map(n => `- ${n}: ${skills.get(n)?.description}`).join("\n");
+        return { content: `Verified Synthesized Skills (${names.length}):\n${listStr}`, isError: false };
+      }
+
+      if (input.action === "synthesize") {
+        const apiKey = process.env.GEMINI_API_KEY || "";
+        const result = await skillSynthesizer.synthesizeSkill({
+          name: input.name!,
+          description: input.description || input.requirement!,
+          requirement: input.requirement!
+        }, apiKey);
+
+        if (!result.success) {
+          return { content: `Skill synthesis failed: ${result.error || "Validation error"}`, isError: true };
+        }
+
+        return {
+          content: `✅ Successfully synthesized, sandbox-validated, and registered new tool '${result.skill?.name}'!\n` +
+            `Description: ${result.skill?.description}\n` +
+            `You can now call this tool directly or via SkillSynthesizer (action: 'execute', name: '${result.skill?.name}').`,
+          isError: false
+        };
+      }
+
+      if (input.action === "execute") {
+        const result = await skillSynthesizer.executeSkill(input.name!, input.input || {});
+        if (!result.success) {
+          return { content: `Skill execution failed: ${result.error}`, isError: true };
+        }
+        return {
+          content: `Skill '${input.name}' output:\n${JSON.stringify(result.output, null, 2)}`,
+          isError: false
+        };
+      }
+
+      return { content: `Unsupported action: ${input.action}`, isError: true };
+    } catch (err: any) {
+      return { content: `SkillSynthesizer error: ${err.message}`, isError: true };
+    }
+  }
+};
+
 // ─── Registry builder ─────────────────────────────────────────────────────────
 
 export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>> {
@@ -1610,10 +1711,23 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
     GlobTool, GrepTool, WebSearchTool, WeatherTool,
     SystemTelemetryTool, MemoryStoreTool, AppLauncherTool, MediaControlTool,
     PythonSandboxTool, ClipboardTool, NotificationTool, ProcessManagerTool,
-    ServiceManagerTool, GitManagerTool, ComputerUseTool, LinuxSystemTool
+    ServiceManagerTool, GitManagerTool, ComputerUseTool, LinuxSystemTool,
+    SkillSynthesizerTool
   ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }
+
+  // Merge any runtime synthesized dynamic skills
+  try {
+    const dynamicTools = skillSynthesizer.getDynamicTools();
+    for (const [name, tool] of dynamicTools) {
+      if (!registry.has(name)) {
+        registry.set(name, tool);
+      }
+    }
+  } catch {}
+
   return registry;
 }
+
 

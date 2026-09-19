@@ -31,7 +31,10 @@ import {
   getUnifiedContext,
   recordDecision,
   searchDecisions,
-  loadRecentDecisions
+  loadRecentDecisions,
+  getAllProceduralRules,
+  deleteSynthesizedSkill,
+  loadSynthesizedSkills
 } from "./brain";
 import {
   ragIngest,
@@ -59,6 +62,8 @@ import { audioSynthesis } from "./services/audioSynthesis";
 import { telemetryBridge } from "./services/telemetryBridge";
 import { workshopProfiles } from "./services/workshopProfiles";
 import { agentSwarm } from "./files claude/agentSwarm";
+import { reflexionEngine } from "./services/reflexionEngine";
+import { skillSynthesizer } from "./services/skillSynthesizer";
 import {
   verifyPassword,
   verifyPasscode,
@@ -963,7 +968,18 @@ function routeToSpecialist(prompt: string): { specialist: AgentSpecialist; direc
     };
   }
 
-  // 2. SysAdmin Specialist
+  // 2. Skill Synthesizer & Meta-Learning Specialist
+  if (
+    /\b(synthesize tool|create tool|new tool|make tool|generate tool|new skill|synthesize skill|expand toolset|invent tool)\b/.test(p)
+  ) {
+    return {
+      specialist: "coder",
+      directive: "SPECIALIST ROLE: Meta-Cognitive Tool Synthesizer & Skill Architect. Use SkillSynthesizer (action: 'synthesize', name: '...', requirement: '...') to author, sandbox-test, and dynamically register new Python capabilities into your live toolset.",
+      priorityTools: "SkillSynthesizer, PythonSandbox, Bash, FileRead, FileWrite"
+    };
+  }
+
+  // 3. SysAdmin Specialist
   if (
     /\b(cpu|ram|memory|disk|hardware|temperature|temp|process|processes|top|kill|service|systemd|daemon|journalctl|status|clipboard|copy|paste|notification|notify|volume|mute|media|play|pause|app|launch|terminal|reboot|shutdown|uptime)\b/.test(p)
   ) {
@@ -974,18 +990,18 @@ function routeToSpecialist(prompt: string): { specialist: AgentSpecialist; direc
     };
   }
 
-  // 3. Coder Specialist
+  // 4. Coder Specialist
   if (
     /\b(python|code|script|sandbox|function|class|git|branch|commit|diff|repository|repo|file|read file|write file|edit file|debug|traceback|syntax|compile|build|refactor)\b/.test(p)
   ) {
     return {
       specialist: "coder",
       directive: "SPECIALIST ROLE: Autonomous Software Engineer & Code Architect. You excel at executing Python code in the sandbox (PythonSandbox), diagnosing tracebacks with self-healing reflexion, running git operations (GitManager), and inspecting or editing codebase files (FileRead, FileWrite, FileEdit, Bash). Proactively test and verify code.",
-      priorityTools: "PythonSandbox, GitManager, FileRead, FileWrite, FileEdit, Bash, Glob, Grep"
+      priorityTools: "PythonSandbox, GitManager, FileRead, FileWrite, FileEdit, Bash, Glob, Grep, SkillSynthesizer"
     };
   }
 
-  // 4. Researcher Specialist
+  // 5. Researcher Specialist
   if (
     /\b(search|find out|google|web|weather|forecast|who is|what is|latest news|remember|recall|memory|knowledge|learn|history)\b/.test(p)
   ) {
@@ -996,7 +1012,7 @@ function routeToSpecialist(prompt: string): { specialist: AgentSpecialist; direc
     };
   }
 
-  // 5. General Assistant
+  // 6. General Assistant
   return {
     specialist: "general",
     directive: "SPECIALIST ROLE: Universal Personal AI Assistant. You have full access to all system tools and seamlessly orchestrate multi-step tasks across the operating system, code, and knowledge base.",
@@ -1024,6 +1040,7 @@ async function runReActAgenticLoop(
   }
 
   const { specialist, directive, priorityTools } = routeToSpecialist(userPrompt);
+  const proceduralWisdom = reflexionEngine.getOperationalWisdomBlock(userPrompt);
 
   const systemPrompt = `You are S.N.O.W. (Brain Level ${brainState.level}), an autonomous, highly sophisticated, calm, and soothing female AI assistant and operations intelligence system engineered exclusively for nj.
 CORE IDENTITY & PERSONA:
@@ -1047,12 +1064,14 @@ ${directive}
 PRIORITY TOOLSET: ${priorityTools}
 
 ${memoryContext}
+${proceduralWisdom ? `\n${proceduralWisdom}\n` : ""}
 
 RULES:
 - NEVER output raw brackets, tags, or JSON in speech. Speak only in natural, clean sentences.
-- You have full access to native Linux tools (ComputerUse, LinuxSystem, SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, PythonSandbox, GitManager, WebSearch, Weather, Bash, FileRead, FileWrite, FileEdit, MemoryStore, AppLauncher, MediaControl). Invoke them autonomously whenever needed to execute multi-step reasoning.
+- You have full access to native Linux tools (SkillSynthesizer, ComputerUse, LinuxSystem, SystemTelemetry, ProcessManager, ServiceManager, Clipboard, Notification, PythonSandbox, GitManager, WebSearch, Weather, Bash, FileRead, FileWrite, FileEdit, MemoryStore, AppLauncher, MediaControl). Invoke them autonomously whenever needed to execute multi-step reasoning.
 - CLOSED-LOOP COMPUTER USE: When controlling the desktop via ComputerUse, examine the returned visual delta and verification report. If stateChanged is false or visual delta is minimal, adapt your coordinates or check if the target window needs focusing first.
 - SELF-HEALING REFLEXION: When executing code via PythonSandbox or shell commands, if an execution returns an error or traceback, inspect the error details, fix the code/command, and re-execute immediately until it succeeds.
+- DYNAMIC SKILL GENERATION: If you lack a specific tool to solve a computational or automation problem, use SkillSynthesizer to author, test, and register a Python tool on the fly.
 - Keep responses concise and conversational — 2 to 3 sentences is ideal unless detailed step-by-step guidance is requested by nj.`;
 
   const initialMessages: Message[] = [];
@@ -1133,6 +1152,19 @@ RULES:
           isError: !!event.result?.isError,
           durationMs: duration
         });
+
+        // Trigger autonomous procedural reflexion on failure in background
+        if (event.result?.isError) {
+          const apiKey = process.env.GEMINI_API_KEY || "";
+          reflexionEngine.analyzeFailure({
+            contextQuery: userPrompt,
+            toolName: start?.name || "Tool",
+            toolInput: start?.inputSummary,
+            errorMessage: contentStr
+          }, apiKey).catch(err => {
+            console.warn("[Reflexion Engine] Analysis background notice:", err.message);
+          });
+        }
       }
       if (event.type === "content_block_delta" && typeof event.delta === "string") {
         fullText += event.delta;
@@ -1654,6 +1686,37 @@ async function startServer() {
       connections: activeMcpConnections,
       tools: activeMcpTools.map(t => ({ name: t.name, description: t.description }))
     });
+  });
+
+  // ── Dynamic Synthesized Skills & Procedural Reflexion Endpoints ───────────
+  app.get("/api/snow/skills", (_req, res) => {
+    const skills = loadSynthesizedSkills();
+    res.json({ skills, count: skills.length });
+  });
+
+  app.post("/api/snow/skills/synthesize", async (req, res) => {
+    try {
+      const { name, description, requirement } = req.body;
+      if (!name || !requirement) {
+        return res.status(400).json({ error: "Name and requirement strings are required." });
+      }
+      const apiKey = process.env.GEMINI_API_KEY || "";
+      const result = await skillSynthesizer.synthesizeSkill({ name, description: description || requirement, requirement }, apiKey);
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.delete("/api/snow/skills/:name", (req, res) => {
+    const deleted = deleteSynthesizedSkill(req.params.name);
+    skillSynthesizer.reloadDynamicTools();
+    res.json({ success: deleted });
+  });
+
+  app.get("/api/snow/reflexion/rules", (_req, res) => {
+    const rules = getAllProceduralRules();
+    res.json({ rules, count: rules.length });
   });
 
   // ── /api/snow/chat — main AI endpoint ────────────────────────────────────
