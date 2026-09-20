@@ -1,8 +1,8 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  Send, Download, Trash2, Copy, ThumbsUp, ThumbsDown,
-  Mic, MicOff, Volume2, VolumeX, Paperclip, X,
+  Send, Download, Trash2, Copy, Check, ThumbsUp, ThumbsDown,
+  Mic, MicOff, Volume2, VolumeX, Paperclip, X, Eye, FileCode,
   Terminal, ShieldCheck, Sparkles, BrainCircuit
 } from "lucide-react";
 
@@ -66,6 +66,16 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
   renderWidgetContent,
 }) => {
   const chatEndRef = useRef<HTMLDivElement>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [previewFile, setPreviewFile] = useState<{ name: string; path: string; content: string } | null>(null);
+
+  const handleCopy = (id: string, text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedId(id);
+    setTimeout(() => {
+      setCopiedId((curr) => (curr === id ? null : curr));
+    }, 2000);
+  };
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -182,18 +192,23 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
               >
                 {/* Tool Activity Execution Pills */}
                 {msg.toolActivity && msg.toolActivity.length > 0 && (
-                  <div className="mb-2.5 pb-2 border-b border-cyan-500/15 space-y-1 font-mono">
-                    <div className="text-[9px] text-cyan-400/80 font-bold uppercase tracking-widest flex items-center gap-1">
-                      <Terminal className="w-3 h-3 text-cyan-400" />
-                      <span>ACTIONS TAKEN</span>
+                  <div className="mb-2.5 pb-2 border-b border-cyan-500/15 space-y-1.5 font-mono">
+                    <div className="text-[9px] text-cyan-400/90 font-bold uppercase tracking-widest flex items-center justify-between">
+                      <span className="flex items-center gap-1.5">
+                        <Terminal className="w-3 h-3 text-cyan-400" />
+                        <span>TACTICAL ACTIONS EXECUTED</span>
+                      </span>
+                      <span className="text-[8px] text-emerald-400 bg-emerald-950/70 border border-emerald-500/30 px-1.5 py-0.2 rounded font-bold">
+                        {msg.toolActivity.length} VERIFIED
+                      </span>
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {msg.toolActivity.map((tool, idx) => (
                         <span
                           key={idx}
-                          className="px-2 py-0.5 rounded-md bg-cyan-950/80 border border-cyan-400/30 text-[9px] text-cyan-300 font-mono flex items-center gap-1"
+                          className="px-2 py-0.5 rounded-md bg-cyan-950/80 border border-cyan-400/30 text-[9px] text-cyan-200 font-mono flex items-center gap-1 shadow-sm"
                         >
-                          <span className="w-1 h-1 rounded-full bg-emerald-400" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                           <span>{tool}</span>
                         </span>
                       ))}
@@ -219,11 +234,18 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
 
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => navigator.clipboard.writeText(msg.text)}
-                        className="hover:text-cyan-300 transition cursor-pointer p-0.5"
-                        title="Copy response"
+                        onClick={() => handleCopy(msg.id, msg.text)}
+                        className="hover:text-cyan-300 transition cursor-pointer p-0.5 flex items-center gap-1"
+                        title={copiedId === msg.id ? "Copied to clipboard" : "Copy response"}
                       >
-                        <Copy className="w-3 h-3" />
+                        {copiedId === msg.id ? (
+                          <Check className="w-3 h-3 text-emerald-400" />
+                        ) : (
+                          <Copy className="w-3 h-3" />
+                        )}
+                        {copiedId === msg.id && (
+                          <span className="text-[9px] text-emerald-400 font-bold">Copied</span>
+                        )}
                       </button>
                       <button
                         onClick={() => onSendFeedback(msg.id, "thumbs_up")}
@@ -349,13 +371,22 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
             {attachedContextFiles.map((file) => (
               <div
                 key={file.path}
-                className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-cyan-950/90 border border-cyan-400/40 text-cyan-300 text-[10px] shadow-sm font-mono"
+                className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-cyan-950/90 border border-cyan-400/40 text-cyan-300 text-[10px] shadow-sm font-mono group"
               >
-                <Paperclip className="w-2.5 h-2.5 text-cyan-400" />
-                <span className="truncate max-w-[120px]">{file.name}</span>
+                <button
+                  type="button"
+                  onClick={() => setPreviewFile(file)}
+                  className="flex items-center gap-1 hover:text-cyan-100 transition cursor-pointer"
+                  title="Click to preview file contents"
+                >
+                  <Paperclip className="w-2.5 h-2.5 text-cyan-400" />
+                  <span className="truncate max-w-[110px]">{file.name}</span>
+                  <Eye className="w-2.5 h-2.5 opacity-60 group-hover:opacity-100 text-cyan-300 ml-0.5" />
+                </button>
                 <button
                   onClick={() => onRemoveAttachment(file.path)}
-                  className="hover:text-rose-400 transition ml-0.5"
+                  className="hover:text-rose-400 transition ml-0.5 cursor-pointer"
+                  title="Remove attachment"
                 >
                   <X className="w-2.5 h-2.5" />
                 </button>
@@ -424,6 +455,59 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Attached Context File Holographic Preview Modal */}
+      <AnimatePresence>
+        {previewFile && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            className="absolute inset-3 z-50 rounded-2xl bg-slate-950/95 border border-cyan-500/50 backdrop-blur-2xl p-3.5 flex flex-col shadow-[0_0_50px_rgba(6,182,212,0.35)]"
+          >
+            <div className="flex items-center justify-between pb-2 border-b border-cyan-500/20 font-mono">
+              <div className="flex items-center gap-2 text-cyan-300 text-xs font-bold truncate">
+                <FileCode className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+                <span className="truncate">{previewFile.name}</span>
+                <span className="text-[9px] text-slate-500 font-normal">
+                  ({previewFile.content.split("\n").length} lines)
+                </span>
+              </div>
+              <button
+                onClick={() => setPreviewFile(null)}
+                className="p-1 rounded-lg hover:bg-cyan-500/20 text-slate-400 hover:text-white transition cursor-pointer"
+                title="Close preview"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto mt-2 p-2.5 rounded-xl bg-slate-900/90 border border-cyan-500/15 font-mono text-[10px] text-slate-300 whitespace-pre-wrap select-text scrollbar-thin leading-relaxed">
+              {previewFile.content.slice(0, 10000)}
+              {previewFile.content.length > 10000 && "\n\n... [Content truncated for preview]"}
+            </div>
+            <div className="pt-2 mt-2 border-t border-cyan-500/20 flex justify-between items-center font-mono text-[10px]">
+              <span className="text-slate-500 truncate max-w-[180px]">{previewFile.path}</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    onRemoveAttachment(previewFile.path);
+                    setPreviewFile(null);
+                  }}
+                  className="px-2 py-1 rounded-lg border border-rose-500/30 bg-rose-950/60 text-rose-300 hover:bg-rose-900/60 transition cursor-pointer"
+                >
+                  Remove Attachment
+                </button>
+                <button
+                  onClick={() => setPreviewFile(null)}
+                  className="px-2.5 py-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/20 transition cursor-pointer font-bold"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

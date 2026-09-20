@@ -22,7 +22,7 @@ import QuantumArcCore from "./components/QuantumArcCore";
 import TacticalTelemetryHUD from "./components/TacticalTelemetryHUD";
 import HolographicMissionLog from "./components/HolographicMissionLog";
 import SnowfallBackground from "./components/SnowfallBackground";
-import { MemoryNode, CodeFile } from "./types";
+import { MemoryNode, CodeFile, TelemetryPackage } from "./types";
 import PasswordGate from "./components/PasswordGate";
 
 type WeatherType = "default" | "sunny" | "rain" | "cloudy" | "snow" | "storm";
@@ -472,6 +472,19 @@ export default function App() {
     loadAvg: "Optimal 12%"
   });
   const [systemLoadPct, setSystemLoadPct] = useState(12);
+  const [telemetryPackage, setTelemetryPackage] = useState<TelemetryPackage | null>(null);
+
+  const fetchTelemetryPackage = async () => {
+    try {
+      const res = await fetch("/api/snow/telemetry/package");
+      if (res.ok) {
+        const pkg: TelemetryPackage = await res.json();
+        setTelemetryPackage(pkg);
+      }
+    } catch {
+      // Non-fatal fallback
+    }
+  };
 
   // Weather State
   const [weatherState, setWeatherState] = useState<WeatherType>("default");
@@ -783,10 +796,11 @@ export default function App() {
     fetchMemories();
     fetchVectors();
     fetchBrainStatus();
+    fetchTelemetryPackage();
     fetchLiveWeather("Madurai, Tamil Nadu, India");
   }, []);
 
-  // Poll live system stats every 5 seconds
+  // Poll live system stats & telemetry
   useEffect(() => {
     const fetchStats = async () => {
       try {
@@ -803,8 +817,13 @@ export default function App() {
       } catch { /* ignore */ }
     };
     fetchStats();
+    fetchTelemetryPackage();
     const interval = setInterval(fetchStats, 5000);
-    return () => clearInterval(interval);
+    const telemetryInterval = setInterval(fetchTelemetryPackage, 10000);
+    return () => {
+      clearInterval(interval);
+      clearInterval(telemetryInterval);
+    };
   }, []);
 
   // Initial dynamic, situation-aware greeting for NJ
@@ -1984,6 +2003,7 @@ export default function App() {
               diskUsage={liveStats.disk || "84.1/157.5 GB"}
               uptimeFormatted={formatUptime(uptimeSeconds)}
               commandCount={commandCount}
+              telemetryPackage={telemetryPackage}
               weather={{
                 temp: liveWeather.temp,
                 condition: liveWeather.condition,
@@ -2007,6 +2027,7 @@ export default function App() {
                 triggerToast("Tactical telemetry updated.");
                 fetchLiveWeather();
                 fetchBrainStatus();
+                fetchTelemetryPackage();
               }}
             />
 

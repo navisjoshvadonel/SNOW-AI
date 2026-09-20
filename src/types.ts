@@ -30,3 +30,33 @@ export interface SystemMetrics {
   latency: number;
   networkLoad: number;
 }
+
+export interface HudNodeCoordinate {
+  name: string;
+  lat: number;
+  lng: number;
+  status: "ACTIVE" | "SYNCHRONIZED" | "STANDBY";
+  pingMs: number;
+}
+
+export interface ThreatRadarTarget {
+  angleDeg: number;
+  distancePct: number;
+  type: "SECURE" | "TRACKING" | "ANOMALOUS";
+  label: string;
+}
+
+export interface TelemetryPackage {
+  timestamp: string;
+  gridStatus: "OPTIMAL" | "ENGAGED" | "ALERT";
+  activeCoordinates: HudNodeCoordinate[];
+  radarTargets: ThreatRadarTarget[];
+  orbitalAltitudeKm: number;
+  coreDensity: number[];
+  knowledgeGraphNodesCount: number;
+  systemVitals: {
+    cpuPct: number;
+    ramPct: number;
+    tempC: number;
+  };
+}

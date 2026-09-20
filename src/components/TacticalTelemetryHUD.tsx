@@ -4,7 +4,7 @@ import {
   Activity, Shield, Clock, Cpu, HardDrive,
   Database, RefreshCw, Paperclip, Sparkles, FileCode, Radio
 } from "lucide-react";
-import { CodeFile } from "../types";
+import { CodeFile, TelemetryPackage, ThreatRadarTarget } from "../types";
 
 export interface TacticalTelemetryHUDProps {
   cpuPct: number;
@@ -14,6 +14,7 @@ export interface TacticalTelemetryHUDProps {
   diskUsage: string;
   uptimeFormatted: string;
   commandCount: number;
+  telemetryPackage?: TelemetryPackage | null;
   weather: {
     temp: string;
     condition: string;
@@ -131,6 +132,7 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
   diskUsage,
   uptimeFormatted,
   commandCount,
+  telemetryPackage,
   weather,
   workspaceFiles,
   selectedVaultPath,
@@ -144,6 +146,18 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
   onIngestFileToRAG,
   onRefreshStats,
 }) => {
+  const radarTargets: ThreatRadarTarget[] =
+    telemetryPackage?.radarTargets && telemetryPackage.radarTargets.length > 0
+      ? telemetryPackage.radarTargets
+      : [
+          { angleDeg: 42, distancePct: 30, type: "SECURE", label: "Snow Core Server (Port 3000)" },
+          { angleDeg: 125, distancePct: 45, type: "SECURE", label: "Subprocess Guardian" },
+          { angleDeg: 215, distancePct: 68, type: "TRACKING", label: "Neural Cloud Relay" },
+          { angleDeg: 305, distancePct: 52, type: "SECURE", label: "Port Sentinel" },
+        ];
+
+  const gridStatus = telemetryPackage?.gridStatus || "OPTIMAL";
+
   return (
     <div className="col-span-3 flex flex-col gap-3 overflow-y-auto pr-1 scrollbar-none select-none">
       {/* ─── CARD 1: HARDWARE TELEMETRY ARC METERS ─── */}
@@ -238,8 +252,16 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
             <Shield className="w-3.5 h-3.5 text-emerald-400" />
             <span>SECURITY & ENGINES</span>
           </div>
-          <span className="text-[10px] font-mono font-semibold text-emerald-400 bg-emerald-950/70 border border-emerald-500/30 px-2 py-0.5 rounded-full">
-            ALL CLEAR
+          <span
+            className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full border ${
+              gridStatus === "OPTIMAL"
+                ? "text-emerald-400 bg-emerald-950/70 border-emerald-500/30"
+                : gridStatus === "ENGAGED"
+                ? "text-cyan-300 bg-cyan-950/70 border-cyan-500/30"
+                : "text-rose-400 bg-rose-950/70 border-rose-500/30 animate-pulse"
+            }`}
+          >
+            {gridStatus === "OPTIMAL" ? "ALL CLEAR" : gridStatus}
           </span>
         </div>
 
@@ -261,26 +283,54 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
             {/* Rotating Conical Sweep Beam */}
             <div className="absolute inset-0 radar-sweep opacity-70" />
 
-            {/* Blip Nodes (Simulated Active Processes) */}
-            <div className="absolute top-4 left-6 w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399] animate-pulse" />
-            <div className="absolute bottom-6 right-5 w-1.5 h-1.5 rounded-full bg-cyan-400 shadow-[0_0_6px_#22d3ee] animate-pulse" />
-            <div className="absolute top-7 right-7 w-1.5 h-1.5 rounded-full bg-sky-300 shadow-[0_0_6px_#38bdf8] animate-pulse" />
+            {/* Dynamic Blip Nodes mapped from Polar Coordinates */}
+            {radarTargets.map((target, idx) => {
+              const angleRad = ((target.angleDeg - 90) * Math.PI) / 180;
+              const r = (Math.max(12, Math.min(88, target.distancePct)) / 100) * 40;
+              const x = 48 + r * Math.cos(angleRad);
+              const y = 48 + r * Math.sin(angleRad);
+              const colorClass =
+                target.type === "SECURE"
+                  ? "bg-emerald-400 shadow-[0_0_6px_#34d399]"
+                  : target.type === "TRACKING"
+                  ? "bg-cyan-400 shadow-[0_0_6px_#22d3ee]"
+                  : "bg-rose-400 shadow-[0_0_6px_#f43f5e]";
+
+              return (
+                <div
+                  key={idx}
+                  className={`absolute w-1.5 h-1.5 rounded-full ${colorClass} animate-pulse cursor-pointer transition-transform hover:scale-150`}
+                  style={{ left: `${x - 3}px`, top: `${y - 3}px` }}
+                  title={`${target.label} (${target.type})`}
+                />
+              );
+            })}
           </div>
 
-          {/* Active Process Telemetry */}
+          {/* Dynamic Active Process & Socket Telemetry */}
           <div className="flex-1 space-y-1.5 font-mono text-[10px]">
-            <div className="flex justify-between items-center bg-slate-950/70 px-2 py-1 rounded-lg border border-cyan-500/15">
-              <span className="text-slate-400 truncate">SYSTEM CONTROL</span>
-              <span className="text-cyan-300 font-bold">CONNECTED</span>
-            </div>
-            <div className="flex justify-between items-center bg-slate-950/70 px-2 py-1 rounded-lg border border-cyan-500/15">
-              <span className="text-slate-400 truncate">VOICE ENGINE</span>
-              <span className="text-emerald-300 font-bold">INSTANT</span>
-            </div>
-            <div className="flex justify-between items-center bg-slate-950/70 px-2 py-1 rounded-lg border border-cyan-500/15">
-              <span className="text-slate-400 truncate">AI ASSISTANTS</span>
-              <span className="text-blue-300 font-bold">4 READY</span>
-            </div>
+            {radarTargets.slice(0, 3).map((t, idx) => (
+              <div
+                key={idx}
+                className="flex justify-between items-center bg-slate-950/70 px-2 py-1 rounded-lg border border-cyan-500/15"
+                title={t.label}
+              >
+                <span className="text-slate-400 truncate max-w-[95px]">
+                  {t.label.replace(/\s*\(Port \d+\)/, "")}
+                </span>
+                <span
+                  className={`font-bold ${
+                    t.type === "SECURE"
+                      ? "text-emerald-300"
+                      : t.type === "TRACKING"
+                      ? "text-cyan-300"
+                      : "text-rose-400"
+                  }`}
+                >
+                  {t.type === "SECURE" ? "SECURE" : t.type === "TRACKING" ? "SYNC" : "ALERT"}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -433,6 +483,19 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
           </div>
           <span className="font-bold text-white tracking-wider">{uptimeFormatted}</span>
         </div>
+
+        {telemetryPackage && (
+          <div className="mt-2 pt-2 border-t border-cyan-500/15 flex items-center justify-between font-mono text-[9px] text-cyan-400/80">
+            <span className="flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping" />
+              <span>ORBIT: {telemetryPackage.orbitalAltitudeKm} KM</span>
+            </span>
+            <span className="text-emerald-300 font-bold tracking-wider">
+              {telemetryPackage.activeCoordinates[0]?.name.split("(")[1]?.replace(")", "") || "PRIMARY"} •{" "}
+              {telemetryPackage.activeCoordinates[0]?.pingMs || 1}ms
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
