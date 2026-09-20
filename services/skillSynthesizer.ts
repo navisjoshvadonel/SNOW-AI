@@ -48,6 +48,34 @@ export interface SkillSynthesisResult {
   error?: string;
 }
 
+const GEMINI_SYNTHESIS_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-1.5-flash",
+];
+
+async function callGenAIWithCascade(ai: GoogleGenAI, promptPayload: {
+  contents: any[];
+  config?: any;
+}): Promise<string> {
+  let lastError: Error | null = null;
+  for (const model of GEMINI_SYNTHESIS_MODELS) {
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: promptPayload.contents,
+        config: promptPayload.config,
+      });
+      const text = response.text?.trim() || "";
+      if (text) return text;
+    } catch (err: any) {
+      lastError = err;
+      console.warn(`[SkillSynthesizer] Model '${model}' failed: ${err.message}. Trying next in cascade...`);
+    }
+  }
+  throw lastError || new Error("All models in synthesis cascade failed.");
+}
+
 class SkillSynthesizerService {
   private activeDynamicTools: Map<string, ToolDefinition<unknown>> = new Map();
 
@@ -117,21 +145,29 @@ except Exception as e:
     sys.exit(1)
 `;
 
-    const res = await runPythonCode(testHarness, 8000, { allowNetwork: false });
+    try {
+      const res = await runPythonCode(testHarness, 8000, { allowNetwork: false });
 
-    if (res.success && res.stdout.includes('"validation": "PASSED"')) {
+      if (res.success && res.stdout.includes('"validation": "PASSED"')) {
+        return {
+          valid: true,
+          testOutput: res.stdout,
+          executionTimeMs: res.executionTimeMs
+        };
+      }
+
       return {
-        valid: true,
-        testOutput: res.stdout,
+        valid: false,
+        error: res.stderr || res.stdout || "Execution failed without output.",
         executionTimeMs: res.executionTimeMs
       };
+    } catch (err: any) {
+      return {
+        valid: false,
+        error: `Sandbox execution error: ${err.message}`,
+        executionTimeMs: 0
+      };
     }
-
-    return {
-      valid: false,
-      error: res.stderr || res.stdout || "Execution failed without output.",
-      executionTimeMs: res.executionTimeMs
-    };
   }
 
   /**
@@ -181,18 +217,14 @@ Proposed Description: "${req.description}"
 Generate the complete, hardened Python tool and test cases.`;
 
     try {
-      let candidateRes = await ai.models.generateContent({
-        model: "gemini-flash-latest",
-        contents: [
-          { role: "user", parts: [{ text: userPrompt }] }
-        ],
+      let raw = await callGenAIWithCascade(ai, {
+        contents: [{ role: "user", parts: [{ text: userPrompt }] }],
         config: {
           systemInstruction: systemPrompt,
           responseMimeType: "application/json"
         }
       });
 
-      let raw = candidateRes.text?.trim() || "";
       let parsed: any;
       try {
         parsed = JSON.parse(raw);
@@ -223,13 +255,11 @@ ${code}
 Fix the Python code so all test cases pass without any runtime exceptions.
 Return ONLY the corrected Python code inside a JSON object: {"code": "fixed python code"}`;
 
-        const repairRes = await ai.models.generateContent({
-          model: "gemini-flash-latest",
+        const repairedRaw = await callGenAIWithCascade(ai, {
           contents: [{ role: "user", parts: [{ text: repairPrompt }] }],
           config: { responseMimeType: "application/json" }
         });
 
-        const repairedRaw = repairRes.text?.trim() || "";
         const repairedJson = JSON.parse(repairedRaw.match(/\{[\s\S]*\}/)?.[0] || "{}");
         if (repairedJson.code) {
           code = repairedJson.code;

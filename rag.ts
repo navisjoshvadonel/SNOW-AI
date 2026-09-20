@@ -246,10 +246,14 @@ export async function embedText(text: string): Promise<number[]> {
     try {
       const ai = getGeminiAi();
       if (ai) {
-        const res: any = await ai.models.embedContent({
+        const embedPromise = ai.models.embedContent({
           model: "text-embedding-004",
           contents: [{ parts: [{ text: clean }] }]
         });
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Gemini embedContent timeout")), 5000)
+        );
+        const res: any = await Promise.race([embedPromise, timeoutPromise]);
         const values = res.embedding?.values || res.embeddings?.[0]?.values;
         if (Array.isArray(values) && values.length > 0) {
           resultVec = values;
@@ -607,4 +611,86 @@ export function ragLoadAll(): RagChunk[] {
     timestamp: row.timestamp,
   }));
 }
+
+// ─── SLIDING-WINDOW CHUNKER ───────────────────────────────────────────────────
+
+/**
+ * Splits a document into overlapping text chunks for vector indexing.
+ * @param text The input document text
+ * @param chunkSize The maximum character length of each chunk (default 800)
+ * @param overlap The character overlap between consecutive chunks (default 150)
+ */
+export function chunkDocument(text: string, chunkSize: number = 800, overlap: number = 150): string[] {
+  const clean = text.trim();
+  if (!clean) return [];
+  if (clean.length <= chunkSize) return [clean];
+
+  const chunks: string[] = [];
+  let start = 0;
+  while (start < clean.length) {
+    let end = start + chunkSize;
+    if (end < clean.length) {
+      // Attempt to break cleanly on paragraph or sentence boundary
+      const boundaryMatch = clean.slice(start, end).lastIndexOf("\n\n");
+      if (boundaryMatch > chunkSize * 0.4) {
+        end = start + boundaryMatch;
+      } else {
+        const sentenceMatch = clean.slice(start, end).lastIndexOf(". ");
+        if (sentenceMatch > chunkSize * 0.4) {
+          end = start + sentenceMatch + 1;
+        }
+      }
+    } else {
+      end = clean.length;
+    }
+
+    const chunk = clean.slice(start, end).trim();
+    if (chunk) chunks.push(chunk);
+
+    if (end >= clean.length) break;
+    start = Math.max(start + 1, end - overlap);
+  }
+
+  return chunks;
+}
+
+/**
+ * Ingest a long document into RAG using sliding-window chunking.
+ */
+export async function ragIngestDocument(
+  text: string,
+  source: string,
+  category: "history" | "preference" | "fact" | "code" | "guideline" = "guideline",
+  chunkSize: number = 800,
+  overlap: number = 150
+): Promise<RagChunk[]> {
+  const chunks = chunkDocument(text, chunkSize, overlap);
+  const ingested: RagChunk[] = [];
+  for (let i = 0; i < chunks.length; i++) {
+    const chunkSource = `${source}#part_${i + 1}_of_${chunks.length}`;
+    const item = await ragIngest(chunks[i], chunkSource, category);
+    ingested.push(item);
+  }
+  return ingested;
+}
+
+// ─── SHUTDOWN & LIFECYCLE ─────────────────────────────────────────────────────
+
+/**
+ * Cleanly checkpoints WAL and closes the SQLite RAG database handle.
+ */
+export function closeRagDb(): void {
+  if (_db) {
+    try {
+      _db.pragma("wal_checkpoint(TRUNCATE)");
+      _db.close();
+      console.log("[RAG] Database connection closed cleanly.");
+    } catch (err: any) {
+      console.warn("[RAG] Error closing database:", err.message);
+    } finally {
+      _db = null;
+    }
+  }
+}
+
 

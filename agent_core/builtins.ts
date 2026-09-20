@@ -32,6 +32,7 @@ import { glob } from "glob"; // npm: glob
 import type { ToolDefinition, ToolUseContext } from "./types.js";
 import { desktopActuator } from "../services/desktopActuator.js";
 import { skillSynthesizer } from "../services/skillSynthesizer.js";
+import { linuxSystemActuator } from "../services/linuxSystemActuator.js";
 import {
   createAutonomousGoal,
   getAutonomousGoals,
@@ -1538,22 +1539,63 @@ export const ComputerUseTool: ToolDefinition<ComputerUseInput> = {
 // ─── LinuxSystemTool ────────────────────────────────────────────────────────
 
 type LinuxSystemInput = {
-  category: "audio" | "display" | "windows" | "power";
-  action: "get_volume" | "set_volume" | "toggle_mute" | "list_windows" | "focus_window" | "get_power_profile" | "set_power_profile";
+  category: "audio" | "display" | "windows" | "power" | "media" | "session";
+  action:
+    | "get_volume"
+    | "set_volume"
+    | "toggle_mute"
+    | "list_windows"
+    | "focus_window"
+    | "close_window"
+    | "get_power_profile"
+    | "set_power_profile"
+    | "play_pause"
+    | "next"
+    | "previous"
+    | "stop"
+    | "media_status"
+    | "lock_screen"
+    | "notify"
+    | "launch_app"
+    | "get_state";
   value?: string | number;
+  message?: string;
 };
 
 export const LinuxSystemTool: ToolDefinition<LinuxSystemInput> = {
   name: "LinuxSystem",
   description:
     "Direct native Linux OS and hardware control. Inspects/sets master audio volume and mute state (PipeWire/PulseAudio), " +
-    "queries/focuses desktop windows, and inspects/sets system power performance profiles.",
+    "queries/focuses/closes desktop windows, sets power performance profiles, controls MPRIS media playback (Spotify/YouTube/browsers), " +
+    "locks the session, launches applications, and dispatches native desktop notifications.",
   inputSchema: {
     type: "object",
     properties: {
-      category: { type: "string", enum: ["audio", "display", "windows", "power"] },
-      action: { type: "string", enum: ["get_volume", "set_volume", "toggle_mute", "list_windows", "focus_window", "get_power_profile", "set_power_profile"] },
-      value: { type: ["string", "number"], description: "Argument for action (e.g., volume level 0-100, window title substring, power profile name)" }
+      category: { type: "string", enum: ["audio", "display", "windows", "power", "media", "session"] },
+      action: {
+        type: "string",
+        enum: [
+          "get_volume",
+          "set_volume",
+          "toggle_mute",
+          "list_windows",
+          "focus_window",
+          "close_window",
+          "get_power_profile",
+          "set_power_profile",
+          "play_pause",
+          "next",
+          "previous",
+          "stop",
+          "media_status",
+          "lock_screen",
+          "notify",
+          "launch_app",
+          "get_state",
+        ]
+      },
+      value: { type: ["string", "number"], description: "Argument for action (e.g., volume level 0-100, window title substring, app name, notification title)" },
+      message: { type: "string", description: "Secondary message argument (e.g. notification body)" }
     },
     required: ["category", "action"]
   },
@@ -1573,37 +1615,75 @@ export const LinuxSystemTool: ToolDefinition<LinuxSystemInput> = {
     try {
       if (input.category === "audio") {
         if (input.action === "get_volume") {
-          const { stdout } = await execAsync("wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null || echo 'Volume: 0.50'");
-          return { content: `Master Audio: ${stdout.trim()}`, isError: false };
+          const res = await linuxSystemActuator.getAudioStatus();
+          return { content: `Master Audio: Volume ${res.volumePct}%, Muted: ${res.muted}`, isError: false };
         } else if (input.action === "set_volume") {
           const vol = Math.max(0, Math.min(100, Number(input.value || 50)));
-          await execAsync(`wpctl set-volume @DEFAULT_AUDIO_SINK@ ${vol / 100} 2>/dev/null || pactl set-sink-volume @DEFAULT_SINK@ ${vol}% 2>/dev/null`);
-          return { content: `Master Audio volume set to ${vol}%`, isError: false };
+          const res = await linuxSystemActuator.setVolume(vol);
+          return { content: `Master Audio volume set to ${res.volumePct}%`, isError: false };
         } else if (input.action === "toggle_mute") {
-          await execAsync("wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle 2>/dev/null || pactl set-sink-mute @DEFAULT_SINK@ toggle 2>/dev/null");
-          return { content: "Toggled audio mute state.", isError: false };
+          const res = await linuxSystemActuator.toggleMute();
+          return { content: `Toggled audio mute state. Currently muted: ${res.muted}`, isError: false };
         }
-      } else if (input.category === "windows") {
+      } else if (input.category === "windows" || input.category === "display") {
         if (input.action === "list_windows") {
-          const { stdout } = await execAsync("wmctrl -l 2>/dev/null || echo '(Window manager list unavailable)'");
-          return { content: `Open Windows:\n${stdout.trim()}`, isError: false };
+          const windows = await linuxSystemActuator.listOpenWindows();
+          const winStr = windows.length > 0
+            ? windows.map(w => `[${w.desktop}] ${w.id} - ${w.title}`).join("\n")
+            : "(No active desktop windows detected)";
+          return { content: `Open Windows:\n${winStr}`, isError: false };
         } else if (input.action === "focus_window") {
-          const target = String(input.value || "").replace(/[^a-zA-Z0-9\s_-]/g, "");
+          const target = String(input.value || "").trim();
           if (!target) return { content: "Missing window title substring", isError: true };
-          await execAsync(`wmctrl -a "${target}" 2>/dev/null || xdotool search --name "${target}" windowactivate 2>/dev/null`);
-          return { content: `Focused window matching: '${target}'`, isError: false };
+          const res = await linuxSystemActuator.focusWindow(target);
+          return { content: `Focused window matching: '${res.title}' (success: ${res.success})`, isError: false };
+        } else if (input.action === "close_window") {
+          const target = String(input.value || "").trim();
+          if (!target) return { content: "Missing window title substring", isError: true };
+          const res = await linuxSystemActuator.closeWindow(target);
+          return { content: `Closed window matching: '${res.title}' (success: ${res.success})`, isError: false };
         }
       } else if (input.category === "power") {
         if (input.action === "get_power_profile") {
-          const { stdout } = await execAsync("powerprofilesctl get 2>/dev/null || echo 'balanced'");
-          return { content: `Current Power Profile: ${stdout.trim()}`, isError: false };
+          const res = await linuxSystemActuator.getPowerProfile();
+          return { content: `Current Power Profile: ${res.activeProfile} (Available: ${res.availableProfiles.join(", ")})`, isError: false };
         } else if (input.action === "set_power_profile") {
-          const profile = String(input.value || "balanced").toLowerCase();
-          if (!["performance", "balanced", "power-saver"].includes(profile)) {
-            return { content: "Invalid profile. Must be performance, balanced, or power-saver.", isError: true };
-          }
-          await execAsync(`powerprofilesctl set ${profile} 2>/dev/null`);
-          return { content: `System power profile updated to: ${profile}`, isError: false };
+          const profile = String(input.value || "balanced").toLowerCase() as any;
+          const res = await linuxSystemActuator.setPowerProfile(profile);
+          return { content: `System power profile updated to: ${res.profile}`, isError: false };
+        }
+      } else if (input.category === "media") {
+        if (input.action === "media_status") {
+          const status = await linuxSystemActuator.getMediaStatus();
+          if (!status) return { content: "No active MPRIS media player detected.", isError: false };
+          return {
+            content: `Media Player: ${status.player} [${status.playbackStatus}]${status.title ? ` - "${status.title}" by ${status.artist || "Unknown"}` : ""}`,
+            isError: false
+          };
+        } else {
+          const mAction = input.action === "play_pause" ? "play-pause" : (input.action as any);
+          const res = await linuxSystemActuator.mediaControl(mAction);
+          return {
+            content: `Media directive '${mAction}' executed on player: ${res.player || "default"} (success: ${res.success})`,
+            isError: false
+          };
+        }
+      } else if (input.category === "session") {
+        if (input.action === "lock_screen") {
+          const res = await linuxSystemActuator.lockScreen();
+          return { content: `Lock screen triggered (success: ${res.success})`, isError: false };
+        } else if (input.action === "notify") {
+          const title = String(input.value || "Snow OS");
+          const msg = String(input.message || "Directive completed");
+          const res = await linuxSystemActuator.dispatchNotification(title, msg);
+          return { content: `Notification dispatched: "${title}: ${msg}" (success: ${res.success})`, isError: false };
+        } else if (input.action === "launch_app") {
+          const app = String(input.value || "").trim();
+          const res = await linuxSystemActuator.launchApplication(app);
+          return { content: `Launched application: '${res.app}' (success: ${res.success})`, isError: false };
+        } else if (input.action === "get_state") {
+          const state = await linuxSystemActuator.getSystemActuatorState();
+          return { content: `System Actuator State: ${JSON.stringify(state, null, 2)}`, isError: false };
         }
       }
 

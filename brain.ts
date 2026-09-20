@@ -1564,12 +1564,13 @@ export function addGoalSubtasks(
 export function updateSubtaskStatus(
   subtaskId: string,
   status: SubtaskStatus,
-  resultSummary?: string
+  resultSummary?: string,
+  incrementRetry?: boolean
 ): void {
   const db = getDb();
   const now = new Date().toISOString();
 
-  if (status === "failed") {
+  if (status === "failed" || incrementRetry) {
     db.prepare("UPDATE goal_subtasks SET status = ?, result_summary = ?, retry_count = retry_count + 1, executed_at = ? WHERE id = ?")
       .run(status, resultSummary || "", now, subtaskId);
   } else {
@@ -1778,5 +1779,19 @@ export function getMemoryHealthSnapshot(): {
   }
 }
 
-
-
+/**
+ * Safely checkpoints the SQLite WAL journal and closes the database handle.
+ */
+export function closeBrainDb(): void {
+  if (dbInstance) {
+    try {
+      dbInstance.pragma("wal_checkpoint(TRUNCATE)");
+      dbInstance.close();
+      console.log("[Brain] Database connection closed cleanly.");
+    } catch (err: any) {
+      console.warn("[Brain] Error closing database:", err.message);
+    } finally {
+      dbInstance = null;
+    }
+  }
+}

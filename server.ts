@@ -39,7 +39,8 @@ import {
   getAutonomousGoals,
   getGoalWithSubtasks,
   updateGoalStatus,
-  deleteAutonomousGoal
+  deleteAutonomousGoal,
+  closeBrainDb
 } from "./brain";
 import {
   ragIngest,
@@ -51,6 +52,8 @@ import {
   ragDeleteOld,
   ragClear,
   ragLoadAll,
+  ragIngestDocument,
+  closeRagDb,
 } from "./rag.js";
 import { connectMcpServers } from "./agent_core/McpClient.ts";
 import { createAgent, Message } from "./agent_core/index.ts";
@@ -1577,7 +1580,10 @@ async function startServer() {
     res.json({ insights: proactiveIntelligence.getLatestInsights() });
   });
 
-  // 4. Linux System Actuation (Audio, Windows, Power)
+  // 4. Linux System Actuation (Audio, Windows, Power, Media, Session)
+  app.get("/api/snow/linux/state", async (_req, res) => {
+    res.json(await linuxSystemActuator.getSystemActuatorState());
+  });
   app.get("/api/snow/linux/audio", async (_req, res) => {
     res.json(await linuxSystemActuator.getAudioStatus());
   });
@@ -1592,6 +1598,25 @@ async function startServer() {
   });
   app.post("/api/snow/linux/windows/focus", async (req, res) => {
     res.json(await linuxSystemActuator.focusWindow(String(req.body.title || "")));
+  });
+  app.post("/api/snow/linux/windows/close", async (req, res) => {
+    res.json(await linuxSystemActuator.closeWindow(String(req.body.title || "")));
+  });
+  app.get("/api/snow/linux/media", async (_req, res) => {
+    res.json({ media: await linuxSystemActuator.getMediaStatus() });
+  });
+  app.post("/api/snow/linux/media", async (req, res) => {
+    res.json(await linuxSystemActuator.mediaControl(req.body.action || "play-pause"));
+  });
+  app.post("/api/snow/linux/lock", async (_req, res) => {
+    res.json(await linuxSystemActuator.lockScreen());
+  });
+  app.post("/api/snow/linux/notify", async (req, res) => {
+    const { title, message, urgency } = req.body;
+    res.json(await linuxSystemActuator.dispatchNotification(title || "Snow", message || "", urgency || "normal"));
+  });
+  app.post("/api/snow/linux/launch", async (req, res) => {
+    res.json(await linuxSystemActuator.launchApplication(String(req.body.app || "")));
   });
   app.get("/api/snow/linux/power", async (_req, res) => {
     res.json(await linuxSystemActuator.getPowerProfile());
@@ -1755,6 +1780,7 @@ async function startServer() {
     const { title, description, priority } = req.body;
     if (!title) return res.status(400).json({ error: "Title is required" });
     const goal = createAutonomousGoal(title, description || title, priority || 3);
+    goalEngine.ensureStarted();
     res.json(goal);
   });
 
@@ -1765,6 +1791,7 @@ async function startServer() {
 
   app.post("/api/snow/goals/:id/resume", (req, res) => {
     updateGoalStatus(req.params.id, "active");
+    goalEngine.ensureStarted();
     res.json({ success: true, status: "active" });
   });
 
@@ -2273,8 +2300,12 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
 
   /** POST: manually ingest a document / fact into RAG */
   app.post("/api/snow/rag/ingest", async (req, res) => {
-    const { text, source, category } = req.body;
+    const { text, source, category, chunkDocument: shouldChunk } = req.body;
     if (!text || !source) return res.status(400).json({ error: "text and source required" });
+    if (shouldChunk || (typeof text === "string" && text.length > 1000)) {
+      const chunks = await ragIngestDocument(text, source, category || "fact");
+      return res.json({ success: true, count: chunks.length, chunks: chunks.map(c => ({ ...c, embedding: undefined })) });
+    }
     const chunk = await ragIngest(text, source, category || "fact");
     res.json({ success: true, chunk: { ...chunk, embedding: undefined } });
   });
@@ -2417,7 +2448,7 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
 
   const PORT = parseInt(process.env.PORT || "3000", 10);
   const HOST = process.env.HOST || "127.0.0.1";
-  app.listen(PORT, HOST, () => {
+  const server = app.listen(PORT, HOST, () => {
     const rs = ragStats();
     console.log(`\n✅  Snow OS Autonomous Learning Agent ONLINE → http://${HOST}:${PORT}`);
     console.log(`    Host Binding : ${HOST} (Loopback/Localhost Secure Mode)`);
@@ -2433,6 +2464,41 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
     goalEngine.start(4000);
     dreamCycle.start(3 * 60 * 1000); // 3-minute check interval, triggers after 5 min idle
   });
+
+  let isShuttingDown = false;
+  const gracefulShutdown = (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`\n[Server] Received ${signal}. Gracefully stopping background daemons and flushing databases...`);
+    try {
+      routineScheduler.stopScheduler();
+      ambientPerception.stop();
+      goalEngine.stop();
+      dreamCycle.stop();
+    } catch (e: any) {
+      console.warn("[Server] Notice while stopping daemons:", e.message);
+    }
+
+    try {
+      closeBrainDb();
+      closeRagDb();
+    } catch (e: any) {
+      console.warn("[Server] Notice while closing database handles:", e.message);
+    }
+
+    server.close(() => {
+      console.log("[Server] HTTP server closed. Safe shutdown complete.");
+      process.exit(0);
+    });
+
+    setTimeout(() => {
+      console.warn("[Server] Shutdown timeout reached (5s). Force exiting.");
+      process.exit(0);
+    }, 5000).unref();
+  };
+
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 }
 
 startServer();
