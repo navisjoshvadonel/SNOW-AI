@@ -9,7 +9,7 @@ import {
   Keyboard, BarChart3, Play, Pause, X,
   CloudLightning, CloudFog, SunMedium, Moon, Wind,
   FolderOpen, FileText, FileCode, Paperclip, Upload, FilePlus,
-  Volume2, VolumeX, ShieldCheck, Compass, Radio
+  Volume2, VolumeX, ShieldCheck, Compass, Radio, Lock
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import NetworkGraph from "./components/NetworkGraph";
@@ -423,6 +423,17 @@ export default function App() {
       .catch(() => sessionStorage.removeItem("snow_auth_token"));
   }, []);
 
+  // Listen for global lockdown / lock events
+  useEffect(() => {
+    const handleLock = () => {
+      sessionStorage.removeItem("snow_auth_token");
+      setAuthToken(null);
+      setIsAuthenticated(false);
+    };
+    window.addEventListener("snow:lock", handleLock);
+    return () => window.removeEventListener("snow:lock", handleLock);
+  }, []);
+
   // Global fetch interceptor: automatically attaches session token to all /api/snow and /api/system calls
   useEffect(() => {
     const originalFetch = window.fetch;
@@ -601,7 +612,7 @@ export default function App() {
     memoriesCount: 4,
     vectorsCount: 2
   });
-  const [selectedModel, setSelectedModel] = useState<string>("gemini-flash-latest");
+  const [selectedModel, setSelectedModel] = useState<string>("gemini-2.5-flash");
   const [compilerMode, setCompilerMode] = useState<"general" | "education" | "debugging" | "context_awareness">("general");
 
   // Code Sandbox State
@@ -1922,6 +1933,14 @@ export default function App() {
           })()}
 
           <button
+            onClick={() => window.dispatchEvent(new CustomEvent("snow:lock"))}
+            className="p-2 rounded-xl border border-rose-500/30 bg-slate-900/80 hover:bg-rose-500/15 text-rose-400 hover:text-rose-300 transition-all cursor-pointer shadow-[0_0_10px_rgba(244,63,94,0.1)] hover:shadow-[0_0_15px_rgba(244,63,94,0.25)]"
+            title="Lock Console Gateway"
+          >
+            <Lock className="w-4 h-4" />
+          </button>
+
+          <button
             onClick={() => setShowSettings(!showSettings)}
             className="p-2 rounded-xl border border-cyan-500/30 bg-slate-900/80 hover:bg-cyan-500/15 text-cyan-400 hover:text-cyan-300 transition-all cursor-pointer shadow-[0_0_10px_rgba(6,182,212,0.1)] hover:shadow-[0_0_15px_rgba(6,182,212,0.25)]"
             title="Settings & System Configuration"
@@ -1955,9 +1974,10 @@ export default function App() {
                   onChange={(e) => setSelectedModel(e.target.value)}
                   className="w-full bg-slate-950 border border-cyan-500/30 rounded-lg p-2 text-cyan-200 outline-none focus:border-cyan-400"
                 >
-                  <option value="gemini-flash-latest">Gemini Flash Latest (Active Core)</option>
-                  <option value="gemini-3.6-flash">Gemini 3.6 Flash (Ultra Fast)</option>
-                  <option value="gemini-3.5-flash">Gemini 3.5 Flash (Reliable)</option>
+                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Primary Active Core)</option>
+                  <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (Low-Latency)</option>
+                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Context Fallback)</option>
+                  <option value="deepseek">DeepSeek Reasoner (High Logic)</option>
                   <option value="ollama">Ollama Local Engine (Offline)</option>
                 </select>
               </div>

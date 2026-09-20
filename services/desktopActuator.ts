@@ -310,18 +310,41 @@ Output a STRICT JSON object in this exact format with NO markdown wrapping:
   "explanation": "why you targeted this element"
 }`;
 
-        const res = await ai.models.generateContent({
-          model: "gemini-flash-latest",
-          contents: [{
-            role: "user",
-            parts: [
-              { text: prompt },
-              { inlineData: { mimeType, data: base64Data } }
-            ]
-          }]
-        });
+const GEMINI_VISION_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-2.5-flash-lite",
+  "gemini-1.5-flash",
+];
 
-        const raw = res.text?.trim() || "";
+        let raw = "";
+        let lastErr: Error | null = null;
+        for (const model of GEMINI_VISION_MODELS) {
+          try {
+            const res = await ai.models.generateContent({
+              model,
+              contents: [{
+                role: "user",
+                parts: [
+                  { text: prompt },
+                  { inlineData: { mimeType, data: base64Data } }
+                ]
+              }]
+            });
+            const text = res.text?.trim() || "";
+            if (text) {
+              raw = text;
+              break;
+            }
+          } catch (err: any) {
+            lastErr = err;
+            console.warn(`[Snow Actuator] Vision model '${model}' failed: ${err.message}. Trying next in cascade...`);
+          }
+        }
+
+        if (!raw && lastErr) {
+          throw lastErr;
+        }
+
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
@@ -337,9 +360,9 @@ Output a STRICT JSON object in this exact format with NO markdown wrapping:
       }
     }
 
-    // Convert normalized coordinates back to actual screen resolution
-    const actualX = Math.round(normX * shot.width);
-    const actualY = Math.round(normY * shot.height);
+    // Convert normalized coordinates back to actual screen resolution with display safety bounds
+    const actualX = Math.max(1, Math.min(shot.width - 2, Math.round(normX * shot.width)));
+    const actualY = Math.max(1, Math.min(shot.height - 2, Math.round(normY * shot.height)));
 
     // Step 2: Actuate on real Linux desktop with closed-loop verification
     let verifiedRes: VerifiedActionResult;

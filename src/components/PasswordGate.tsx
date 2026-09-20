@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Lock, Unlock, Eye, EyeOff, ShieldAlert, KeyRound, ArrowRight, Loader2 } from "lucide-react";
+import { Lock, Unlock, Eye, EyeOff, ShieldAlert, KeyRound, ArrowRight, Loader2, Mic, MicOff, Fingerprint, Radio, Sparkles } from "lucide-react";
 
 interface PasswordGateProps {
   onAuthenticated: (token: string) => void;
@@ -15,8 +15,12 @@ export default function PasswordGate({ onAuthenticated }: PasswordGateProps) {
   const [attemptsRemaining, setAttemptsRemaining] = useState<number | null>(null);
   const [cooldown, setCooldown] = useState(0);
   const [isUnlocked, setIsUnlocked] = useState(false);
+  const [isListeningVoice, setIsListeningVoice] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<string>("");
 
   const inputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   // Focus input automatically on mount
   useEffect(() => {
@@ -99,6 +103,98 @@ export default function PasswordGate({ onAuthenticated }: PasswordGateProps) {
       setErrorMessage("Network error: Unable to reach Snow AI authorization server.");
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleDirectSubmit = async (val: string) => {
+    if (!val || isLoading || cooldown > 0) return;
+    setIsLoading(true);
+    setErrorMessage("");
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: val }),
+      });
+      const data = await res.json();
+      if (res.ok && data.token) {
+        setIsUnlocked(true);
+        sessionStorage.setItem("snow_auth_token", data.token);
+        setTimeout(() => {
+          onAuthenticated(data.token);
+        }, 900);
+      } else if (res.status === 429) {
+        const wait = data.retryAfter || 60;
+        setCooldown(wait);
+        setErrorMessage(`Security lockout active. Retry in ${wait}s`);
+      } else {
+        setErrorMessage("Voice passphrase denied. Try password instead.");
+      }
+    } catch {
+      setErrorMessage("Network error: Authorization server unreachable.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const toggleVoiceAuth = async () => {
+    if (isListeningVoice) {
+      mediaRecorderRef.current?.stop();
+      setIsListeningVoice(false);
+      return;
+    }
+
+    try {
+      setVoiceStatus("Listening for voice passphrase...");
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        setVoiceStatus("Transcribing biometric voice payload...");
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        const reader = new FileReader();
+        reader.onloadend = async () => {
+          const base64 = (reader.result as string) || "";
+          try {
+            const res = await fetch("/api/snow/voice/transcribe", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ audio: base64, mimeType: "audio/webm" })
+            });
+            const data = await res.json();
+            const text = (data.text || "").replace(/[^a-zA-Z0-9]/g, "").trim();
+            if (text && text.toLowerCase() !== "silence") {
+              setPassword(text);
+              setVoiceStatus(`Transcribed: "${text}"`);
+              handleDirectSubmit(text);
+            } else {
+              setVoiceStatus("Voice silence. Try again or enter password.");
+            }
+          } catch {
+            setVoiceStatus("Voice service unavailable.");
+          }
+        };
+        reader.readAsDataURL(blob);
+      };
+
+      mediaRecorder.start();
+      setIsListeningVoice(true);
+      setTimeout(() => {
+        if (mediaRecorder.state === "recording") {
+          mediaRecorder.stop();
+          setIsListeningVoice(false);
+        }
+      }, 4500);
+    } catch {
+      setVoiceStatus("Microphone access unavailable.");
+      setIsListeningVoice(false);
     }
   };
 
@@ -203,13 +299,28 @@ export default function PasswordGate({ onAuthenticated }: PasswordGateProps) {
             </p>
           </div>
 
-          {/* Holographic Center Icon Node */}
+          {/* Holographic Biometric Center Node */}
           <div className="relative mb-6 flex items-center justify-center">
             {/* Outer animated spinning halo */}
             <motion.div
               animate={{ rotate: 360 }}
               transition={{ duration: 18, repeat: Infinity, ease: "linear" }}
-              className="absolute w-24 h-24 rounded-full border border-cyan-500/20 border-t-cyan-400/60 border-dashed"
+              className="absolute w-28 h-28 rounded-full border border-cyan-500/20 border-t-cyan-400/60 border-dashed"
+            />
+            {/* Radar scanner sweep line */}
+            <motion.div
+              animate={{ rotate: 360 }}
+              transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
+              className="absolute w-24 h-24 rounded-full pointer-events-none"
+              style={{
+                background: "conic-gradient(from 0deg, rgba(6,182,212,0.25) 0deg, transparent 60deg, transparent 360deg)",
+              }}
+            />
+            {/* Concentric biometric pulse ring */}
+            <motion.div
+              animate={{ scale: [1, 1.25, 1], opacity: [0.3, 0.7, 0.3] }}
+              transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
+              className="absolute w-20 h-20 rounded-full border border-cyan-400/30 pointer-events-none"
             />
             {/* Center circular badge */}
             <motion.div
@@ -218,12 +329,16 @@ export default function PasswordGate({ onAuthenticated }: PasswordGateProps) {
                   ? { scale: [1, 1.12, 1] }
                   : errorMessage
                   ? { x: [-6, 6, -5, 5, 0] }
+                  : isListeningVoice
+                  ? { scale: [1, 1.08, 1] }
                   : {}
               }
               transition={{ duration: 0.4 }}
-              className={`w-16 h-16 rounded-full flex items-center justify-center transition-colors duration-500 ${
+              className={`w-16 h-16 rounded-full flex items-center justify-center transition-colors duration-500 relative z-10 ${
                 isUnlocked
                   ? "bg-emerald-500/20 border-2 border-emerald-400 text-emerald-300 shadow-[0_0_30px_rgba(16,185,129,0.4)]"
+                  : isListeningVoice
+                  ? "bg-rose-500/20 border-2 border-rose-400 text-rose-300 shadow-[0_0_30px_rgba(244,63,94,0.4)]"
                   : errorMessage
                   ? "bg-rose-500/20 border-2 border-rose-400 text-rose-300 shadow-[0_0_30px_rgba(244,63,94,0.3)]"
                   : "bg-cyan-500/10 border border-cyan-400/30 text-cyan-300 shadow-[0_0_25px_rgba(6,182,212,0.2)]"
@@ -238,6 +353,15 @@ export default function PasswordGate({ onAuthenticated }: PasswordGateProps) {
                     exit={{ scale: 0 }}
                   >
                     <Unlock size={28} />
+                  </motion.div>
+                ) : isListeningVoice ? (
+                  <motion.div
+                    key="listening"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    exit={{ scale: 0 }}
+                  >
+                    <Mic size={26} className="text-rose-400 animate-pulse" />
                   </motion.div>
                 ) : (
                   <motion.div
@@ -356,6 +480,37 @@ export default function PasswordGate({ onAuthenticated }: PasswordGateProps) {
                 </>
               )}
             </button>
+
+            {/* Voice Passphrase Biometric Trigger */}
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={toggleVoiceAuth}
+                disabled={isLoading || cooldown > 0 || isUnlocked}
+                className={`w-full py-2.5 px-3 rounded-xl font-mono text-xs flex items-center justify-center gap-2 border transition-all duration-200 ${
+                  isListeningVoice
+                    ? "bg-rose-500/20 border-rose-400 text-rose-300 shadow-[0_0_20px_rgba(244,63,94,0.3)] animate-pulse"
+                    : "bg-slate-900/60 hover:bg-slate-800/80 border-cyan-500/25 text-cyan-300 hover:border-cyan-400/50"
+                }`}
+              >
+                {isListeningVoice ? (
+                  <>
+                    <Mic className="w-3.5 h-3.5 text-rose-400 animate-bounce" />
+                    <span>Listening... Speak Passphrase</span>
+                  </>
+                ) : (
+                  <>
+                    <Fingerprint className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>Voice Passphrase Biometric Auth</span>
+                  </>
+                )}
+              </button>
+              {voiceStatus && (
+                <div className="text-[10px] text-cyan-400/90 font-mono text-center mt-1.5 animate-pulse">
+                  {voiceStatus}
+                </div>
+              )}
+            </div>
           </form>
 
           {/* Footer note */}

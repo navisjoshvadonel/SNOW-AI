@@ -163,16 +163,25 @@ def calculate_visual_delta(img1: Image.Image, img2: Image.Image, threshold: int 
 
 def execute_action(action: str, **kwargs):
     try:
+        size = pyautogui.size()
+        max_x, max_y = max(1, size.width - 1), max(1, size.height - 1)
+
         if action == "move":
-            x = int(kwargs.get("x", 0))
-            y = int(kwargs.get("y", 0))
+            raw_x = int(kwargs.get("x", 0))
+            raw_y = int(kwargs.get("y", 0))
+            # Clamp to [1, max-1] to prevent accidentally tripping FAILSAFE at (0, 0)
+            x = max(1, min(max_x - 1, raw_x))
+            y = max(1, min(max_y - 1, raw_y))
             pyautogui.moveTo(x, y, duration=0.15)
             pos = pyautogui.position()
             return {"success": True, "action": "move", "mouse": {"x": pos.x, "y": pos.y}}
 
         elif action == "click":
-            x = int(kwargs.get("x", pyautogui.position().x))
-            y = int(kwargs.get("y", pyautogui.position().y))
+            cur_pos = pyautogui.position()
+            raw_x = int(kwargs.get("x", cur_pos.x))
+            raw_y = int(kwargs.get("y", cur_pos.y))
+            x = max(1, min(max_x - 1, raw_x))
+            y = max(1, min(max_y - 1, raw_y))
             button = kwargs.get("button", "left")
             clicks = int(kwargs.get("clicks", 1))
             pyautogui.click(x=x, y=y, clicks=clicks, button=button)

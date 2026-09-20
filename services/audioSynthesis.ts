@@ -77,6 +77,17 @@ class AudioSynthesisService {
       timestamp: new Date().toISOString(),
     };
   }
+
+  /**
+   * Immediately terminates active speech synthesis and resets voice duplex state
+   */
+  public async cancelSpeech(): Promise<void> {
+    try {
+      await execAsync("spd-say -C 2>/dev/null || pkill -f spd-say 2>/dev/null || true");
+    } catch {}
+    voiceDuplex.finishSpeaking();
+  }
 }
 
 export const audioSynthesis = new AudioSynthesisService();
+

@@ -1490,6 +1490,10 @@ async function startServer() {
     const result = await audioSynthesis.synthesize(text, urgency);
     res.json(result);
   });
+  app.post("/api/snow/tts/cancel", async (_req, res) => {
+    await audioSynthesis.cancelSpeech();
+    res.json({ success: true, state: voiceDuplex.getState() });
+  });
 
   // Neural Voice STT Transcription Engine (Multimodal Gemini Speech-to-Text)
   app.post("/api/snow/voice/transcribe", async (req, res) => {
@@ -1509,7 +1513,7 @@ async function startServer() {
       }
 
       const apiKey = process.env.GEMINI_API_KEY || "";
-      const modelsToTry = ["gemini-flash-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"];
+      const modelsToTry = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"];
       
       let transcribed = "";
       for (const modelName of modelsToTry) {

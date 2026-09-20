@@ -3,6 +3,8 @@
  * Enables seamless, interruptible conversational audio with <80ms barge-in latency.
  */
 
+import { exec } from "child_process";
+
 export type VoiceState = "idle" | "listening" | "processing" | "speaking";
 
 export interface SpeechSession {
@@ -75,9 +77,12 @@ class VoiceDuplexService {
     const hadActiveSession = this.activeSession !== null;
     const prevSessionId = this.activeSession?.sessionId;
 
-    // Immediately cut off active speech
+    // Immediately cut off active speech and cancel any active OS speech dispatch
     this.activeSession = null;
     this.currentState = "listening";
+    try {
+      exec("spd-say -C 2>/dev/null || pkill -f spd-say 2>/dev/null || true", () => {});
+    } catch {}
 
     const result: BargeInResult = {
       interrupted: hadActiveSession,
