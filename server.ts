@@ -1109,7 +1109,7 @@ RULES:
     });
   }
 
-  const activeModel = requestedModel && requestedModel.startsWith("gemini-") ? requestedModel : "gemini-flash-latest";
+  const activeModel = requestedModel && requestedModel.startsWith("gemini-") ? requestedModel : "gemini-2.5-flash";
   const permissionMode = (process.env.SNOW_PERMISSION_MODE as any) || "default";
 
   const agent = await createAgent({
@@ -2264,7 +2264,7 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
 {"scene": "1-sentence summary of the scene", "objects": ["list", "of", "notable", "visible", "items", "windows", "or", "tools"], "activity": "brief note on current activity"}`;
 
         const geminiRes = await ai.models.generateContent({
-          model: "gemini-flash-latest",
+          model: "gemini-2.5-flash",
           contents: [{
             role: "user",
             parts: [

@@ -58,7 +58,7 @@ ${incident.errorMessage.slice(0, 600)}
 Synthesize the operational rule to prevent this failure in future runs.`;
 
       const res = await ai.models.generateContent({
-        model: "gemini-flash-latest",
+        model: "gemini-2.5-flash",
         contents: [{ role: "user", parts: [{ text: userContent }] }],
         config: {
           systemInstruction,
