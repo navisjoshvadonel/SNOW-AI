@@ -1845,9 +1845,6 @@ export default function App() {
             <span className="font-extrabold text-xl tracking-[0.35em] text-cyan-400 drop-shadow-[0_0_12px_rgba(34,211,238,0.7)] font-mono">
               S N O W
             </span>
-            <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded bg-cyan-500/15 border border-cyan-400/30 text-cyan-300">
-              MK-V
-            </span>
           </div>
 
           <div className="h-4 w-[1px] bg-cyan-500/20" />
