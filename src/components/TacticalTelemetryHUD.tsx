@@ -4,7 +4,7 @@ import {
   Activity, Shield, Clock, Cpu, HardDrive,
   Database, RefreshCw, Paperclip, Sparkles, FileCode, Radio
 } from "lucide-react";
-import { CodeFile, TelemetryPackage, ThreatRadarTarget } from "../types";
+import { CodeFile, TelemetryPackage, ThreatRadarTarget, SynthesizedSkill } from "../types";
 
 export interface TacticalTelemetryHUDProps {
   cpuPct: number;
@@ -15,6 +15,8 @@ export interface TacticalTelemetryHUDProps {
   uptimeFormatted: string;
   commandCount: number;
   telemetryPackage?: TelemetryPackage | null;
+  synthesizedSkills?: SynthesizedSkill[];
+  onExecuteSkill?: (name: string) => void;
   weather: {
     temp: string;
     condition: string;
@@ -145,6 +147,8 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
   onAskSnowAboutFile,
   onIngestFileToRAG,
   onRefreshStats,
+  synthesizedSkills = [],
+  onExecuteSkill,
 }) => {
   const radarTargets: ThreatRadarTarget[] =
     telemetryPackage?.radarTargets && telemetryPackage.radarTargets.length > 0
@@ -473,6 +477,39 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
           </div>
         )}
       </div>
+
+      {/* ─── CARD 4.5: AUTONOMOUS DYNAMIC SKILLS ─── */}
+      {synthesizedSkills.length > 0 && (
+        <div className="p-3.5 rounded-3xl bg-slate-900/80 border border-indigo-500/25 backdrop-blur-xl relative overflow-hidden shadow-[0_0_25px_rgba(99,102,241,0.06)]">
+          <div className="flex items-center justify-between border-b border-indigo-500/20 pb-2 mb-2">
+            <div className="flex items-center gap-2 text-indigo-300 font-mono font-bold text-xs tracking-wider">
+              <Cpu className="w-3.5 h-3.5 text-indigo-400" />
+              <span>DYNAMIC SKILLS</span>
+            </div>
+            <span className="text-[10px] font-mono text-indigo-400 font-bold">{synthesizedSkills.length} ACTIVE</span>
+          </div>
+          
+          <div className="max-h-24 overflow-y-auto space-y-1.5 font-mono text-[11px] pr-1 scrollbar-none">
+            {synthesizedSkills.map((skill) => (
+              <div key={skill.id} className="p-2 rounded-xl bg-slate-950/60 border border-indigo-500/10 hover:border-indigo-500/30 transition group">
+                <div className="flex justify-between items-start">
+                  <div className="flex flex-col">
+                    <span className="text-indigo-300 font-bold">{skill.name}</span>
+                    <span className="text-[9px] text-slate-500 truncate max-w-[150px]">{skill.description}</span>
+                  </div>
+                  <button
+                    onClick={() => onExecuteSkill && onExecuteSkill(skill.name)}
+                    className="shrink-0 p-1 rounded-lg border border-indigo-500/30 bg-indigo-500/10 hover:bg-indigo-500/30 text-indigo-300 transition"
+                    title="Manually trigger skill"
+                  >
+                    <Activity className="w-3 h-3" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ─── CARD 5: UPTIME & EXECUTIVE SESSION TRACKER ─── */}
       <div className="p-3 rounded-3xl bg-slate-900/80 border border-cyan-500/25 backdrop-blur-xl relative overflow-hidden shadow-[0_0_20px_rgba(6,182,212,0.05)]">

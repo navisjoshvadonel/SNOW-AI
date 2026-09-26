@@ -22,7 +22,7 @@ import QuantumArcCore from "./components/QuantumArcCore";
 import TacticalTelemetryHUD from "./components/TacticalTelemetryHUD";
 import HolographicMissionLog from "./components/HolographicMissionLog";
 import SnowfallBackground from "./components/SnowfallBackground";
-import { MemoryNode, CodeFile, TelemetryPackage } from "./types";
+import { MemoryNode, CodeFile, TelemetryPackage, SynthesizedSkill } from "./types";
 import PasswordGate from "./components/PasswordGate";
 
 type WeatherType = "default" | "sunny" | "rain" | "cloudy" | "snow" | "storm";
@@ -484,6 +484,7 @@ export default function App() {
   });
   const [systemLoadPct, setSystemLoadPct] = useState(12);
   const [telemetryPackage, setTelemetryPackage] = useState<TelemetryPackage | null>(null);
+  const [synthesizedSkills, setSynthesizedSkills] = useState<SynthesizedSkill[]>([]);
 
   const fetchTelemetryPackage = async () => {
     try {
@@ -803,12 +804,46 @@ export default function App() {
     }
   };
 
+  const fetchSkills = async () => {
+    try {
+      const res = await fetch("/api/snow/skills");
+      if (res.ok) {
+        const data = await res.json();
+        setSynthesizedSkills(data.skills || []);
+      }
+    } catch (e) {
+      console.warn("Failed to fetch skills", e);
+    }
+  };
+
+  const handleExecuteSkill = async (name: string) => {
+    try {
+      triggerToast(`Executing dynamic skill: ${name}...`);
+      const res = await fetch("/api/snow/skills/execute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, input: {} })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          triggerToast(`Skill '${name}' executed successfully!`);
+        } else {
+          triggerToast(`Skill '${name}' failed: ${data.error}`);
+        }
+      }
+    } catch (e: any) {
+      triggerToast(`Execution error: ${e.message}`);
+    }
+  };
+
   useEffect(() => {
     fetchMemories();
     fetchVectors();
     fetchBrainStatus();
     fetchTelemetryPackage();
     fetchLiveWeather("Madurai, Tamil Nadu, India");
+    fetchSkills();
   }, []);
 
   // Poll live system stats & telemetry
@@ -2040,11 +2075,14 @@ export default function App() {
               onAttachFile={handleAttachFileToContext}
               onAskSnowAboutFile={handleAskSnowAboutFile}
               onIngestFileToRAG={handleIngestFileToRAG}
+              synthesizedSkills={synthesizedSkills}
+              onExecuteSkill={handleExecuteSkill}
               onRefreshStats={() => {
                 triggerToast("Tactical telemetry updated.");
                 fetchLiveWeather();
                 fetchBrainStatus();
                 fetchTelemetryPackage();
+                fetchSkills();
               }}
             />
 

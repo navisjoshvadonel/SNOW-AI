@@ -1772,6 +1772,17 @@ async function startServer() {
     res.json({ success: deleted });
   });
 
+  app.post("/api/snow/skills/execute", async (req, res) => {
+    try {
+      const { name, input } = req.body;
+      if (!name) return res.status(400).json({ error: "Skill name is required" });
+      const result = await skillSynthesizer.executeSkill(name, input || {});
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/snow/reflexion/rules", (_req, res) => {
     const rules = getAllProceduralRules();
     res.json({ rules, count: rules.length });

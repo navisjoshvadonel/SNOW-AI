@@ -60,3 +60,19 @@ export interface TelemetryPackage {
     tempC: number;
   };
 }
+
+export interface SynthesizedSkill {
+  id: string;
+  name: string;
+  description: string;
+  language: "python" | "node" | "bash";
+  code: string;
+  inputSchema: string; // JSON string
+  testCases: string;   // JSON string
+  isVerified: boolean;
+  successCount: number;
+  failureCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
