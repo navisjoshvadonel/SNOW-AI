@@ -36,10 +36,17 @@ export interface MediaPlaybackStatus {
   album?: string;
 }
 
+export interface SystemResourceStatus {
+  cpuPct: number;
+  memoryPct: number;
+  diskRootPct: number;
+}
+
 export interface SystemActuatorState {
   audio: AudioDeviceStatus;
   power: PowerProfileStatus;
   media: MediaPlaybackStatus | null;
+  resources: SystemResourceStatus | null;
   windowsCount: number;
   timestamp: string;
 }
@@ -274,20 +281,49 @@ class LinuxSystemActuatorService {
   }
 
   /**
-   * 8. Unified System Actuator State Snapshot
+   * 8. System Resource Monitoring (CPU, RAM, Disk)
+   */
+  public async getSystemResources(): Promise<SystemResourceStatus | null> {
+    try {
+      // Memory usage (excluding buffers/cache)
+      const { stdout: memOut } = await execAsync("free | awk '/^Mem:/ {print $3/$2 * 100}'");
+      const memoryPct = parseFloat(memOut.trim()) || 0;
+
+      // Root disk usage
+      const { stdout: diskOut } = await execAsync("df / | tail -1 | awk '{print $5}'");
+      const diskPct = parseInt(diskOut.replace('%', '').trim(), 10) || 0;
+
+      // CPU usage (using top -bn1)
+      const { stdout: cpuOut } = await execAsync("top -bn1 | awk '/Cpu/ {print $2 + $4}' | head -n 1");
+      const cpuPct = parseFloat(cpuOut.trim()) || 0;
+
+      return {
+        cpuPct: Math.round(cpuPct * 10) / 10,
+        memoryPct: Math.round(memoryPct * 10) / 10,
+        diskRootPct: diskPct,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 9. Unified System Actuator State Snapshot
    */
   public async getSystemActuatorState(): Promise<SystemActuatorState> {
-    const [audio, power, media, windows] = await Promise.all([
+    const [audio, power, media, windows, resources] = await Promise.all([
       this.getAudioStatus(),
       this.getPowerProfile(),
       this.getMediaStatus().catch(() => null),
       this.listOpenWindows(),
+      this.getSystemResources(),
     ]);
 
     return {
       audio,
       power,
       media,
+      resources,
       windowsCount: windows.length,
       timestamp: new Date().toISOString(),
     };

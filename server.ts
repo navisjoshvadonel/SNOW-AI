@@ -211,38 +211,48 @@ async function fetchWeather(location: string): Promise<WeatherData | null> {
 /** Real system telemetry via native OS + systeminformation */
 async function fetchSystem(): Promise<SystemData> {
   try {
+    const actResources = await linuxSystemActuator.getSystemResources();
+
     let cpuLoadPct = 12;
-    try {
-      const load = await si.currentLoad();
-      cpuLoadPct = Math.round(load.currentLoad);
-    } catch {
-      cpuLoadPct = Math.round(Math.random() * 10 + 10);
+    if (actResources) {
+      cpuLoadPct = actResources.cpuPct;
+    } else {
+      try {
+        const load = await si.currentLoad();
+        cpuLoadPct = Math.round(load.currentLoad);
+      } catch {
+        cpuLoadPct = Math.round(Math.random() * 10 + 10);
+      }
     }
 
     const totalMem = os.totalmem() / (1024 * 1024 * 1024);
-    const freeMem = os.freemem() / (1024 * 1024 * 1024);
-    const usedMem = totalMem - freeMem;
-    const ramPct = Math.round((usedMem / totalMem) * 100);
+    let freeMem = os.freemem() / (1024 * 1024 * 1024);
+    let usedMem = totalMem - freeMem;
+    let ramPct = Math.round((usedMem / totalMem) * 100);
+    
+    if (actResources) {
+      ramPct = actResources.memoryPct;
+      usedMem = (ramPct / 100) * totalMem;
+    }
 
     let diskUsedStr = "69.3/157.5 GB";
-    let diskPct = 44;
+    let diskPct = actResources ? actResources.diskRootPct : 44;
     try {
       const fsSizes = await si.fsSize();
       const root = fsSizes.find((f: any) => f.mount === "/") || fsSizes[0];
       if (root && root.size > 0) {
         const totalDisk = root.size / (1024 * 1024 * 1024);
         const usedDisk = root.used / (1024 * 1024 * 1024);
-        diskPct = Math.round((root.used / root.size) * 100);
-        diskUsedStr = `${usedDisk.toFixed(1)}/${totalDisk.toFixed(1)} GB`;
+        diskPct = actResources ? actResources.diskRootPct : Math.round((root.used / root.size) * 100);
+        diskUsedStr = `${((diskPct / 100) * totalDisk).toFixed(1)}/${totalDisk.toFixed(1)} GB`;
       }
     } catch {
       try {
         if ((fs as any).statfsSync) {
           const stat = (fs as any).statfsSync("/");
           const totalDisk = (stat.blocks * stat.bsize) / (1024 * 1024 * 1024);
-          const freeDisk = (stat.bfree * stat.bsize) / (1024 * 1024 * 1024);
-          const usedDisk = totalDisk - freeDisk;
-          diskPct = Math.round((usedDisk / totalDisk) * 100);
+          diskPct = actResources ? actResources.diskRootPct : diskPct;
+          const usedDisk = (diskPct / 100) * totalDisk;
           diskUsedStr = `${usedDisk.toFixed(1)}/${totalDisk.toFixed(1)} GB`;
         }
       } catch { /* fallback */ }
