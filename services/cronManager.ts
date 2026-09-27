@@ -1,6 +1,6 @@
 import { exec } from "child_process";
 import { promisify } from "util";
-import { triggerDreamCycle } from "./dreamCycle";
+import { dreamCycle } from "./dreamCycle";
 
 const execAsync = promisify(exec);
 
@@ -26,7 +26,7 @@ export function startNightlyCron() {
 async function runNightlyTasks() {
   console.log("[SNOW CRON] Executing nightly maintenance...");
   try {
-    await triggerDreamCycle();
+    await dreamCycle.runDreamCycle();
     console.log("[SNOW CRON] Dream cycle complete.");
   } catch (err: any) {
     console.error("[SNOW CRON] Dream cycle failed:", err.message);

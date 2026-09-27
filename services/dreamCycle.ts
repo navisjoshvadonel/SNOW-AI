@@ -129,7 +129,7 @@ class DreamCycleService {
 
   // ─── Main Dream Cycle ────────────────────────────────────────────────────
 
-  private async runDreamCycle(apiKeyOverride?: string): Promise<{ consolidated: number; decayed: number; resolved: number }> {
+  public async runDreamCycle(apiKeyOverride?: string): Promise<{ consolidated: number; decayed: number; resolved: number }> {
     this.isDreaming = true;
     this.totalDreamCycles++;
     const cycleId = `dream-${Date.now()}`;
