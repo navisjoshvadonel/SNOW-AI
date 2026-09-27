@@ -587,6 +587,10 @@ export default function App() {
     handleSendMessage(`Please analyze the codebase file "${name}" (${pathStr}) and provide key structural insights, bug fixes, or performance optimization recommendations:\n\n\`\`\`${fileExt}\n${content.slice(0, 15000)}\n\`\`\``);
   };
 
+  const handleAskSnowAboutProject = () => {
+    handleSendMessage(`Please read the project files in the current workspace, provide a comprehensive architectural overview, explain how it works, and anticipate what a judge or technical interviewer might ask about this project.`);
+  };
+
   const handleCustomFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -844,6 +848,7 @@ export default function App() {
     fetchTelemetryPackage();
     fetchLiveWeather("Madurai, Tamil Nadu, India");
     fetchSkills();
+    fetchWorkspaceFiles();
   }, []);
 
   // Poll live system stats & telemetry
@@ -2074,6 +2079,7 @@ export default function App() {
               onVaultSearchChange={setFileSearchQuery}
               onAttachFile={handleAttachFileToContext}
               onAskSnowAboutFile={handleAskSnowAboutFile}
+              onAnalyzeProject={handleAskSnowAboutProject}
               onIngestFileToRAG={handleIngestFileToRAG}
               synthesizedSkills={synthesizedSkills}
               onExecuteSkill={handleExecuteSkill}

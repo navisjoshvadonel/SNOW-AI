@@ -35,6 +35,7 @@ export interface TacticalTelemetryHUDProps {
   onVaultSearchChange: (q: string) => void;
   onAttachFile: (name: string, path: string, content: string) => void;
   onAskSnowAboutFile: (name: string, path: string, content: string) => void;
+  onAnalyzeProject?: () => void;
   onIngestFileToRAG: (path: string, content: string) => void;
   onRefreshStats: () => void;
 }
@@ -145,6 +146,7 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
   onVaultSearchChange,
   onAttachFile,
   onAskSnowAboutFile,
+  onAnalyzeProject,
   onIngestFileToRAG,
   onRefreshStats,
   synthesizedSkills = [],
@@ -390,7 +392,19 @@ export const TacticalTelemetryHUD: React.FC<TacticalTelemetryHUDProps> = ({
             <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
             <span>PROJECT FILES</span>
           </div>
-          <span className="text-[10px] font-mono text-cyan-400 font-bold">{workspaceFiles.length} FILES</span>
+          <div className="flex items-center gap-3">
+            {onAnalyzeProject && (
+              <button
+                onClick={onAnalyzeProject}
+                className="flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/25 border border-cyan-500/30 text-cyan-300 transition text-[9px] font-mono font-bold uppercase tracking-wider"
+                title="Deep Analyze Project & Generate Overview"
+              >
+                <Sparkles className="w-3 h-3 text-cyan-400" />
+                Analyze
+              </button>
+            )}
+            <span className="text-[10px] font-mono text-cyan-400 font-bold">{workspaceFiles.length} FILES</span>
+          </div>
         </div>
 
         {/* Vault Search Input */}
