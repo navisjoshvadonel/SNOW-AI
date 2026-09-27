@@ -826,7 +826,7 @@ export async function resolveIntent(prompt: string): Promise<ResolvedIntent> {
   }
 
   // Fast-track simple greetings, casual talk, and wake calls without burning Gemini API quota
-  const isSimpleGreetingOrChat = /^(?:hello|hi|hey|yo|sup|greetings|howdy|good\s+(?:morning|afternoon|evening|night)|who are you|what is your name|are you there|snow|jarvis)[.!?\s]*$/i.test(pLower);
+  const isSimpleGreetingOrChat = /^(?:hello|hi|hey|yo|sup|greetings|howdy|good\s+(?:morning|afternoon|evening|night)|who are you|what is your name|are you there|snow)[.!?\s]*$/i.test(pLower);
 
   // Try LLM Intent Resolution first for intelligent intent parsing only on non-trivial queries
   const apiKey = process.env.GEMINI_API_KEY || "";

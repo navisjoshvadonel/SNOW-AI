@@ -372,10 +372,10 @@ export default function App() {
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [isJarvisMode, setIsJarvisMode] = useState(true);
+  const [isContinuousMode, setIsContinuousMode] = useState(true);
   const [micVolume, setMicVolume] = useState(0);
 
-  const isJarvisModeRef = useRef<boolean>(true);
+  const isContinuousModeRef = useRef<boolean>(true);
   const isSpeakingRef = useRef<boolean>(false);
   const shouldKeepListeningRef = useRef<boolean>(false);
   const recognitionRef = useRef<any>(null);
@@ -1001,8 +1001,8 @@ export default function App() {
 
   // Keep voice refs synchronized with component state
   useEffect(() => {
-    isJarvisModeRef.current = isJarvisMode;
-  }, [isJarvisMode]);
+    isContinuousModeRef.current = isContinuousMode;
+  }, [isContinuousMode]);
 
   useEffect(() => {
     isSpeakingRef.current = isSpeaking;
@@ -1032,9 +1032,9 @@ export default function App() {
   // ─── Speak Response as Snow (Articulate Female Voice) ────────────────────────
   const speakSnow = (textToSpeak: string) => {
     if (isMuted || !("speechSynthesis" in window)) {
-      if (isJarvisModeRef.current) {
+      if (isContinuousModeRef.current) {
         setTimeout(() => {
-          if (isJarvisModeRef.current && !isSpeakingRef.current) {
+          if (isContinuousModeRef.current && !isSpeakingRef.current) {
             startSnowVoiceListening(true);
           }
         }, 1200);
@@ -1048,7 +1048,7 @@ export default function App() {
 
       const cleaned = cleanForSpeech(textToSpeak);
       if (!cleaned) {
-        if (isJarvisModeRef.current && !isSpeakingRef.current) {
+        if (isContinuousModeRef.current && !isSpeakingRef.current) {
           setTimeout(() => startSnowVoiceListening(true), 400);
         }
         return;
@@ -1102,11 +1102,11 @@ export default function App() {
         setIsSpeaking(false);
         isSpeakingRef.current = false;
 
-        // J.A.R.V.I.S. Continuous Conversational Loop:
+        // S.N.O.W. Continuous Conversational Loop:
         // Automatically resume listening for follow-up immediately after speech finishes!
-        if (isJarvisModeRef.current && !isMuted) {
+        if (isContinuousModeRef.current && !isMuted) {
           setTimeout(() => {
-            if (isJarvisModeRef.current && !isSpeakingRef.current) {
+            if (isContinuousModeRef.current && !isSpeakingRef.current) {
               startSnowVoiceListening(true);
             }
           }, 350);
@@ -1133,7 +1133,7 @@ export default function App() {
       console.warn("Speech synthesis error:", e);
       setIsSpeaking(false);
       isSpeakingRef.current = false;
-      if (isJarvisModeRef.current && !isMuted) {
+      if (isContinuousModeRef.current && !isMuted) {
         setTimeout(() => startSnowVoiceListening(true), 350);
       }
     }
@@ -1193,11 +1193,11 @@ export default function App() {
   };
 
   // ─── Continuous Voice Engine (Dual-Mode: Native Audio + WebSpeech API) ──────
-  const stopSnowVoiceListening = (preserveJarvisMode = false) => {
+  const stopSnowVoiceListening = (preserveContinuousMode = false) => {
     shouldKeepListeningRef.current = false;
-    if (!preserveJarvisMode) {
-      setIsJarvisMode(false);
-      isJarvisModeRef.current = false;
+    if (!preserveContinuousMode) {
+      setIsContinuousMode(false);
+      isContinuousModeRef.current = false;
     }
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
 
@@ -1224,10 +1224,10 @@ export default function App() {
 
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
 
-    // Only chime and toast on explicit user activation, never repeatedly in Jarvis loop
+    // Only chime and toast on explicit user activation, never repeatedly in SNOW loop
     if (!isAutoSilent) {
       playSnowWakeChime();
-      triggerToast(isJarvisModeRef.current ? "⚡ J.A.R.V.I.S. Loop Active (Speak freely)..." : "⚡ Snow Listening...");
+      triggerToast(isContinuousModeRef.current ? "⚡ S.N.O.W. Loop Active (Speak freely)..." : "⚡ Snow Listening...");
     }
 
     setIsListening(true);
@@ -1402,7 +1402,7 @@ export default function App() {
             lastSpeechTimestampRef.current = Date.now();
 
             // Instant wake-word trigger on Web Speech API
-            if (/^(?:hey|hi|hello|yo|ok)?\s*(?:snow|jarvis)[.!?]*$/i.test(activeSpeech.trim())) {
+            if (/^(?:hey|hi|hello|yo|ok)?\s*(?:snow|SNOW)[.!?]*$/i.test(activeSpeech.trim())) {
               stopSnowVoiceListening(true);
               handleSendMessageRef.current(activeSpeech.trim());
               return;
@@ -1459,18 +1459,18 @@ export default function App() {
       stopSnowVoiceListening(false);
       triggerToast("Voice input paused.");
     } else {
-      setIsJarvisMode(true);
-      isJarvisModeRef.current = true;
+      setIsContinuousMode(true);
+      isContinuousModeRef.current = true;
       startSnowVoiceListening(false);
     }
   };
 
-  const toggleJarvisMode = () => {
-    const next = !isJarvisMode;
-    setIsJarvisMode(next);
-    isJarvisModeRef.current = next;
+  const toggleContinuousMode = () => {
+    const next = !isContinuousMode;
+    setIsContinuousMode(next);
+    isContinuousModeRef.current = next;
     if (next) {
-      triggerToast("⚡ J.A.R.V.I.S. Continuous Conversation Mode Enabled.");
+      triggerToast("⚡ S.N.O.W. Continuous Conversation Mode Enabled.");
       if (!isListening) {
         startSnowVoiceListening(false);
       }
@@ -1510,8 +1510,8 @@ export default function App() {
             stopSnowVoiceListening(false);
             triggerToast("Voice input paused.");
           } else {
-            setIsJarvisMode(true);
-            isJarvisModeRef.current = true;
+            setIsContinuousMode(true);
+            isContinuousModeRef.current = true;
             startSnowVoiceListening(false);
           }
         }
@@ -2122,8 +2122,8 @@ export default function App() {
               isSpeaking={isSpeaking}
               isMuted={isMuted}
               attachedContextFiles={attachedContextFiles}
-              isJarvisMode={isJarvisMode}
-              onToggleJarvisMode={toggleJarvisMode}
+              isContinuousMode={isContinuousMode}
+              onToggleContinuousMode={toggleContinuousMode}
               micVolume={micVolume}
               onInputChange={setInputText}
               onSendMessage={handleSendMessage}

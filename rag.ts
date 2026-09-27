@@ -1,7 +1,7 @@
 /**
  * UNIFIED HYBRID RAG ENGINE — rag.ts
  *
- * Phase 2: High-Precision Retrieval-Augmented Generation for Snow Jarvis
+ * Phase 2: High-Precision Retrieval-Augmented Generation for Snow
  *
  * Capabilities:
  *   1. DENSE VECTOR RETRIEVAL  — 768-dim semantic vectors (Ollama nomic-embed-text / Gemini text-embedding-004)

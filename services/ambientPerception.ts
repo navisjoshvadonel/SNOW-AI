@@ -1,7 +1,7 @@
 /**
  * SNOW AI — Ambient Desktop Perception & Differential Context Engine
  * Continuously tracks active desktop focus, window titles, and visual scenes
- * to provide J.A.R.V.I.S.-grade ambient workspace awareness.
+ * to provide S.N.O.W.-grade ambient workspace awareness.
  */
 
 import { exec } from "child_process";

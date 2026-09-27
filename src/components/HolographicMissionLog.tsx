@@ -28,8 +28,8 @@ export interface HolographicMissionLogProps {
   isSpeaking: boolean;
   isMuted: boolean;
   attachedContextFiles: { name: string; path: string; content: string }[];
-  isJarvisMode?: boolean;
-  onToggleJarvisMode?: () => void;
+  isContinuousMode?: boolean;
+  onToggleContinuousMode?: () => void;
   micVolume?: number;
   onInputChange: (text: string) => void;
   onSendMessage: (textToSend?: string) => void;
@@ -51,8 +51,8 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
   isSpeaking,
   isMuted,
   attachedContextFiles,
-  isJarvisMode = true,
-  onToggleJarvisMode,
+  isContinuousMode = true,
+  onToggleContinuousMode,
   micVolume = 0,
   onInputChange,
   onSendMessage,
@@ -335,19 +335,19 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Jarvis Hands-Free Mode Toggle */}
+            {/* SNOW Hands-Free Mode Toggle */}
             <button
               type="button"
-              onClick={onToggleJarvisMode}
+              onClick={onToggleContinuousMode}
               className={`flex items-center gap-1.5 px-2 py-0.5 rounded-lg border text-[9px] transition cursor-pointer font-mono font-bold ${
-                isJarvisMode
+                isContinuousMode
                   ? "bg-cyan-500/20 border-cyan-400 text-cyan-200 shadow-[0_0_10px_rgba(6,182,212,0.3)]"
                   : "bg-slate-900/60 border-slate-700 text-slate-400 hover:border-slate-500"
               }`}
-              title={isJarvisMode ? "Continuous Hands-Free J.A.R.V.I.S. Conversation Active" : "Click to enable Continuous Hands-Free J.A.R.V.I.S. Mode"}
+              title={isContinuousMode ? "Continuous Hands-Free S.N.O.W. Conversation Active" : "Click to enable Continuous Hands-Free S.N.O.W. Mode"}
             >
-              <BrainCircuit className={`w-3 h-3 ${isJarvisMode ? "text-cyan-400 animate-pulse" : "text-slate-500"}`} />
-              <span>{isJarvisMode ? "JARVIS LOOP" : "PUSH TALK"}</span>
+              <BrainCircuit className={`w-3 h-3 ${isContinuousMode ? "text-cyan-400 animate-pulse" : "text-slate-500"}`} />
+              <span>{isContinuousMode ? "CONTINUOUS LOOP" : "PUSH TALK"}</span>
             </button>
 
             <button
@@ -401,7 +401,7 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
             type="text"
             placeholder={
               isListening
-                ? isJarvisMode
+                ? isContinuousMode
                   ? "⚡ Say 'Hey Snow' or speak freely (Hands-free active)..."
                   : "Listening to your voice..."
                 : attachedContextFiles.length > 0

@@ -1,6 +1,6 @@
 /**
  * SNOW AI — Deep Linux System & D-Bus Actuator Service
- * Grants J.A.R.V.I.S.-grade direct control over native Linux audio routing,
+ * Grants S.N.O.W.-grade direct control over native Linux audio routing,
  * multi-monitor displays, window tiling, power profiles, MPRIS media playback,
  * session security, and user services.
  */
