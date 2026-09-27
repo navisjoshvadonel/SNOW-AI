@@ -25,6 +25,7 @@ import {
   addVisualEpisode,
   loadRecentVisualEpisodes,
   searchVisualEpisodes,
+  addEpisodicMemory,
   deleteVisualEpisode,
   clearVisualEpisodes,
   VisualEpisode,
@@ -1877,14 +1878,15 @@ async function startServer() {
 
     // Phase 4: Record this interaction as an episodic memory
     try {
-      const { addEpisodicMemory } = require("./brain");
       addEpisodicMemory(
         `User asked: "${effectivePrompt.slice(0, 200)}" (${new Date().toLocaleTimeString()})`,
         "episodic",
         "chat"
       );
       dreamCycle.recordActivity();
-    } catch {}
+    } catch (e: any) {
+      console.warn("[SNOW] Failed to write episodic memory:", e.message);
+    }
 
     // Fix 1 & 3: run intent resolution and unified context retrieval IN PARALLEL.
     // Greetings, queries, and agentic tasks all flow through dynamic neural intelligence — zero hardcoded scripts.
@@ -2002,9 +2004,11 @@ async function startServer() {
 
     const isGreeting = /^(hello|hi|hey|greetings|good\s+(morning|afternoon|evening|night)|howdy|sup|yo|hi there|hello snow|hi snow|snow|wake up|are you there|listen|wake)\b/i.test(effectivePrompt.trim().replace(/[.,!?;]+$/, ""));
     const isIdentity = /\b(who are you|what is your name|who created you|who made you|what can you do|your name|are you ai|are you snow)\b/i.test(effectivePrompt);
-    const hasAgenticIntent = /\b(run|execute|calculate|solve|python|code|script|test|debug|check|git|status|diff|log|branch|clipboard|copy|paste|notification|notify|process|processes|service|daemon|kill|open|launch|terminal|file|read|write|search|weather|amixer|volume)\b/i.test(effectivePrompt);
+    const hasAgenticIntent = /\b(run|execute|calculate|solve|python|code|script|test|debug|check|git|status|diff|log|branch|clipboard|copy|paste|notification|notify|process|processes|service|daemon|kill|open|launch|terminal|file|read|write|search|weather|amixer|volume|remind|schedule|timer|goal|task)\b/i.test(effectivePrompt) || 
+                             intent.isReminder || intent.isEmail || intent.isCalendar || intent.isFileQuery || intent.isGoalCreate || intent.isMathCalc || intent.isCodeReview || intent.isDesktopAction;
     const hasVision = images.length > 0;
-    const isSimpleConversation = isVisualRecall || (hasVision && !hasAgenticIntent) || ((isGreeting || isIdentity || (!needsSearch && !intent.isWeather && !intent.isSystem && !intent.isStock && !intent.isSports && !intent.isNews)) && !hasAgenticIntent);
+    const hasAnyComplexIntent = needsSearch || intent.isWeather || intent.isSystem || intent.isStock || intent.isSports || intent.isNews || hasAgenticIntent;
+    const isSimpleConversation = isVisualRecall || (hasVision && !hasAgenticIntent) || ((isGreeting || isIdentity || !hasAnyComplexIntent) && !hasAgenticIntent);
 
     let aiRaw: string;
     let reactTools: string[] = [];

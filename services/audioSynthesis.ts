@@ -136,8 +136,9 @@ class AudioSynthesisService {
     let dispatched = false;
     let engine: SynthesizedAudioResult["engine"] = "none";
 
-    // 6a. Try edge-tts → temp mp3 → gst-play-1.0 (preferred path)
-    if (await hasEdgeTts()) {
+    try {
+      // 6a. Try edge-tts → temp mp3 → gst-play-1.0 (preferred path)
+      if (await hasEdgeTts()) {
       const tmpFile = join(tmpdir(), `snow_tts_${Date.now()}.mp3`);
       _activeTmpFile = tmpFile;
       try {
@@ -190,9 +191,10 @@ class AudioSynthesisService {
       } catch {
         // Silent — no TTS engine available
       }
+      }
+    } finally {
+      voiceDuplex.finishSpeaking();
     }
-
-    voiceDuplex.finishSpeaking();
 
     return {
       text,

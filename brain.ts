@@ -163,6 +163,15 @@ export interface ResolvedIntent {
   webQuery?: string;
   extractedFacts?: { source: string; rel: string; target: string }[];
   isTrainRequest?: boolean;
+  isReminder?: boolean;
+  isEmail?: boolean;
+  isCalendar?: boolean;
+  isFileQuery?: boolean;
+  isGoalCreate?: boolean;
+  isMemoryRecall?: boolean;
+  isMathCalc?: boolean;
+  isCodeReview?: boolean;
+  isDesktopAction?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -802,7 +811,10 @@ export async function resolveIntent(prompt: string): Promise<ResolvedIntent> {
     return {
       isTime: true, isWeather: false, isSystem: false, isStock: false,
       isNews: false, isSports: false, isJoke: false, isMusic: false,
-      isWeb: false, isTrainRequest: false
+      isWeb: false, isTrainRequest: false,
+      isReminder: false, isEmail: false, isCalendar: false,
+      isFileQuery: false, isGoalCreate: false, isMemoryRecall: false,
+      isMathCalc: false, isCodeReview: false, isDesktopAction: false
     };
   }
 
@@ -811,7 +823,10 @@ export async function resolveIntent(prompt: string): Promise<ResolvedIntent> {
     return {
       isSystem: true, isWeather: false, isStock: false, isNews: false,
       isSports: false, isTime: false, isJoke: false, isMusic: false,
-      isWeb: false, isTrainRequest: false
+      isWeb: false, isTrainRequest: false,
+      isReminder: false, isEmail: false, isCalendar: false,
+      isFileQuery: false, isGoalCreate: false, isMemoryRecall: false,
+      isMathCalc: false, isCodeReview: false, isDesktopAction: false
     };
   }
 
@@ -821,7 +836,10 @@ export async function resolveIntent(prompt: string): Promise<ResolvedIntent> {
       isWeather: true, weatherLocation: "Madurai, Tamil Nadu, India",
       isSystem: false, isStock: false, isNews: false, isSports: false,
       isTime: false, isJoke: false, isMusic: false, isWeb: false,
-      isTrainRequest: false
+      isTrainRequest: false,
+      isReminder: false, isEmail: false, isCalendar: false,
+      isFileQuery: false, isGoalCreate: false, isMemoryRecall: false,
+      isMathCalc: false, isCodeReview: false, isDesktopAction: false
     };
   }
 
@@ -849,7 +867,16 @@ Return ONLY valid JSON matching this schema:
   "isWeb": boolean,
   "webQuery": string | null,
   "extractedFacts": Array<{"source": string, "rel": string, "target": string}>,
-  "isTrainRequest": boolean
+  "isTrainRequest": boolean,
+  "isReminder": boolean,
+  "isEmail": boolean,
+  "isCalendar": boolean,
+  "isFileQuery": boolean,
+  "isGoalCreate": boolean,
+  "isMemoryRecall": boolean,
+  "isMathCalc": boolean,
+  "isCodeReview": boolean,
+  "isDesktopAction": boolean
 }`;
 
       const res = await ai.models.generateContent({
@@ -888,7 +915,16 @@ Return ONLY valid JSON matching this schema:
           isWeb: !!parsed.isWeb,
           webQuery: parsed.webQuery || undefined,
           extractedFacts: parsed.extractedFacts,
-          isTrainRequest: !!parsed.isTrainRequest || /train|learn|study|update brain/i.test(pLower)
+          isTrainRequest: !!parsed.isTrainRequest || /train|learn|study|update brain/i.test(pLower),
+          isReminder: !!parsed.isReminder,
+          isEmail: !!parsed.isEmail,
+          isCalendar: !!parsed.isCalendar,
+          isFileQuery: !!parsed.isFileQuery,
+          isGoalCreate: !!parsed.isGoalCreate,
+          isMemoryRecall: !!parsed.isMemoryRecall,
+          isMathCalc: !!parsed.isMathCalc,
+          isCodeReview: !!parsed.isCodeReview,
+          isDesktopAction: !!parsed.isDesktopAction
         };
       }
     } catch (e: any) {
