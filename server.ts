@@ -75,6 +75,7 @@ import { reflexionEngine } from "./services/reflexionEngine";
 import { skillSynthesizer } from "./services/skillSynthesizer";
 import { goalEngine } from "./services/goalEngine";
 import { dreamCycle } from "./services/dreamCycle";
+import { startNightlyCron } from "./services/cronManager";
 import {
   verifyPassword,
   verifyPasscode,
@@ -2490,6 +2491,7 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
     ambientPerception.start(10000);
     goalEngine.start(4000);
     dreamCycle.start(3 * 60 * 1000); // 3-minute check interval, triggers after 5 min idle
+    startNightlyCron();
   });
 
   let isShuttingDown = false;
