@@ -34,37 +34,49 @@ class ReflexionEngineService {
 
     try {
       const ai = new GoogleGenAI({ apiKey });
-      const systemInstruction = `You are SNOW's Post-Mortem Reflexion & Operational Learning Engine.
+      const systemInstruction = `You are SNOW's Advanced Post-Mortem Reflexion & Operational Learning Engine.
 An operational error or tool failure occurred during task execution.
-Your objective is to extract a concrete, reusable operational rule (heuristic) that prevents this specific error from recurring.
+Your objective is to extract a concrete, structurally deep operational rule (heuristic) that prevents this specific error from recurring.
 
 CRITICAL GUIDELINES:
-1. Rule must be actionable and concise (1 sentence).
-   Example: "When reading JSON files, verify existence before parsing and wrap in try-catch."
-   Example: "When activating a desktop window via wmctrl, ensure the target string matches the window title substring."
-2. Output a STRICT JSON object in this format with NO markdown wrapping:
+1. Rule must be actionable, precise, and address root cause (not just symptom).
+2. If the error is a syntax or stack trace issue, include code-level prevention strategies.
+3. Output a STRICT JSON object in this format with NO markdown wrapping:
 {
-  "triggerContext": "keywords or intent describing when this rule applies",
-  "rule": "Concrete actionable directive",
-  "rationale": "Brief reason why this failure occurred"
+  "triggerContext": "precise keywords, function, or intent describing when this rule applies",
+  "rule": "Deep actionable directive (e.g. 'When parsing JSON from stdout, always strip ansi codes and wrap in try-catch with fallback.')",
+  "rationale": "Root cause analysis of why this failure occurred"
 }`;
 
       const userContent = `Task / Context Query: "${incident.contextQuery}"
 Tool Invoked: ${incident.toolName}
-Tool Input: ${JSON.stringify(incident.toolInput || {}).slice(0, 300)}
+Tool Input: ${JSON.stringify(incident.toolInput || {}).slice(0, 500)}
 Error Output:
-${incident.errorMessage.slice(0, 600)}
+${incident.errorMessage.slice(0, 1000)}
 
 Synthesize the operational rule to prevent this failure in future runs.`;
 
-      const res = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: userContent }] }],
-        config: {
-          systemInstruction,
-          responseMimeType: "application/json"
-        }
-      });
+      let res;
+      try {
+        res = await ai.models.generateContent({
+          model: "gemini-2.5-pro",
+          contents: [{ role: "user", parts: [{ text: userContent }] }],
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json"
+          }
+        });
+      } catch (e) {
+        console.warn("[Reflexion Engine] Pro model unavailable, falling back to Flash...");
+        res = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: [{ role: "user", parts: [{ text: userContent }] }],
+          config: {
+            systemInstruction,
+            responseMimeType: "application/json"
+          }
+        });
+      }
 
       const raw = res.text?.trim() || "";
       const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}");

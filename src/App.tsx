@@ -1035,8 +1035,8 @@ export default function App() {
   }, []);
 
   // ─── Speak Response as Snow (Articulate Female Voice) ────────────────────────
-  const speakSnow = (textToSpeak: string) => {
-    if (isMuted || !("speechSynthesis" in window)) {
+  const speakSnow = async (textToSpeak: string) => {
+    if (isMuted) {
       if (isContinuousModeRef.current) {
         setTimeout(() => {
           if (isContinuousModeRef.current && !isSpeakingRef.current) {
@@ -1047,29 +1047,70 @@ export default function App() {
       return;
     }
 
-    try {
-      window.speechSynthesis.cancel();
-      if (speechWatchdogRef.current) clearTimeout(speechWatchdogRef.current);
+    const cleaned = cleanForSpeech(textToSpeak);
+    if (!cleaned) {
+      if (isContinuousModeRef.current && !isSpeakingRef.current) {
+        setTimeout(() => startSnowVoiceListening(true), 400);
+      }
+      return;
+    }
 
-      const cleaned = cleanForSpeech(textToSpeak);
-      if (!cleaned) {
-        if (isContinuousModeRef.current && !isSpeakingRef.current) {
-          setTimeout(() => startSnowVoiceListening(true), 400);
-        }
-        return;
+    // Stop browser TTS if any is running
+    if ("speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    if (speechWatchdogRef.current) clearTimeout(speechWatchdogRef.current);
+
+    setIsSpeaking(true);
+    isSpeakingRef.current = true;
+
+    try {
+      // 1. Try S.N.O.W. Backend Neural Engine (edge-tts + native playback)
+      const res = await fetch("/api/snow/tts/synthesize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: cleaned, urgency: "calm" })
+      });
+
+      if (!res.ok) throw new Error("Backend TTS unavailable");
+      
+      const data = await res.json();
+      if (!data.dispatchedToNativeLinux) {
+        throw new Error("Backend TTS did not dispatch native playback");
       }
 
-      // Extract first 2-3 sentences for concise, crisp spoken delivery
+      // Speech finished via backend successfully
+      setIsSpeaking(false);
+      isSpeakingRef.current = false;
+      if (isContinuousModeRef.current && !isMuted) {
+        setTimeout(() => {
+          if (isContinuousModeRef.current && !isSpeakingRef.current) {
+            startSnowVoiceListening(true);
+          }
+        }, 350);
+      }
+      return; // Exit here if backend succeeded
+    } catch (err) {
+      console.warn("[Snow Voice] Backend Neural Engine failed, falling back to Browser Web Speech API:", err);
+    }
+
+    // 2. Fallback: Browser Web Speech API
+    if (!("speechSynthesis" in window)) {
+      setIsSpeaking(false);
+      isSpeakingRef.current = false;
+      return;
+    }
+
+    try {
       const sentenceMatches = cleaned.match(/[^.!?]+[.!?]+/g);
       const spokenSummary = sentenceMatches && sentenceMatches.length > 0 
         ? sentenceMatches.slice(0, 3).join(" ").trim() 
         : cleaned.slice(0, 260).trim();
 
       const utterance = new SpeechSynthesisUtterance(spokenSummary);
-      utterance.rate = 1.02; // Elegant, fluid conversational pace
-      utterance.pitch = 1.14; // Melodic, crystal-clear feminine register
+      utterance.rate = 1.02;
+      utterance.pitch = 1.14;
 
-      // Select female voice with prioritized fallback chain
       const voices = (availableVoicesRef.current && availableVoicesRef.current.length > 0)
         ? availableVoicesRef.current
         : window.speechSynthesis.getVoices();
@@ -1091,7 +1132,6 @@ export default function App() {
 
       if (femaleVoice) utterance.voice = femaleVoice;
 
-      // Pin utterance to prevent Chromium GC freeze bug
       activeUtteranceRef.current = utterance;
       (window as any)._snowActiveUtterance = utterance;
 
@@ -1107,8 +1147,6 @@ export default function App() {
         setIsSpeaking(false);
         isSpeakingRef.current = false;
 
-        // S.N.O.W. Continuous Conversational Loop:
-        // Automatically resume listening for follow-up immediately after speech finishes!
         if (isContinuousModeRef.current && !isMuted) {
           setTimeout(() => {
             if (isContinuousModeRef.current && !isSpeakingRef.current) {
@@ -1124,7 +1162,6 @@ export default function App() {
         handleSpeechDone();
       };
 
-      // Watchdog timer: Auto-recover if browser speech stalls or misses onend
       const maxSpeechMs = Math.max(3500, (spokenSummary.length * 90) + 1500);
       speechWatchdogRef.current = setTimeout(() => {
         if (isSpeakingRef.current) {
@@ -1135,7 +1172,7 @@ export default function App() {
 
       window.speechSynthesis.speak(utterance);
     } catch (e) {
-      console.warn("Speech synthesis error:", e);
+      console.warn("Fallback speech synthesis error:", e);
       setIsSpeaking(false);
       isSpeakingRef.current = false;
       if (isContinuousModeRef.current && !isMuted) {

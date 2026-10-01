@@ -89,7 +89,46 @@ class ProactiveIntelligenceService {
         });
       }
 
-      // 3. Ingest proactive insights into RAG memory
+      // 3. NPM Audit Security Check
+      try {
+        const { stdout: auditOut } = await execAsync("npm audit --json", { cwd: WORKSPACE_DIR, timeout: 15_000 });
+        const auditObj = JSON.parse(auditOut);
+        if (auditObj.metadata && auditObj.metadata.vulnerabilities) {
+          const vulns = auditObj.metadata.vulnerabilities;
+          const total = vulns.info + vulns.low + vulns.moderate + vulns.high + vulns.critical;
+          if (total > 0) {
+            newInsights.push({
+              id: `sec-${Date.now()}`,
+              category: "security",
+              title: "Dependency Vulnerabilities Detected",
+              summary: `Found ${total} vulnerabilities (${vulns.high} high, ${vulns.critical} critical).`,
+              suggestedAction: "Run 'npm audit fix' to resolve vulnerabilities.",
+              timestamp: now.toISOString(),
+            });
+          }
+        }
+      } catch (e: any) {
+        // If exit code is not 0, npm audit returns vulnerabilities in stdout
+        try {
+           const auditObj = JSON.parse(e.stdout);
+           if (auditObj.metadata && auditObj.metadata.vulnerabilities) {
+             const vulns = auditObj.metadata.vulnerabilities;
+             const total = vulns.info + vulns.low + vulns.moderate + vulns.high + vulns.critical;
+             if (total > 0) {
+                newInsights.push({
+                  id: `sec-${Date.now()}`,
+                  category: "security",
+                  title: "Dependency Vulnerabilities Detected",
+                  summary: `Found ${total} vulnerabilities (${vulns.high} high, ${vulns.critical} critical).`,
+                  suggestedAction: "Run 'npm audit fix' to resolve vulnerabilities.",
+                  timestamp: now.toISOString(),
+                });
+             }
+           }
+        } catch (_) {}
+      }
+
+      // 4. Ingest proactive insights into RAG memory
       for (const insight of newInsights) {
         ragIngestFact("proactive_engine", insight.category, `${insight.title}: ${insight.summary}`).catch(() => {});
       }

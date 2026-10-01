@@ -265,7 +265,8 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
 
   console.log("[OLLAMA BACKEND] Sending messages to Ollama:", JSON.stringify(ollamaMessages, null, 2));
 
-  const response = await fetch("http://127.0.0.1:11434/api/chat", {
+  const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const response = await fetch(`${ollamaHost}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal,

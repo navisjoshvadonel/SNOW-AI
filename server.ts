@@ -850,7 +850,8 @@ async function callAI(
   const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
 
   try {
-    const res = await fetch("http://127.0.0.1:11434/api/chat", {
+    const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+    const res = await fetch(`${ollamaHost}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -933,7 +934,8 @@ async function callAIStream(
   const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
 
   try {
-    const res = await fetch("http://127.0.0.1:11434/api/chat", {
+    const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+    const res = await fetch(`${ollamaHost}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: ollamaModel, messages: ollamaMessages, stream: true })

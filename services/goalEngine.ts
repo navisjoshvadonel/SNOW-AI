@@ -164,43 +164,63 @@ class GoalEngineService {
     if (apiKey) {
       try {
         const ai = new GoogleGenAI({ apiKey });
-        const prompt = `You are SNOW's Autonomous Executive Goal Architect.
-Decompose this high-level system objective into 2 to 5 structured, atomic, sequential subtasks.
+        const prompt = `You are SNOW's Advanced Autonomous Executive Goal Architect.
+You operate with full agency. Your task is to decompose a high-level system objective into a comprehensive, highly robust sequence of atomic subtasks. 
+Think step-by-step. Anticipate failures. If a task involves coding, system config, or external tools, include verification steps.
 
-Available execution tools:
-- "LinuxSystem": Linux OS actuation (pass {"action": "set_volume" | "toggle_mute" | "power_profile" | "media" | "focus_window" | "close_window" | "notify" | "launch" | "state", ...})
-- "FileOperation": Safe file system operations (pass {"action": "read" | "write" | "append" | "list" | "exists", "path": "...", "content": "..."})
-- "Bash": Shell command execution (pass {"command": "..."})
-- "PythonSandbox": Safe Python execution (pass {"code": "..."})
-- "ComputerUse": Desktop automation (pass {"action": "status" | "click" | "hotkey" | "launch", ...})
-- "SkillSynthesizer": Synthesize new tool (pass {"action": "synthesize" | "execute", ...})
+Available Execution Tools (CRITICAL: Use exact names):
+- "LinuxSystem": OS Actuation {"action": "set_volume" | "toggle_mute" | "power_profile" | "media" | "focus_window" | "close_window" | "notify" | "launch" | "state", "title": "...", "app": "...", "volume": 50, ...}
+- "FileOperation": Safe File I/O {"action": "read" | "write" | "append" | "list" | "exists", "path": "...", "content": "..."}
+- "Bash": Unrestricted Shell Command Execution {"command": "..."}. Useful for deep system interaction, git, npm, docker, etc.
+- "PythonSandbox": Safe Data/Math Python execution {"code": "..."}
+- "ComputerUse": UI Desktop automation {"action": "status" | "click" | "hotkey" | "launch", "x": 0, "y": 0, "keys": "..."}
+- "SkillSynthesizer": Synthesize new capability {"action": "synthesize" | "execute", "name": "...", "description": "..."}
 
 OBJECTIVE:
 Title: "${goal.title}"
 Description: "${goal.description}"
 
-Output a STRICT JSON object in this format with NO markdown wrapping:
+CRITICAL RULES:
+1. Always output valid JSON only. NO MARKDOWN WRAPPING. NO \`\`\`json.
+2. Provide a "reasoning" field first.
+3. Subtasks must be highly specific, safe, and verifiable.
+4. Ensure the last subtask validates the outcome.
+
+Format:
 {
+  "reasoning": "Step-by-step logic explaining the decomposition strategy...",
   "subtasks": [
     {
       "stepOrder": 1,
-      "title": "Clear concise subtask title",
+      "title": "Clear, verifiable action",
       "assignedTool": "LinuxSystem | FileOperation | Bash | PythonSandbox | ComputerUse | SkillSynthesizer",
       "inputPayload": { ... }
     }
   ]
 }`;
 
-        const res = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          config: { responseMimeType: "application/json" }
-        });
+        // Attempt Pro model for deeper reasoning, fallback to Flash
+        let res;
+        try {
+          res = await ai.models.generateContent({
+            model: "gemini-2.5-pro",
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            config: { responseMimeType: "application/json" }
+          });
+        } catch (e) {
+          console.warn("[GoalEngine] Pro model unavailable/failed, falling back to Flash...", e);
+          res = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: [{ role: "user", parts: [{ text: prompt }] }],
+            config: { responseMimeType: "application/json" }
+          });
+        }
 
         const raw = res.text?.trim() || "";
         const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}");
         if (Array.isArray(parsed.subtasks) && parsed.subtasks.length > 0) {
           subtasksCreated = parsed.subtasks;
+          console.log(`[GoalEngine] AI Reasoning: ${parsed.reasoning || 'No reasoning provided'}`);
         }
       } catch (err: any) {
         console.warn("[GoalEngine] AI decomposition notice, falling back to heuristic planner:", err.message);

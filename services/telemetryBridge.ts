@@ -169,7 +169,7 @@ class TelemetryBridgeService {
       si.mem().catch(() => ({ used: 5 * 1024 * 1024 * 1024, total: 16 * 1024 * 1024 * 1024 })),
       si.cpuTemperature().catch(() => ({ main: 46 })),
       this.resolveWorkstationLocation(),
-      this.probeTcpPing("127.0.0.1", 3000, 300),
+      this.probeTcpPing(process.env.HOST || "127.0.0.1", 3000, 300),
       this.probeTcpPing("1.1.1.1", 53, 600),
       this.probeTcpPing("8.8.8.8", 53, 600),
     ]);
@@ -307,7 +307,7 @@ class TelemetryBridgeService {
     return new Promise<boolean>((resolve) => {
       const req = http.request(
         {
-          hostname: "127.0.0.1",
+          hostname: process.env.HUD_HOST || "127.0.0.1",
           port: this.hudPort,
           path: "/dashboard/update",
           method: "POST",

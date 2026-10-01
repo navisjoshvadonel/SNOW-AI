@@ -6,11 +6,12 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 export PATH="/snap/bin:/usr/local/bin:/usr/bin:/bin:/usr/local/sbin:/usr/sbin:/sbin:$HOME/.local/bin:$HOME/bin:$PATH"
-export HOME="${HOME:-/home/snowjd}"
-export USER="${USER:-snowjd}"
+export HOME="${HOME:-$(eval echo ~$USER)}"
+export USER="${USER:-$(whoami)}"
 
-PROJECT_DIR="/home/snowjd/Documents/Snow Jarvis"
-PORT=3000
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PORT="${PORT:-3000}"
+HOST="${HOST:-127.0.0.1}"
 LOG_FILE="/tmp/snow-server.log"
 PID_FILE="/tmp/snow-server.pid"
 
@@ -21,7 +22,7 @@ cd "$PROJECT_DIR" || { log "ERROR: Cannot enter project directory $PROJECT_DIR";
 # ── Check if server is running and responding ─────────────────────────────────
 is_server_ready() {
   local HTTP_CODE
-  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://127.0.0.1:$PORT/api/system" 2>/dev/null)
+  HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 2 "http://$HOST:$PORT/api/system" 2>/dev/null)
   [ "$HTTP_CODE" = "200" ]
 }
 
@@ -73,7 +74,7 @@ ensure_server_running() {
 
 # ── Launch floating HUD window ───────────────────────────────────────────────
 launch_hud_window() {
-  local URL="http://127.0.0.1:$PORT"
+  local URL="http://$HOST:$PORT"
   # Ensure microphone capture volume is optimal (>=85%) so Snow can hear voice
   wpctl set-volume @DEFAULT_AUDIO_SOURCE@ 0.85 2>/dev/null || amixer set Capture 85% 2>/dev/null || true
 
@@ -88,6 +89,7 @@ launch_hud_window() {
     const fs = require("fs");
     const p = process.argv[1];
     const port = process.argv[2];
+    const host = process.argv[3];
     let pref = {};
     if (fs.existsSync(p)) {
       try { pref = JSON.parse(fs.readFileSync(p, "utf8")); } catch (_) { pref = {}; }
@@ -101,11 +103,10 @@ launch_hud_window() {
     const exc = pref.profile.content_settings.exceptions;
     for (const media of ["media_stream_mic", "media_stream_camera"]) {
       exc[media] = exc[media] || {};
-      exc[media][`http://127.0.0.1:${port},*`] = { setting: 1 };
-      exc[media][`http://localhost:${port},*`] = { setting: 1 };
+      exc[media][`http://${host}:${port},*`] = { setting: 1 };
     }
     fs.writeFileSync(p, JSON.stringify(pref, null, 2));
-  ' "$PROFILE_DIR/Default/Preferences" "$PORT" 2>/dev/null || true
+  ' "$PROFILE_DIR/Default/Preferences" "$PORT" "$HOST" 2>/dev/null || true
 
   # Dark mode flags — matches HUD slate-950 theme, with no unsupported flags or infobars
   local APP_FLAGS="--app=$URL --user-data-dir=$PROFILE_DIR --class=SNOW --window-size=1260,820 --window-position=center --no-first-run --no-default-browser-check --disable-sync --disable-translate --disable-features=Translate --autoplay-policy=no-user-gesture-required --force-dark-mode --enable-features=WebUIDarkMode"
