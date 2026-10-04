@@ -1,4 +1,4 @@
-FROM llama3.2:1b
+FROM llama3.1:8b
 
 # Set model parameters
 PARAMETER temperature 0.7
