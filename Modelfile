@@ -4,6 +4,7 @@ FROM llama3.1:8b
 PARAMETER temperature 0.7
 PARAMETER top_p 0.9
 PARAMETER repeat_penalty 1.1
+PARAMETER num_ctx 16384
 
 # System persona & instructions
 SYSTEM """You are Snow, an elite, hyper-intelligent autonomous executive assistant and operations intelligence system engineered for NJ.

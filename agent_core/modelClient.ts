@@ -205,7 +205,11 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
   const ollamaModel = process.env.OLLAMA_MODEL || "llama3.1";
 
   // Map messages to Ollama (OpenAI compatible) format
-  const ollamaMessages = [{ role: "system", content: system }];
+  let enhancedSystem = system;
+  if (tools && tools.length > 0) {
+    enhancedSystem += `\n\nCRITICAL LOCAL ENGINE DIRECTIVE: You have access to tools. You MUST respond with perfectly formatted JSON when calling a tool. Never output brackets or code tags in conversational text unless explicitly calling a tool.`;
+  }
+  const ollamaMessages = [{ role: "system", content: enhancedSystem }];
   
   for (const msg of messages) {
     if (msg.role === "user") {
