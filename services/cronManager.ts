@@ -1,11 +1,15 @@
 import { exec } from "child_process";
 import { promisify } from "util";
 import { dreamCycle } from "./dreamCycle";
+import { startIndiaKnowledgeCron } from "./indiaKnowledgeUpdater";
 
 const execAsync = promisify(exec);
 
 export function startNightlyCron() {
   console.log("[SNOW] Starting Nightly Memory Consolidation Cron (03:00 AM)...");
+  
+  // Start the India knowledge updater
+  startIndiaKnowledgeCron();
   
   // Calculate time until next 3:00 AM
   const now = new Date();
