@@ -67,6 +67,18 @@ async function hasEdgeTts(): Promise<boolean> {
   return _edgeTtsAvailable;
 }
 
+let _piperAvailable: boolean | null = null;
+async function hasPiper(): Promise<boolean> {
+  if (_piperAvailable !== null) return _piperAvailable;
+  try {
+    await execAsync("which piper");
+    _piperAvailable = true;
+  } catch {
+    _piperAvailable = false;
+  }
+  return _piperAvailable;
+}
+
 // ─── Active playback PID tracking for cancel ───────────────────────────────────
 let _activeTmpFile: string | null = null;
 let _activePlayPid: number | null = null;
@@ -134,11 +146,46 @@ class AudioSynthesisService {
     const pitchStr = pitchHz >= 0 ? `+${pitchHz}Hz` : `${pitchHz}Hz`;
 
     let dispatched = false;
-    let engine: SynthesizedAudioResult["engine"] = "none";
+    let engine: SynthesizedAudioResult["engine"] | "piper+gst" | "piper+aplay" = "none" as any;
+    const preferLocal = process.env.USE_LOCAL_FAST_PATH !== "false";
 
     try {
-      // 6a. Try edge-tts → temp mp3 → gst-play-1.0 (preferred path)
-      if (await hasEdgeTts()) {
+      // 6a. Try Piper TTS (Project Metal Mind - Zero Latency Local)
+      if (preferLocal && await hasPiper()) {
+        const tmpFile = join(tmpdir(), `snow_tts_${Date.now()}.wav`);
+        _activeTmpFile = tmpFile;
+        const modelPath = process.env.PIPER_MODEL_PATH || join(process.cwd(), "data", "piper_models", "en_US-lessac-medium.onnx");
+        
+        try {
+          await execAsync(
+            `echo ${JSON.stringify(cleanSpoken)} | piper --model "${modelPath}" --output_file "${tmpFile}" 2>/dev/null`,
+            { timeout: 15_000 }
+          );
+
+          if (await hasGstPlay()) {
+            const child = spawn("gst-play-1.0", ["--quiet", tmpFile], { stdio: "ignore" });
+            _activePlayPid = child.pid ?? null;
+            await new Promise<void>((resolve) => {
+              child.on("close", () => resolve());
+              child.on("error", () => resolve());
+            });
+            _activePlayPid = null;
+            engine = "piper+gst";
+          } else {
+            await execAsync(`aplay -q "${tmpFile}" 2>/dev/null`, { timeout: 30_000 });
+            engine = "piper+aplay";
+          }
+          dispatched = true;
+        } catch (err) {
+          console.warn("[SNOW TTS] Piper TTS failed:", (err as Error).message);
+        } finally {
+          _activeTmpFile = null;
+          try { await unlink(tmpFile); } catch {}
+        }
+      }
+
+      // 6b. Try edge-tts → temp mp3 → gst-play-1.0 (preferred cloud path)
+      if (!dispatched && await hasEdgeTts()) {
       const tmpFile = join(tmpdir(), `snow_tts_${Date.now()}.mp3`);
       _activeTmpFile = tmpFile;
       try {

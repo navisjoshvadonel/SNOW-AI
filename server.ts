@@ -828,48 +828,58 @@ async function callAI(
 
   const geminiContents = buildGeminiContents(history, fullPrompt, images);
 
-  // Fix 5: use module-level singleton instead of re-instantiating every call
-  if (geminiClient) {
-    for (const model of GEMINI_MODELS) {
-      try {
-        console.log(`[SNOW] Trying Gemini ${model} (Multi-turn context: ${geminiContents.length} turns, Visual inputs: ${images?.length || 0})...`);
-        const res = await geminiClient.models.generateContent({
-          model,
-          contents: geminiContents,
-          config: { systemInstruction: SNOW_PERSONA }
-        });
-        const text = res.text?.trim();
-        if (text) return { text, model };
-      } catch (e: any) {
-        console.warn(`[SNOW] Gemini ${model} failed: ${e.message}`);
+  const ollamaModel = process.env.OLLAMA_MODEL || "llama3.2:1b";
+  const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
+  const preferLocal = process.env.USE_LOCAL_FAST_PATH !== "false"; // Project Metal Mind: Default to local fast-path
+
+  const tryGemini = async () => {
+    if (geminiClient) {
+      for (const model of GEMINI_MODELS) {
+        try {
+          console.log(`[SNOW] Trying Gemini ${model} (Multi-turn context: ${geminiContents.length} turns, Visual inputs: ${images?.length || 0})...`);
+          const res = await geminiClient.models.generateContent({
+            model,
+            contents: geminiContents,
+            config: { systemInstruction: SNOW_PERSONA }
+          });
+          const text = res.text?.trim();
+          if (text) return { text, model };
+        } catch (e: any) {
+          console.warn(`[SNOW] Gemini ${model} failed: ${e.message}`);
+        }
       }
     }
+    return null;
+  };
+
+  const tryOllama = async () => {
+    console.log(`[SNOW] Trying Ollama Local Fast-Path (${ollamaModel})...`);
+    try {
+      const res = await fetch(`${ollamaHost}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: ollamaModel, messages: ollamaMessages, stream: false })
+      });
+      if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
+      const data: any = await res.json();
+      const text = data.message?.content?.trim();
+      if (text) return { text, model: `Ollama (${ollamaModel})` };
+    } catch (e: any) {
+      console.error("[SNOW] Ollama Local failed:", e.message);
+    }
+    return null;
+  };
+
+  let finalRes = null;
+  if (preferLocal) {
+    finalRes = await tryOllama();
+    if (!finalRes) finalRes = await tryGemini();
+  } else {
+    finalRes = await tryGemini();
+    if (!finalRes) finalRes = await tryOllama();
   }
-
-  // Ollama fallback with Multi-Turn context
-  const ollamaModel = process.env.OLLAMA_MODEL || "llama3.2:1b";
-  console.log(`[SNOW] Falling back to Ollama (${ollamaModel})...`);
-
-  const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
-
-  try {
-    const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
-    const res = await fetch(`${ollamaHost}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: ollamaModel,
-        messages: ollamaMessages,
-        stream: false
-      })
-    });
-    if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
-    const data: any = await res.json();
-    const text = data.message?.content?.trim();
-    if (text) return { text, model: `Ollama (${ollamaModel})` };
-  } catch (e: any) {
-    console.error("[SNOW] Ollama failed:", e.message);
-  }
+  if (finalRes) return finalRes;
 
   // Absolute last-resort: Built-in offline Snow intelligence
   const offlineReply = buildOfflineReply(userPrompt, history);
@@ -906,69 +916,83 @@ async function callAIStream(
 
   const geminiContents = buildGeminiContents(history, fullPrompt, images);
 
-  // Fix 5: use module-level singleton instead of re-instantiating every call
-  if (geminiClient) {
-    for (const model of GEMINI_MODELS) {
-      try {
-        console.log(`[SNOW STREAM] Trying Gemini Stream ${model} (Visual inputs: ${images?.length || 0})...`);
-        const streamResult = await geminiClient.models.generateContentStream({
-          model,
-          contents: geminiContents,
-          config: { systemInstruction: SNOW_PERSONA }
-        });
+  const ollamaModel = process.env.OLLAMA_MODEL || "llama3.2:1b";
+  const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
+  const preferLocal = process.env.USE_LOCAL_FAST_PATH !== "false"; // Project Metal Mind
+
+  const tryGeminiStream = async () => {
+    if (geminiClient) {
+      for (const model of GEMINI_MODELS) {
+        try {
+          console.log(`[SNOW STREAM] Trying Gemini Stream ${model} (Visual inputs: ${images?.length || 0})...`);
+          const streamResult = await geminiClient.models.generateContentStream({
+            model,
+            contents: geminiContents,
+            config: { systemInstruction: SNOW_PERSONA }
+          });
+          let accumulated = "";
+          for await (const chunk of streamResult) {
+            const chunkText = chunk.text || "";
+            if (chunkText) {
+              accumulated += chunkText;
+              onChunk(chunkText);
+            }
+          }
+          if (accumulated.trim()) return { fullText: accumulated.trim(), model };
+        } catch (e: any) {
+          console.warn(`[SNOW STREAM] Gemini Stream ${model} failed: ${e.message}`);
+        }
+      }
+    }
+    return null;
+  };
+
+  const tryOllamaStream = async () => {
+    console.log(`[SNOW STREAM] Trying Ollama Local Fast-Path Stream (${ollamaModel})...`);
+    try {
+      const res = await fetch(`${ollamaHost}/api/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: ollamaModel, messages: ollamaMessages, stream: true })
+      });
+      if (res.body) {
+        const reader = (res.body as any).getReader();
+        const decoder = new TextDecoder();
         let accumulated = "";
-        for await (const chunk of streamResult) {
-          const chunkText = chunk.text || "";
-          if (chunkText) {
-            accumulated += chunkText;
-            onChunk(chunkText);
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunkStr = decoder.decode(value, { stream: true });
+          const lines = chunkStr.split("\n").filter(Boolean);
+          for (const line of lines) {
+            try {
+              const parsed = JSON.parse(line);
+              const token = parsed.message?.content || "";
+              if (token) {
+                accumulated += token;
+                onChunk(token);
+              }
+            } catch {}
           }
         }
-        if (accumulated.trim()) return { fullText: accumulated.trim(), model };
-      } catch (e: any) {
-        console.warn(`[SNOW STREAM] Gemini Stream ${model} failed: ${e.message}`);
+        if (accumulated.trim()) return { fullText: accumulated.trim(), model: `Ollama (${ollamaModel})` };
       }
+    } catch (e: any) {
+      console.error("[SNOW STREAM] Ollama Local Stream failed:", e.message);
     }
+    return null;
+  };
+
+  let finalRes = null;
+  if (preferLocal) {
+    finalRes = await tryOllamaStream();
+    if (!finalRes) finalRes = await tryGeminiStream();
+  } else {
+    finalRes = await tryGeminiStream();
+    if (!finalRes) finalRes = await tryOllamaStream();
   }
-
-  // Ollama Fallback Streaming
-  const ollamaModel = process.env.OLLAMA_MODEL || "snow";
-  console.log(`[SNOW STREAM] Falling back to Ollama Stream (${ollamaModel})...`);
-  const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
-
-  try {
-    const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
-    const res = await fetch(`${ollamaHost}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: ollamaModel, messages: ollamaMessages, stream: true })
-    });
-
-    if (res.body) {
-      const reader = (res.body as any).getReader();
-      const decoder = new TextDecoder();
-      let accumulated = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunkStr = decoder.decode(value, { stream: true });
-        const lines = chunkStr.split("\n").filter(Boolean);
-        for (const line of lines) {
-          try {
-            const parsed = JSON.parse(line);
-            const token = parsed.message?.content || "";
-            if (token) {
-              accumulated += token;
-              onChunk(token);
-            }
-          } catch {}
-        }
-      }
-      if (accumulated.trim()) return { fullText: accumulated.trim(), model: `Ollama (${ollamaModel})` };
-    }
-  } catch (e: any) {
-    console.error("[SNOW STREAM] Ollama stream failed:", e.message);
-  }
+  if (finalRes) return finalRes;
 
   const fallback = buildOfflineReply(userPrompt, history);
   onChunk(fallback);
@@ -1093,7 +1117,7 @@ VOICE OUTPUT & AUDITORY DIRECTIVES:
 - Real-Time Clock: ${temporal.timeStr} (${temporal.period.toUpperCase()}), ${temporal.dateStr} (Madurai, Tamil Nadu, India).
 
 SYSTEM & DUAL-BOOT WINDOWS CONTAINMENT:
-- Host System: Ubuntu Linux (Kernel 7.0, GNOME Desktop, PipeWire Audio).
+- Host System: Ubuntu 26.04.1 LTS (GNOME Desktop, PipeWire Audio).
 - Dual-Boot Windows Isolation: Windows NTFS partitions (/dev/nvme0n1p3, /dev/nvme0n1p5) and EFI (nvme0n1p1) must NEVER be disturbed, modified, or disrupted.
 - Security: Maintain zero-compromise security. Do not execute unconfirmed destructive operations.
 
@@ -1528,11 +1552,43 @@ async function startServer() {
       }
 
       const apiKey = process.env.GEMINI_API_KEY || "";
-      const modelsToTry = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"];
+      const preferLocal = process.env.USE_LOCAL_FAST_PATH !== "false";
       
       let transcribed = "";
-      for (const modelName of modelsToTry) {
+
+      // Metal Mind Local STT Fast-Path (Whisper.cpp)
+      if (preferLocal) {
         try {
+          const whisperHost = process.env.WHISPER_HOST || "http://127.0.0.1:8989";
+          const buffer = Buffer.from(base64Data, "base64");
+          const blob = new Blob([buffer], { type: mimeType });
+          const formData = new FormData();
+          formData.append("file", blob, "audio.webm");
+          formData.append("model", "whisper-tiny");
+          
+          console.log(`[SNOW Transcribe] Trying Local Whisper Fast-Path...`);
+          const wRes = await fetch(`${whisperHost}/v1/audio/transcriptions`, {
+            method: "POST",
+            body: formData as any
+          });
+          if (wRes.ok) {
+            const data: any = await wRes.json();
+            if (data.text) {
+              const candidate = data.text.trim();
+              if (candidate && !/^(\[.*?\]|\(.*?\)|silence|)$/i.test(candidate)) {
+                transcribed = candidate;
+              }
+            }
+          }
+        } catch (e: any) {
+          console.warn("[SNOW Transcribe] Local Whisper not available or failed:", e.message);
+        }
+      }
+
+      if (!transcribed) {
+        const modelsToTry = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"];
+        for (const modelName of modelsToTry) {
+          try {
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
           const gRes = await fetch(url, {
             method: "POST",
@@ -1575,6 +1631,7 @@ async function startServer() {
         } catch (e: any) {
           console.warn(`[SNOW Transcribe] Error calling ${modelName}:`, e.message);
         }
+      }
       }
 
       console.log(`[SNOW Transcribe] Transcribed: "${transcribed}" (${Math.round(base64Data.length * 0.75 / 1024)} KB audio)`);

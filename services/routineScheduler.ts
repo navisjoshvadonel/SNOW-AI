@@ -216,7 +216,7 @@ Analyze this REAL live workstation intelligence:
 - Time: ${timeGreeting} (${now.toLocaleTimeString()})
 - Weather: ${weather.tempC}, ${weather.condition} in ${weather.location} (Humidity: ${weather.humidity}, Wind: ${weather.windSpeed})
 - System Hardware: CPU ${system.cpuPct}%, RAM ${system.ramUsedGb}/${system.ramTotalGb} GB (${system.ramPct}%), Temp: ${system.tempC}°C, Disk: ${system.diskUsedGb}/${system.diskTotalGb} GB (${system.diskPct}%)
-- Host Environment: Ubuntu Linux (Protected Dual-Boot Windows NTFS isolation active)
+- Host Environment: Ubuntu 26.04.1 LTS (Protected Dual-Boot Windows NTFS isolation active)
 - Repository Status: Branch '${git.branch}', ${git.modifiedFiles} modified files, ${git.untrackedFiles} untracked files. Last commit: "${git.lastCommit}"
 - Episodic Vision: ${recentEpisodes.length} visual episodes stored in SQLite memory.
 

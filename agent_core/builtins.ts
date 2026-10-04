@@ -770,7 +770,7 @@ export const SystemTelemetryTool: ToolDefinition<Record<string, never>> = {
       const telemetryReport = {
         os: {
           distro: os.distro || "Ubuntu Linux",
-          release: os.release || "24.04 LTS",
+          release: os.release || "26.04.1 LTS",
           kernel: os.kernel || "Linux",
           desktopEnvironment: process.env.XDG_CURRENT_DESKTOP || "GNOME",
           displayServer: process.env.XDG_SESSION_TYPE || "Wayland",
