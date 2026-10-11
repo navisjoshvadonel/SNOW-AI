@@ -41,16 +41,14 @@ OPERATIONAL PROTOCOLS currently loaded:
       systemInstruction += `\n1. [PROTOCOL: STANDARD MODE] Rapid, razor-sharp technical execution with executive clarity.`;
     }
 
-    if (modelSelected === "deepseek") {
-      systemInstruction += `\n\n[core: DeepSeek Reasoning Node] Maximize algorithmic reasoning, mathematical proofs, and structural software design patterns.`;
-    } else if (modelSelected === "gemini-2.5-flash-lite") {
-      systemInstruction += `\n\n[core: Gemini 2.5 Flash-Lite] Ultra-lean latency optimized for rapid tactile commands and instantaneous terminal replies.`;
-    } else if (modelSelected === "gemini-1.5-flash") {
-      systemInstruction += `\n\n[core: Gemini 1.5 Flash] Resilient archival reasoning fallback with massive token context awareness.`;
-    } else if (modelSelected === "ollama" || modelSelected === "llama-3-8b") {
-      systemInstruction += `\n\n[core: Ollama Local Engine] Air-gapped offline backup node emphasizing data privacy and local hardware execution.`;
+    if (modelSelected === "local-deep") {
+      systemInstruction += `\n\n[core: S.N.O.W. Deep Reasoner] Maximize algorithmic reasoning, mathematical logic, and structural software design patterns locally on-device.`;
+    } else if (modelSelected === "local-fast") {
+      systemInstruction += `\n\n[core: S.N.O.W. Reflex Engine] Ultra-lean latency optimized for rapid tactile commands and instantaneous terminal replies.`;
+    } else if (modelSelected === "hybrid") {
+      systemInstruction += `\n\n[core: Adaptive Neural Uplink] Extended multimodal intelligence with broad web knowledge and satellite live telemetry.`;
     } else {
-      systemInstruction += `\n\n[core: Gemini 2.5 Flash] Primary high-throughput multimodal engine with sub-second latency and grounded actuation.`;
+      systemInstruction += `\n\n[core: S.N.O.W. Neural Core] Primary on-device sovereign engine delivering structured, comprehensive reasoning with Markdown headers, bullet points, and code blocks.`;
     }
 
     if (memories.length > 0) {

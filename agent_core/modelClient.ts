@@ -52,29 +52,35 @@ export async function* callModel(
 }
 
 async function* callModelOnce(params: ModelCallParams): AsyncGenerator<QueryEvent> {
-  let isOffline = false;
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey || apiKey === "") {
-    isOffline = true;
+  const isHybrid = params.model === "hybrid";
+
+  if (!isHybrid) {
+    // S.N.O.W. LOCAL-FIRST: Always execute on-device sovereign neural engine first
+    try {
+      yield* callOllamaOnce(params);
+      return;
+    } catch (err: any) {
+      console.warn(`[SNOW BACKEND] Local neural engine notice (${err.message}). Attempting adaptive hybrid uplink fallback...`);
+    }
   }
 
-  if (!isOffline) {
+  // Hybrid Co-Processor or cloud uplink fallback
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (apiKey) {
     const requested = params.model && params.model.startsWith("gemini-") ? params.model : "gemini-2.5-flash";
-    const modelsToTry = [requested, "gemini-2.5-flash", "gemini-3.6-flash", "gemini-3.5-flash-lite"];
+    const modelsToTry = [requested, "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"];
     for (const m of Array.from(new Set(modelsToTry))) {
       try {
-        yield* callGeminiOnce({ ...params, model: m }, apiKey!);
+        yield* callGeminiOnce({ ...params, model: m }, apiKey);
         return;
       } catch (err: any) {
-        console.warn(`[SNOW BACKEND] Gemini model ${m} failed (${err.message}). Trying next fallback...`);
+        console.warn(`[SNOW BACKEND] Hybrid model ${m} notice (${err.message}). Trying next fallback...`);
       }
     }
-    isOffline = true;
   }
 
-  if (isOffline) {
-    yield* callOllamaOnce(params);
-  }
+  // Final fallback to local engine if hybrid failed
+  yield* callOllamaOnce(params);
 }
 
 async function* callGeminiOnce(params: ModelCallParams, apiKey: string): AsyncGenerator<QueryEvent> {
@@ -202,12 +208,17 @@ async function* callGeminiOnce(params: ModelCallParams, apiKey: string): AsyncGe
 
 async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEvent> {
   const { system, messages, tools, signal } = params;
-  const ollamaModel = process.env.OLLAMA_MODEL || "llama3.1";
+  let ollamaModel = process.env.OLLAMA_MODEL || "snow_custom";
+  if (params.model === "local-fast") {
+    ollamaModel = "llama3.2:1b";
+  } else if (params.model === "local-deep") {
+    ollamaModel = process.env.OLLAMA_DEEP_MODEL || "snow_custom";
+  }
 
   // Map messages to Ollama (OpenAI compatible) format
   let enhancedSystem = system;
   if (tools && tools.length > 0) {
-    enhancedSystem += `\n\nCRITICAL LOCAL ENGINE DIRECTIVE: You have access to tools. You MUST respond with perfectly formatted JSON when calling a tool. Never output brackets or code tags in conversational text unless explicitly calling a tool.`;
+    enhancedSystem += `\n\nCRITICAL LOCAL ENGINE DIRECTIVE: You have access to tools. If you need to invoke a tool, respond with perfectly formatted JSON. In your user-facing conversational text, deliver rich, structured answers using Markdown (clear headers, bullet points, numbered steps, and code blocks) just like ChatGPT and Gemini.`;
   }
   const ollamaMessages = [{ role: "system", content: enhancedSystem }];
   

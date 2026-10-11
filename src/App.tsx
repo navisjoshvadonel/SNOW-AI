@@ -617,7 +617,7 @@ export default function App() {
     memoriesCount: 4,
     vectorsCount: 2
   });
-  const [selectedModel, setSelectedModel] = useState<string>("gemini-2.5-flash");
+  const [selectedModel, setSelectedModel] = useState<string>("local");
   const [compilerMode, setCompilerMode] = useState<"general" | "education" | "debugging" | "context_awareness">("general");
 
   // Code Sandbox State
@@ -629,7 +629,7 @@ export default function App() {
   ]);
 
   const [groundingInfo, setGroundingInfo] = useState<GroundingMetadata | null>(null);
-  const [responseStats, setResponseStats] = useState({ time: "0.00s", network: "Excellent", model: "Gemini 2.5" });
+  const [responseStats, setResponseStats] = useState({ time: "0.00s", network: "Optimal (Local)", model: "S.N.O.W. Neural Core" });
 
   // Widget states for conversation
   const [weatherWidget, setWeatherWidget] = useState<WeatherData | null>(null);
@@ -2051,11 +2051,10 @@ export default function App() {
                   onChange={(e) => setSelectedModel(e.target.value)}
                   className="w-full bg-slate-950 border border-cyan-500/30 rounded-lg p-2 text-cyan-200 outline-none focus:border-cyan-400"
                 >
-                  <option value="gemini-2.5-flash">Gemini 2.5 Flash (Primary Active Core)</option>
-                  <option value="gemini-2.5-flash-lite">Gemini 2.5 Flash-Lite (Low-Latency)</option>
-                  <option value="gemini-1.5-flash">Gemini 1.5 Flash (Context Fallback)</option>
-                  <option value="deepseek">DeepSeek Reasoner (High Logic)</option>
-                  <option value="ollama">Ollama Local Engine (Offline)</option>
+                  <option value="local">S.N.O.W. Neural Core (Primary On-Device)</option>
+                  <option value="local-deep">S.N.O.W. Deep Reasoner (Local High-Capacity)</option>
+                  <option value="local-fast">S.N.O.W. Reflex Engine (Ultra Low-Latency)</option>
+                  <option value="hybrid">Adaptive Neural Uplink (Hybrid Co-Processor)</option>
                 </select>
               </div>
 

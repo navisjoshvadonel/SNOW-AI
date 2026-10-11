@@ -1,6 +1,6 @@
 {
   "name": "Snow",
-  "description": "An interactive, HUD-style sci-fi desktop dashboard representing the Snow AI agent project. Features Gemini-powered model routing, custom operational protocols, adaptive knowledge graph graphs, and a client-side execution sandbox.",
+  "description": "An interactive, HUD-style sci-fi desktop dashboard representing the S.N.O.W. sovereign local-first intelligence daemon. Features on-device neural model routing, custom operational protocols, adaptive knowledge graph graphs, and an autonomous execution sandbox.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

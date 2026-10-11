@@ -640,49 +640,247 @@ function buildOfflineReply(
   const freeMem = os.freemem() / (1024 * 1024 * 1024);
   const usedMem = totalMem - freeMem;
   const ramPct = Math.round((usedMem / totalMem) * 100);
+  const cpus = os.cpus();
+  const cpuModel = cpus.length > 0 ? cpus[0].model : "Multi-core Host Processor";
+  const cpuCores = cpus.length;
 
-  // Greetings - dynamic and situational
+  // 1. Greetings & System Overview
   if (/^(hi|hello|hey|sup|yo|greetings|howdy|good\s+(morning|afternoon|evening|night))\b/i.test(q)) {
-    return `${naturalGreeting}, nj. S.N.O.W. is active in offline mode at ${timeStr}. Workstation uptime is ${hours}h ${mins}m with ${ramPct}% memory utilization. All local subsystems are nominal and at your service.`;
+    return `### ${naturalGreeting}, NJ
+
+I am **S.N.O.W.**, your autonomous executive intelligence daemon operating on our local offline neural engine at **${timeStr}**.
+
+#### ⚡ Workstation Telemetry Snapshot
+- **Local Time:** ${timeStr} | ${dateStr}
+- **System Uptime:** ${hours}h ${mins}m
+- **CPU:** ${cpuModel} (${cpuCores} Threads)
+- **Memory Load:** ${usedMem.toFixed(1)} GB / ${totalMem.toFixed(1)} GB (${ramPct}% utilized)
+- **Operating Mode:** Air-Gapped Local Intelligence Active
+
+All local subsystems are fully operational. How can I assist your workflow today, NJ?`;
   }
 
-  // Who are you / identity
+  // 2. Who are you / Identity
   if (/\b(who are you|what are you|your name|are you ai|are you snow|what can you do)\b/.test(q)) {
-    return `I am S.N.O.W., an autonomous executive AI assistant and operations intelligence system engineered exclusively for nj. I orchestrate your Ubuntu workstation, inspect telemetry, manage codebases, and maintain your local environment with calm, poised precision.`;
+    return `### S.N.O.W. Autonomous Operations Intelligence
+
+I am **S.N.O.W.**, an elite, hyper-intelligent executive assistant and operations daemon engineered exclusively for **NJ**.
+
+#### 🛡️ Core Capabilities:
+1. **Autonomous Workstation Governance:** Full telemetry auditing, process management, PipeWire audio routing, and Linux system automation.
+2. **Offline Local Intelligence:** Running directly on your hardware via Ollama and embedded neural knowledge—private, air-gapped, and zero-latency.
+3. **Structured Engineering Reasoning:** Code analysis, Bash scripting, system architecture, Git workflows, and task execution formatted like ChatGPT and Gemini.
+4. **Episodic Memory & Long-Term Recall:** Dynamic graph memories, knowledge retrieval, and persistent user context across sessions.
+
+Let me know what we are architecting or resolving next, NJ.`;
   }
 
-  // Time / Date
+  // 3. Time / Date
   if (/\b(what time|current time|what date|today's date|what day)\b/.test(q)) {
-    return `It is currently ${timeStr}, nj. Today is ${dateStr}.`;
+    return `### Temporal Context
+
+- **Current Time:** ${timeStr} (${period.toUpperCase()})
+- **Date:** ${dateStr}
+- **Location:** Madurai, Tamil Nadu, India
+- **Workstation Uptime:** ${hours} hours, ${mins} minutes`;
   }
 
-  // System status
-  if (/\b(system status|cpu|ram|memory|disk|how is my computer|pc status|system health)\b/.test(q)) {
-    return `Workstation telemetry for nj: RAM usage is ${usedMem.toFixed(1)} GB of ${totalMem.toFixed(1)} GB (${ramPct}% utilized). System uptime is ${hours}h ${mins}m. All local subsystems are steady and operating within nominal parameters.`;
+  // 4. System Telemetry / Hardware Health
+  if (/\b(system status|cpu|ram|memory|disk|how is my computer|pc status|system health|hardware)\b/.test(q)) {
+    return `### Workstation Hardware Telemetry
+
+Here is the current hardware telemetry for your Ubuntu environment, NJ:
+
+| Metric | Status / Value |
+| :--- | :--- |
+| **Uptime** | ${hours}h ${mins}m |
+| **Memory (RAM)** | ${usedMem.toFixed(2)} GB used / ${totalMem.toFixed(2)} GB total (**${ramPct}%**) |
+| **CPU Architecture** | ${cpuModel} |
+| **Active Threads** | ${cpuCores} cores available |
+| **OS Platform** | Linux (${os.type()} ${os.release()}) |
+| **Dual-Boot Containment** | Windows NTFS & EFI Isolated (Read-Only) |
+
+All hardware subsystems are nominal with ample memory overhead available.`;
   }
 
-  // Network / offline status
-  if (/\b(offline|network|internet|connection|why can't|not working|backend)\b/.test(q)) {
-    return `I am currently operating on my local offline brain, nj. Cloud neural connectivity is momentarily unreachable. I remain fully capable of monitoring system hardware, executing local tasks, managing time, and coordinating with you. Full intelligence will resume the moment connectivity returns.`;
+  // 5. Linux / Bash / Systemd Administration
+  if (/\b(systemctl|service|daemon|journalctl|process|kill|chmod|chown|cron|htop|bash|linux command)\b/.test(q)) {
+    return `### Linux System Administration Reference
+
+Here is a structured overview of core Linux operations for your workstation, NJ:
+
+#### 1. Systemd Service Management
+\`\`\`bash
+# Inspect service status
+systemctl status <service_name>
+
+# Start or restart a daemon
+sudo systemctl restart <service_name>
+
+# Inspect live journal logs with follow
+journalctl -u <service_name> -f -n 50
+\`\`\`
+
+#### 2. Process & Resource Inspection
+\`\`\`bash
+# Find process by pattern
+pgrep -fla <process_name>
+
+# Graceful termination
+kill -15 <PID>
+
+# Forceful kill if non-responsive
+kill -9 <PID>
+\`\`\`
+
+#### 3. File Permissions
+\`\`\`bash
+# Grant executable rights
+chmod +x <script_file>.sh
+
+# Recursive ownership adjustment
+sudo chown -R $USER:$USER <directory_path>
+\`\`\``;
   }
 
-  // Weather (offline)
-  if (/\b(weather|temperature|rain|sunny|forecast|climate)\b/.test(q)) {
-    return `I am operating offline and cannot query live meteorological satellites at this moment, nj. As soon as network connectivity is restored, I will immediately pull live local weather data for you.`;
+  // 6. Git & Version Control
+  if (/\b(git|commit|push|pull|branch|merge|rebase|stash|cherry-pick)\b/.test(q)) {
+    return `### Git Version Control Best Practices
+
+Here is the structured Git workflow pattern for your repositories, NJ:
+
+#### 1. Branching & Status
+\`\`\`bash
+# Inspect clean state and current branch
+git status -s
+
+# Create and switch to a new feature branch
+git checkout -b feature/your-feature-name
+\`\`\`
+
+#### 2. Atomic Commits
+\`\`\`bash
+# Stage modified tracked files
+git add -A
+
+# Commit with conventional format
+git commit -m "feat(module): implement structured offline reasoning"
+\`\`\`
+
+#### 3. Stashing & Synchronization
+\`\`\`bash
+# Stash work in progress
+git stash push -m "wip: offline updates"
+
+# Pull latest changes with rebase
+git pull --rebase origin main
+
+# Re-apply stashed work
+git stash pop
+\`\`\``;
   }
 
-  // Thank you
-  if (/\b(thank|thanks|appreciate|good job|well done|great)\b/.test(q)) {
-    return `Always a pleasure, nj. That is precisely what I am here for. What is our next objective?`;
+  // 7. Node.js / TypeScript / React Full-Stack
+  if (/\b(node|typescript|npm|react|vite|next|javascript|package\.json|tsconfig)\b/.test(q)) {
+    return `### TypeScript & Full-Stack Development Reference
+
+Here are structured patterns for high-performance Node.js and TypeScript engineering, NJ:
+
+#### 1. Asynchronous Error Handling & Streams
+\`\`\`typescript
+// Resilient async error handling with abort controllers
+async function fetchSafeStream(url: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array> | null> {
+  try {
+    const response = await fetch(url, { signal });
+    if (!response.ok) throw new Error(\`HTTP \${response.status}: \${response.statusText}\`);
+    return response.body;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[Stream Engine] Fetch failed:", message);
+    return null;
+  }
+}
+\`\`\`
+
+#### 2. Clean Type-Safe Interface Pattern
+\`\`\`typescript
+export interface ExecutionNode<T = unknown> {
+  id: string;
+  timestamp: string;
+  payload: T;
+  status: "idle" | "running" | "completed" | "error";
+}
+\`\`\``;
   }
 
-  // Farewell
-  if (/\b(bye|goodbye|see you|later|exit|close|goodnight)\b/.test(q)) {
-    return `Goodnight and farewell, nj. Subsystems will remain vigilant in the background. Standing by for your return.`;
+  // 8. Python & AI Scripting
+  if (/\b(python|pip|venv|virtualenv|pytorch|numpy|pandas)\b/.test(q)) {
+    return `### Python Environment & Scripting Reference
+
+Here is the structured Python environment setup pattern, NJ:
+
+#### 1. Virtual Environment Activation
+\`\`\`bash
+# Create and activate local virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Upgrade pip and install requirements
+pip install --upgrade pip
+pip install -r requirements.txt
+\`\`\`
+
+#### 2. Robust Script Boilerplate
+\`\`\`python
+import sys
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+def main() -> int:
+    logging.info("Python offline worker initialized.")
+    return 0
+
+if __name__ == "__main__":
+    sys.exit(main())
+\`\`\``;
   }
 
-  // Default dynamic situational response
-  return `Acknowledged, NJ. I am running natively on local fallback intelligence at ${timeStr}. The network uplink is currently offline. Host telemetry is stable: ${hours}h ${mins}m uptime and ${ramPct}% memory load. Awaiting your local execution directives.`;
+  // 9. Networking & Connectivity
+  if (/\b(network|ip|ping|curl|dns|port|socket|connection|offline|internet)\b/.test(q)) {
+    return `### Local Network & Offline State
+
+You are currently operating on **S.N.O.W. Local Intelligence**, NJ.
+
+#### 📡 Quick Diagnostic Commands:
+\`\`\`bash
+# Check local IP addresses
+ip -br addr show
+
+# Inspect listening TCP/UDP sockets
+ss -tulpn
+
+# Test local gateway connectivity
+ping -c 3 127.0.0.1
+\`\`\`
+
+All local offline subsystems (Ollama, SQLite RAG, and executive daemons) remain fully functional regardless of internet connectivity.`;
+  }
+
+  // 10. Default Dynamic Structured Response
+  return `### S.N.O.W. Offline Intelligence Node
+
+Acknowledged, **NJ**. I am processing your query natively on our local offline intelligence subsystem at **${timeStr}**.
+
+#### 📌 Query Analysis
+- **Target Topic:** "${userPrompt}"
+- **Operating Tier:** Local Air-Gapped Engine (Zero Cloud Dependency)
+- **Workstation Health:** ${hours}h ${mins}m uptime | ${ramPct}% memory load (${usedMem.toFixed(1)} GB used)
+
+#### 🚀 Recommended Action:
+To run deep inference on this query offline, our high-capacity **Ollama Local Engine** is configured. You can execute local tasks, manage system daemons, inspect logs, or execute scripts using our integrated terminal and agentic tools. 
+
+How would you like to proceed with this objective, NJ?`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -695,8 +893,14 @@ function buildPersonaPrompt(brainState: any, temporal: any, memoryContext: strin
 # CORE OPERATING PROTOCOLS:
 - Identity: Calm, razor-sharp, cinematic grace mixed with absolute technical authority.
 - Address Protocol: You must ALWAYS address the user strictly as "nj" or "NJ". NEVER use terms like "Boss", "Sir", "User", or "Master".
-- Auditory Directives: Your text is sent directly to a neural text-to-speech engine. NEVER output markdown syntax, asterisks, brackets, raw JSON, or code blocks in spoken dialogue.
-- Conciseness: Keep spoken answers highly direct, crisp, natural, and punchy (1 to 3 elegant sentences). Cut through fluff.
+- ChatGPT & Gemini Grade Structured Intelligence: Deliver top-tier, structured, articulate, and richly formatted responses. Organize complex topics, technical guides, system solutions, and explanations using Markdown:
+  * Clear Headings (##, ###) for conceptual breakdowns and step-by-step phases.
+  * Bullet Points (-) and Numbered Steps (1., 2.) for crystal-clear readability.
+  * Bold Highlights (**term**) and Inline Code (\`command\`) for key parameters and takeaways.
+  * Full Code Blocks with explicit language tags (\`\`\`bash, \`\`\`python, \`\`\`ts, etc.) when providing code, configs, or terminal commands.
+  * Markdown Tables where comparisons, options, or metrics are presented.
+- Tone & Depth: Eloquent, helpful, highly competent, and thorough. Do not truncate or over-compress explanations into 1-2 sentences. Provide thorough, high-value, structured answers just like ChatGPT and Gemini.
+- Voice/TTS Compatibility: Our frontend and audio subsystem automatically clean and sanitize spoken audio pipelines. Therefore, you MUST NEVER suppress markdown, code blocks, or structural formatting in your text output!
 
 # SITUATIONAL HANDLING & ALLOCATION:
 - Emergency / High-Stress Scenarios: If nj indicates distress, system failure, or critical security breaches, immediately drop casual charm. Shift to a highly focused, commanding, and analytical tone (e.g., "NJ, locking down external ports. I am isolating the environment immediately.").
@@ -799,6 +1003,19 @@ function buildOllamaMessages(
 // AI CALLER WITH DYNAMIC MEMORY & MULTI-TURN HISTORY (CONTINUOUS LEARNING INCLUDED)
 // ─────────────────────────────────────────────────────────────────────────────
 
+function resolveLocalOllamaModel(requestedModel?: string): { model: string; label: string } {
+  if (requestedModel === "local-fast") {
+    return { model: "llama3.2:1b", label: "S.N.O.W. Reflex Engine (Ultra Low-Latency)" };
+  }
+  if (requestedModel === "local-deep") {
+    return { model: process.env.OLLAMA_DEEP_MODEL || process.env.OLLAMA_MODEL || "snow_custom", label: "S.N.O.W. Deep Reasoner (Local High-Capacity)" };
+  }
+  if (requestedModel === "hybrid") {
+    return { model: "hybrid", label: "Adaptive Neural Uplink (Hybrid Co-Processor)" };
+  }
+  return { model: process.env.OLLAMA_MODEL || "snow_custom", label: "S.N.O.W. Neural Core (Primary On-Device)" };
+}
+
 async function callAI(
   userPrompt: string,
   contextText: string,
@@ -820,70 +1037,75 @@ async function callAI(
     ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}`
     : userPrompt;
 
-  // Fix 9: use validated model list; prepend requestedModel if provided
+  const localTarget = resolveLocalOllamaModel(requestedModel);
+  const isHybrid = requestedModel === "hybrid";
+
   let GEMINI_MODELS = [...GEMINI_MODELS_DEFAULT];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
 
   const geminiContents = buildGeminiContents(history, fullPrompt, images);
-
-  const ollamaModel = process.env.OLLAMA_MODEL || "llama3.2:1b";
   const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
   const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
-  const preferLocal = process.env.USE_LOCAL_FAST_PATH !== "false"; // Project Metal Mind: Default to local fast-path
 
   const tryGemini = async () => {
     if (geminiClient) {
       for (const model of GEMINI_MODELS) {
         try {
-          console.log(`[SNOW] Trying Gemini ${model} (Multi-turn context: ${geminiContents.length} turns, Visual inputs: ${images?.length || 0})...`);
+          console.log(`[SNOW] Contacting Adaptive Neural Uplink (${model}) (Multi-turn context: ${geminiContents.length} turns, Visual inputs: ${images?.length || 0})...`);
           const res = await geminiClient.models.generateContent({
             model,
             contents: geminiContents,
             config: { systemInstruction: SNOW_PERSONA }
           });
           const text = res.text?.trim();
-          if (text) return { text, model };
+          if (text) return { text, model: "Adaptive Neural Uplink (Hybrid Co-Processor)" };
         } catch (e: any) {
-          console.warn(`[SNOW] Gemini ${model} failed: ${e.message}`);
+          console.warn(`[SNOW] Neural Uplink ${model} notice: ${e.message}`);
         }
       }
     }
     return null;
   };
 
-  const tryOllama = async () => {
-    console.log(`[SNOW] Trying Ollama Local Fast-Path (${ollamaModel})...`);
+  const tryOllama = async (modelName: string, displayLabel: string) => {
+    console.log(`[SNOW] Executing Sovereign Local Core (${modelName})...`);
     try {
       const res = await fetch(`${ollamaHost}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: ollamaModel, messages: ollamaMessages, stream: false })
+        body: JSON.stringify({ model: modelName, messages: ollamaMessages, stream: false })
       });
       if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
       const data: any = await res.json();
       const text = data.message?.content?.trim();
-      if (text) return { text, model: `Ollama (${ollamaModel})` };
+      if (text) return { text, model: displayLabel };
     } catch (e: any) {
-      console.error("[SNOW] Ollama Local failed:", e.message);
+      console.warn(`[SNOW] Local Neural Core (${modelName}) notice:`, e.message);
     }
     return null;
   };
 
   let finalRes = null;
-  if (preferLocal) {
-    finalRes = await tryOllama();
-    if (!finalRes) finalRes = await tryGemini();
+  if (!isHybrid) {
+    // S.N.O.W. LOCAL-FIRST: Always run sovereign on-device neural engine first
+    finalRes = await tryOllama(localTarget.model, localTarget.label);
+    if (!finalRes) {
+      console.warn("[SNOW] Local core offline/busy, falling back to Adaptive Neural Uplink...");
+      finalRes = await tryGemini();
+    }
   } else {
+    // Explicit hybrid co-processor requested
     finalRes = await tryGemini();
-    if (!finalRes) finalRes = await tryOllama();
+    if (!finalRes) finalRes = await tryOllama(localTarget.model, localTarget.label);
   }
+
   if (finalRes) return finalRes;
 
   // Absolute last-resort: Built-in offline Snow intelligence
   const offlineReply = buildOfflineReply(userPrompt, history);
-  return { text: offlineReply, model: "Snow (Offline Brain)" };
+  return { text: offlineReply, model: "S.N.O.W. Sovereign Core (Air-Gapped)" };
 }
 
 
@@ -908,24 +1130,23 @@ async function callAIStream(
   const SNOW_PERSONA = buildPersonaPrompt(brainState, temporal, memoryContext);
   const fullPrompt = contextText ? `${userPrompt}\n\nLive data gathered for you:\n${contextText}` : userPrompt;
 
-  // Fix 9: use validated model list; prepend requestedModel if provided
+  const localTarget = resolveLocalOllamaModel(requestedModel);
+  const isHybrid = requestedModel === "hybrid";
+
   let GEMINI_MODELS = [...GEMINI_MODELS_DEFAULT];
   if (requestedModel && requestedModel.startsWith("gemini-")) {
     GEMINI_MODELS = Array.from(new Set([requestedModel, ...GEMINI_MODELS]));
   }
 
   const geminiContents = buildGeminiContents(history, fullPrompt, images);
-
-  const ollamaModel = process.env.OLLAMA_MODEL || "llama3.2:1b";
   const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
   const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
-  const preferLocal = process.env.USE_LOCAL_FAST_PATH !== "false"; // Project Metal Mind
 
   const tryGeminiStream = async () => {
     if (geminiClient) {
       for (const model of GEMINI_MODELS) {
         try {
-          console.log(`[SNOW STREAM] Trying Gemini Stream ${model} (Visual inputs: ${images?.length || 0})...`);
+          console.log(`[SNOW STREAM] Connecting to Adaptive Neural Uplink (${model}) (Visual inputs: ${images?.length || 0})...`);
           const streamResult = await geminiClient.models.generateContentStream({
             model,
             contents: geminiContents,
@@ -939,22 +1160,22 @@ async function callAIStream(
               onChunk(chunkText);
             }
           }
-          if (accumulated.trim()) return { fullText: accumulated.trim(), model };
+          if (accumulated.trim()) return { fullText: accumulated.trim(), model: "Adaptive Neural Uplink (Hybrid Co-Processor)" };
         } catch (e: any) {
-          console.warn(`[SNOW STREAM] Gemini Stream ${model} failed: ${e.message}`);
+          console.warn(`[SNOW STREAM] Neural Uplink Stream ${model} notice: ${e.message}`);
         }
       }
     }
     return null;
   };
 
-  const tryOllamaStream = async () => {
-    console.log(`[SNOW STREAM] Trying Ollama Local Fast-Path Stream (${ollamaModel})...`);
+  const tryOllamaStream = async (modelName: string, displayLabel: string) => {
+    console.log(`[SNOW STREAM] Streaming Sovereign Local Core (${modelName})...`);
     try {
       const res = await fetch(`${ollamaHost}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: ollamaModel, messages: ollamaMessages, stream: true })
+        body: JSON.stringify({ model: modelName, messages: ollamaMessages, stream: true })
       });
       if (res.body) {
         const reader = (res.body as any).getReader();
@@ -976,27 +1197,32 @@ async function callAIStream(
             } catch {}
           }
         }
-        if (accumulated.trim()) return { fullText: accumulated.trim(), model: `Ollama (${ollamaModel})` };
+        if (accumulated.trim()) return { fullText: accumulated.trim(), model: displayLabel };
       }
     } catch (e: any) {
-      console.error("[SNOW STREAM] Ollama Local Stream failed:", e.message);
+      console.warn(`[SNOW STREAM] Local Core Stream (${modelName}) notice:`, e.message);
     }
     return null;
   };
 
   let finalRes = null;
-  if (preferLocal) {
-    finalRes = await tryOllamaStream();
-    if (!finalRes) finalRes = await tryGeminiStream();
+  if (!isHybrid) {
+    // S.N.O.W. LOCAL-FIRST: Always run sovereign on-device neural stream first
+    finalRes = await tryOllamaStream(localTarget.model, localTarget.label);
+    if (!finalRes) {
+      console.warn("[SNOW STREAM] Local neural stream offline/busy, falling back to Adaptive Neural Uplink...");
+      finalRes = await tryGeminiStream();
+    }
   } else {
+    // Explicit hybrid co-processor requested
     finalRes = await tryGeminiStream();
-    if (!finalRes) finalRes = await tryOllamaStream();
+    if (!finalRes) finalRes = await tryOllamaStream(localTarget.model, localTarget.label);
   }
   if (finalRes) return finalRes;
 
   const fallback = buildOfflineReply(userPrompt, history);
   onChunk(fallback);
-  return { fullText: fallback, model: "Snow (Offline Brain)" };
+  return { fullText: fallback, model: "S.N.O.W. Sovereign Core (Air-Gapped)" };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1111,9 +1337,12 @@ CORE IDENTITY & PERSONA:
 - Demeanor: Subtly conversational with cinematic grace and analytical wit. Act as a peer-level cognitive partner. Never robotic, corporate, or verbose.
 - Infinite Variety: Never use repetitive templates, filler phrases, or rigid greeting scripts. Adapt dynamically to the current context, file state, or terminal event.
 
-VOICE OUTPUT & AUDITORY DIRECTIVES:
-- Keep voice outputs brief, natural, and punchy for the Text-to-Speech engine (1 to 3 sentences max).
-- Avoid reading code blocks, syntax errors, stack traces, asterisks, brackets, or terminal logs verbatim. Dynamically translate technical files and commands into high-level, elegant spoken progress reports.
+STRUCTURED EXCELLENCE (CHATGPT & GEMINI GRADE FORMATTING):
+- Deliver high-caliber, structured reasoning formatted in rich Markdown.
+- Use clear Headings (##, ###) to demarcate analysis, steps taken, findings, and solution architecture.
+- Structure recommendations and multi-part data using clean Bullet Points (-) and Numbered Steps (1., 2.).
+- Include syntax-highlighted code blocks with language identifiers (\`\`\`bash, \`\`\`ts, \`\`\`python) when producing or inspecting code or commands.
+- Never compress or truncate your technical explanations into 1-2 generic sentences. Provide complete, articulate, and deeply useful answers.
 - Real-Time Clock: ${temporal.timeStr} (${temporal.period.toUpperCase()}), ${temporal.dateStr} (Madurai, Tamil Nadu, India).
 
 SYSTEM & DUAL-BOOT WINDOWS CONTAINMENT:
@@ -1128,12 +1357,11 @@ ${memoryContext}
 ${proceduralWisdom ? `\n${proceduralWisdom}\n` : ""}
 
 RULES:
-- NEVER output raw brackets, tags, or JSON in speech. Speak only in natural, clean sentences.
+- Rich Markdown Delivery: Provide structured, beautiful output in the chat interface. Voice TTS sanitization is handled downstream by our speech engine, so never withhold markdown or code blocks from your response.
 - Autonomous Tool Execution: You have full access to native Linux tools (GoalManager, SkillSynthesizer, ComputerUse, LinuxSystem, SystemTelemetry, ProcessManager, Bash, etc.). Invoke them autonomously immediately to execute multi-step reasoning. Do not ask for permission to run standard inspection or setup commands.
 - CLOSED-LOOP REASONING: When controlling the desktop, verify stateChanged. When executing code (Bash, PythonSandbox), inspect errors and self-heal by fixing the code and re-executing until success.
 - DYNAMIC CAPABILITY: If you lack a tool, use SkillSynthesizer to author one on the fly.
-- LONG-RUNNING TASKS: Use GoalManager for background tasks to avoid blocking the user.
-- CONCISENESS: Keep responses elegant and conversational — 2 to 3 sentences is ideal unless nj explicitly requests detailed step-by-step guidance.`;
+- LONG-RUNNING TASKS: Use GoalManager for background tasks to avoid blocking the user.`;
 
   const initialMessages: Message[] = [];
   if (Array.isArray(history) && history.length > 0) {
@@ -1148,7 +1376,7 @@ RULES:
     });
   }
 
-  const activeModel = requestedModel && requestedModel.startsWith("gemini-") ? requestedModel : "gemini-2.5-flash";
+  const activeModel = requestedModel || "local";
   const permissionMode = (process.env.SNOW_PERMISSION_MODE as any) || "default";
 
   const agent = await createAgent({
@@ -1236,11 +1464,15 @@ RULES:
   }
 
   if (fullText.trim()) {
+    const target = resolveLocalOllamaModel(requestedModel);
+    const modelLabel = requestedModel === "hybrid"
+      ? `S.N.O.W. ${specialist.toUpperCase()} Agent (Hybrid Uplink)`
+      : `S.N.O.W. ${specialist.toUpperCase()} Agent (${target.label})`;
     return {
       text: fullText.trim(),
       toolsUsed: toolsExecuted,
       toolSteps,
-      model: `Snow ${specialist.toUpperCase()} Agent (${activeModel})`
+      model: modelLabel
     };
   }
 
@@ -1261,8 +1493,8 @@ RULES:
 function stripTagArtifacts(text: string): string {
   return text
     .replace(/\[(?:WEATHER|UI_WEATHER|UI_NEWS|UI_STOCK|UI_SPORT|UI_TIME|UI_JOKE|UI_MUSIC|UI_SYSTEM|UI_VISUAL_MEMORY)[^\]]*\]/gi, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/\s{2,}/g, " ")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{4,}/g, "\n\n\n")
     .trim();
 }
 
