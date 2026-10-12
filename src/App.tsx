@@ -1307,7 +1307,9 @@ export default function App() {
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
-          autoGainControl: true
+          autoGainControl: true,
+          channelCount: 1,
+          sampleRate: 48000,
         }
       });
       audioStreamRef.current = stream;
@@ -1336,13 +1338,18 @@ export default function App() {
           const normalizedVol = Math.min(100, Math.round((avg / 128) * 100));
           setMicVolume(normalizedVol);
 
-          // Barge-in check: If Snow starts speaking and user speaks aloud
-          if (isSpeakingRef.current && normalizedVol > 18) {
-            stopSnowSpeech();
+          // Barge-in check: If Snow is speaking and user speaks loud enough
+          if (isSpeakingRef.current) {
+            if (normalizedVol > 20) {
+              stopSnowSpeech();
+            }
+            // Do not treat Snow's own TTS output as user voice
+            animFrameRef.current = requestAnimationFrame(updateAudioMetrics);
+            return;
           }
 
-          // Voice Activity Detection (VAD) - sensitive threshold for crisp speech detection
-          if (normalizedVol > 6) {
+          // Voice Activity Detection (VAD) - calibrated threshold for crisp speech detection
+          if (normalizedVol > 11) {
             if (!hasSpokenRef.current) {
               firstSpeechTimestampRef.current = Date.now();
             }
@@ -1351,14 +1358,14 @@ export default function App() {
           }
 
           // Adaptive conversational silence detection:
-          // 1,800ms of sustained pause after speaking (or 2,400ms if ending on a connecting thought)
-          // Extended maximum speaking duration: 25,000ms (25 seconds) to allow complete thoughts without cutoff
+          // 1,400ms of sustained pause after speaking (or 2,000ms if ending on a connecting thought)
+          // Maximum speaking duration: 25,000ms (25 seconds)
           if (hasSpokenRef.current && lastSpeechTimestampRef.current > 0) {
             const silentDuration = Date.now() - lastSpeechTimestampRef.current;
             const totalSpeakingDuration = firstSpeechTimestampRef.current > 0 ? (Date.now() - firstSpeechTimestampRef.current) : 0;
             const currentTranscript = accumulatedTranscriptRef.current.trim();
             const endsWithConnector = /(?:and|or|then|but|if|because|like|with|also|to|for)\s*$/i.test(currentTranscript);
-            const silenceThreshold = endsWithConnector ? 2400 : 1800;
+            const silenceThreshold = endsWithConnector ? 2000 : 1400;
 
             if (silentDuration > silenceThreshold || totalSpeakingDuration > 25000) {
               hasSpokenRef.current = false;
@@ -1366,16 +1373,21 @@ export default function App() {
               firstSpeechTimestampRef.current = 0;
 
               // Check if Web Speech transcript is already available
-              if (currentTranscript) {
+              if (currentTranscript && currentTranscript.length > 2) {
                 const toSubmit = currentTranscript;
                 stopSnowVoiceListening(true);
                 handleSendMessageRef.current(toSubmit);
                 return;
               }
 
-              // Otherwise stop recorder to trigger Neural Gemini transcription
+              // Otherwise request buffered data and stop recorder to trigger Neural Gemini transcription
               if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-                try { mediaRecorderRef.current.stop(); } catch {}
+                try {
+                  mediaRecorderRef.current.requestData();
+                } catch {}
+                try {
+                  mediaRecorderRef.current.stop();
+                } catch {}
                 return;
               }
             }
@@ -1386,11 +1398,15 @@ export default function App() {
         animFrameRef.current = requestAnimationFrame(updateAudioMetrics);
       }
 
-      // Initialize MediaRecorder for neural audio streaming
+      // Initialize MediaRecorder for high-fidelity audio capture
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : MediaRecorder.isTypeSupported("audio/webm")
         ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/mp4")
+        ? "audio/mp4"
+        : MediaRecorder.isTypeSupported("audio/ogg;codecs=opus")
+        ? "audio/ogg;codecs=opus"
         : MediaRecorder.isTypeSupported("audio/ogg")
         ? "audio/ogg"
         : "";
@@ -1407,12 +1423,22 @@ export default function App() {
       };
 
       mediaRecorder.onstop = async () => {
-        if (audioChunksRef.current.length > 0) {
-          const blob = new Blob(audioChunksRef.current, { type: mimeType || "audio/webm" });
-          audioChunksRef.current = [];
+        const chunks = [...audioChunksRef.current];
+        audioChunksRef.current = [];
 
-          if (!accumulatedTranscriptRef.current.trim()) {
-            triggerToast("⚡ Processing your voice directive...");
+        if (chunks.length > 0) {
+          const currentWebSpeech = accumulatedTranscriptRef.current.trim();
+          if (currentWebSpeech && currentWebSpeech.length > 1) {
+            setInputText(currentWebSpeech);
+            stopSnowVoiceListening(true);
+            handleSendMessageRef.current(currentWebSpeech);
+            return;
+          }
+
+          // Neural speech-to-text fallback via server
+          const blob = new Blob(chunks, { type: mimeType || "audio/webm" });
+          if (blob.size > 800) {
+            triggerToast("⚡ Transcribing voice directive...");
             const transcribed = await transcribeAudioBlob(blob);
             if (transcribed && transcribed.trim()) {
               setInputText(transcribed.trim());
@@ -1423,16 +1449,18 @@ export default function App() {
           }
         }
 
-        // If still listening and no command was submitted, restart recorder chunking
+        // If continuous mode active and no speech was processed, restart recording for next utterance
         if (shouldKeepListeningRef.current && stream.active) {
           try {
             audioChunksRef.current = [];
-            mediaRecorder.start(250);
+            mediaRecorder.start(100);
           } catch {}
+        } else {
+          stopSnowVoiceListening(false);
         }
       };
 
-      mediaRecorder.start(250);
+      mediaRecorder.start(100);
     } catch (micErr) {
       console.warn("[Snow Voice] Mic capture notice:", micErr);
       triggerToast("Microphone access denied or unavailable.");
@@ -1523,8 +1551,32 @@ export default function App() {
     }
   };
 
-  const toggleSpeechRecognition = () => {
+  const toggleSpeechRecognition = async () => {
     if (isListening || shouldKeepListeningRef.current) {
+      // User tapped mic button while listening: finish speaking and submit!
+      const currentSpeech = accumulatedTranscriptRef.current.trim();
+      if (currentSpeech && currentSpeech.length > 1) {
+        stopSnowVoiceListening(false);
+        setInputText(currentSpeech);
+        handleSendMessageRef.current(currentSpeech);
+        triggerToast(`⚡ Directive: "${currentSpeech.slice(0, 30)}..."`);
+        return;
+      }
+
+      // If MediaRecorder is actively recording, flush buffer and stop to trigger transcription
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        triggerToast("⚡ Processing recorded speech...");
+        shouldKeepListeningRef.current = false;
+        try {
+          mediaRecorderRef.current.requestData();
+        } catch {}
+        try {
+          mediaRecorderRef.current.stop();
+        } catch {}
+        return;
+      }
+
+      // If nothing was spoken, pause cleanly
       stopSnowVoiceListening(false);
       triggerToast("Voice input paused.");
     } else {
@@ -1575,14 +1627,7 @@ export default function App() {
           // Rapid Double-Space detected!
           e.preventDefault();
           lastSpacePressRef.current = 0;
-          if (isListening || shouldKeepListeningRef.current) {
-            stopSnowVoiceListening(false);
-            triggerToast("Voice input paused.");
-          } else {
-            setIsContinuousMode(true);
-            isContinuousModeRef.current = true;
-            startSnowVoiceListening(false);
-          }
+          toggleSpeechRecognition();
         }
       }
     };

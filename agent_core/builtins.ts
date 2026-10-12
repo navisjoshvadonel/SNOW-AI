@@ -48,6 +48,7 @@ import { dreamCycle } from "../services/dreamCycle.js";
 import { snowGuard } from "../services/snowGuard.js";
 import { snowCoder } from "../services/snowCoder.js";
 import { snowPlanner } from "../services/snowPlanner.js";
+import { snowCritic } from "../services/snowCritic.js";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -2152,6 +2153,71 @@ export const PlannerTool: ToolDefinition<PlannerInput> = {
   },
 };
 
+// ─── CriticTool ───────────────────────────────────────────────────────────────
+
+type CriticInput = {
+  action: "evaluate" | "refine" | "get_metrics" | "get_history";
+  objective?: string;
+  output?: string;
+  code_snippet?: string;
+  strictness?: "lenient" | "standard" | "strict";
+  evaluation?: any;
+};
+
+export const CriticTool: ToolDefinition<CriticInput> = {
+  name: "Critic",
+  description:
+    "Snow-Critic Reflexion Evaluator & Self-Correction Tool. Rigorously audits agent outputs " +
+    "against user objectives, scores quality (0-100), detects hallucinations/syntax flaws, " +
+    "and produces self-correcting refinement loops with persistent heuristic learning.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["evaluate", "refine", "get_metrics", "get_history"] },
+      objective: { type: "string", description: "Target objective or user intent to evaluate against" },
+      output: { type: "string", description: "Candidate output, answer, or execution result" },
+      code_snippet: { type: "string", description: "Associated code snippet to inspect" },
+      strictness: { type: "string", enum: ["lenient", "standard", "strict"] },
+      evaluation: { type: "object", description: "Previous evaluation object for refine pass" },
+    },
+    required: ["action"],
+  },
+
+  async *execute(input, _ctx) {
+    yield { type: "progress" as const, data: null, label: `Critic: ${input.action}` };
+
+    switch (input.action) {
+      case "evaluate": {
+        if (!input.objective || input.output === undefined) {
+          return { content: "Error: objective and output are required for evaluate", isError: true };
+        }
+        const evalResult = await snowCritic.evaluate({
+          objective: input.objective,
+          output: input.output,
+          codeSnippet: input.code_snippet,
+          strictness: input.strictness || "standard",
+        });
+        return { content: JSON.stringify(evalResult, null, 2), isError: false };
+      }
+      case "refine": {
+        if (!input.objective || !input.output || !input.evaluation) {
+          return { content: "Error: objective, output, and evaluation are required for refine", isError: true };
+        }
+        const refined = await snowCritic.refine(input.objective, input.output, input.evaluation);
+        return { content: JSON.stringify(refined, null, 2), isError: false };
+      }
+      case "get_metrics": {
+        return { content: JSON.stringify(snowCritic.getMetrics(), null, 2), isError: false };
+      }
+      case "get_history": {
+        return { content: JSON.stringify(snowCritic.getHistory(), null, 2), isError: false };
+      }
+      default:
+        return { content: `Unknown action: ${(input as any).action}`, isError: true };
+    }
+  },
+};
+
 export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>> {
   const registry = new Map<string, ToolDefinition<unknown>>();
   for (const tool of [
@@ -2161,7 +2227,7 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
     PythonSandboxTool, ClipboardTool, NotificationTool, ProcessManagerTool,
     ServiceManagerTool, GitManagerTool, ComputerUseTool, LinuxSystemTool,
     SkillSynthesizerTool, GoalManagerTool, MemoryConsolidationTool,
-    SecurityGuardTool, CoderTool, PlannerTool
+    SecurityGuardTool, CoderTool, PlannerTool, CriticTool
   ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }

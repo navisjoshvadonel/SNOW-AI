@@ -80,6 +80,7 @@ import { animaEngine } from "./services/animaEngine";
 import { snowGuard } from "./services/snowGuard";
 import { snowCoder } from "./services/snowCoder";
 import { snowPlanner } from "./services/snowPlanner";
+import { snowCritic } from "./services/snowCritic";
 import { startNightlyCron } from "./services/cronManager";
 import {
   verifyPassword,
@@ -1771,7 +1772,7 @@ async function startServer() {
     res.json({ success: true, state: voiceDuplex.getState() });
   });
 
-  // Neural Voice STT Transcription Engine (Multimodal Gemini Speech-to-Text)
+  // Neural Voice STT Transcription Engine (Multimodal Gemini & Fast Whisper Speech-to-Text)
   app.post("/api/snow/voice/transcribe", async (req, res) => {
     try {
       const { audio, mimeType: clientMime } = req.body;
@@ -1782,18 +1783,17 @@ async function startServer() {
       // Robustly extract pure base64 payload and clean mime type
       const base64Data = audio.includes(";base64,") ? audio.split(";base64,")[1] : audio.replace(/^data:[^,]+,/, "");
       const rawMime = clientMime || (audio.startsWith("data:") ? audio.split(";")[0].replace("data:", "") : "audio/webm") || "audio/webm";
-      const mimeType = rawMime.split(";")[0].trim();
+      let mimeType = rawMime.split(";")[0].trim().toLowerCase();
+      if (!mimeType.startsWith("audio/")) mimeType = "audio/webm";
 
       if (base64Data.length < 50) {
         return res.json({ text: "", isSilence: true });
       }
 
-      const apiKey = process.env.GEMINI_API_KEY || "";
       const preferLocal = process.env.USE_LOCAL_FAST_PATH !== "false";
-      
       let transcribed = "";
 
-      // Metal Mind Local STT Fast-Path (Whisper.cpp)
+      // 1. Metal Mind Local STT Fast-Path (Whisper.cpp) with strict 1s timeout
       if (preferLocal) {
         try {
           const whisperHost = process.env.WHISPER_HOST || "http://127.0.0.1:8989";
@@ -1802,12 +1802,13 @@ async function startServer() {
           const formData = new FormData();
           formData.append("file", blob, "audio.webm");
           formData.append("model", "whisper-tiny");
-          
-          console.log(`[SNOW Transcribe] Trying Local Whisper Fast-Path...`);
+
           const wRes = await fetch(`${whisperHost}/v1/audio/transcriptions`, {
             method: "POST",
-            body: formData as any
+            body: formData as any,
+            signal: AbortSignal.timeout(1000), // Fail fast in 1s if whisper server is down
           });
+
           if (wRes.ok) {
             const data: any = await wRes.json();
             if (data.text) {
@@ -1817,58 +1818,44 @@ async function startServer() {
               }
             }
           }
-        } catch (e: any) {
-          console.warn("[SNOW Transcribe] Local Whisper not available or failed:", e.message);
-        }
+        } catch {}
       }
 
-      if (!transcribed) {
-        const modelsToTry = ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"];
-        for (const modelName of modelsToTry) {
+      // 2. Multimodal Gemini Speech-to-Text via geminiClient Singleton
+      if (!transcribed && geminiClient) {
+        const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"];
+        for (const model of modelsToTry) {
           try {
-          const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
-          const gRes = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+            const resp = await geminiClient.models.generateContent({
+              model,
               contents: [{
                 parts: [
                   {
-                    text: "You are the ultra-accurate high-speed speech-to-text transcriber for Snow (a female personal AI assistant). Transcribe everything the user says in any accent, language, or volume accurately. Output ONLY the exact transcribed spoken words, properly punctuated. Never add quotes, commentary, or markdown. Only if the audio is completely blank/pure silence with no audible words at all, reply with 'SILENCE'."
+                    text: "You are the ultra-accurate high-speed speech-to-text transcriber for Snow. Transcribe everything spoken verbatim with proper punctuation. Output ONLY the exact transcribed spoken words. Do not wrap in quotes or markdown. If the audio is completely silent or background noise with no speech, reply 'SILENCE'."
                   },
                   {
                     inlineData: {
-                      mimeType: mimeType,
+                      mimeType,
                       data: base64Data
                     }
                   }
                 ]
               }],
-              generationConfig: {
+              config: {
                 temperature: 0.0,
                 maxOutputTokens: 256
               }
-            })
-          });
+            });
 
-          if (!gRes.ok) {
-            const errBody = await gRes.text().catch(() => "");
-            console.warn(`[SNOW Transcribe] Failover from ${modelName} (status ${gRes.status}):`, errBody.slice(0, 200));
-            continue;
+            const rawCandidate = resp?.text?.trim() || "";
+            if (rawCandidate && !/^silence\.?$/i.test(rawCandidate)) {
+              transcribed = rawCandidate.replace(/^["']|["']$/g, "").trim();
+              break;
+            }
+          } catch (e: any) {
+            console.warn(`[SNOW Transcribe] Failover from ${model}:`, e.message);
           }
-
-          const data = await gRes.json();
-          const parts = data?.candidates?.[0]?.content?.parts || [];
-          const textParts = parts.filter((p: any) => !p.thought && typeof p.text === "string").map((p: any) => p.text.trim()).filter(Boolean);
-          const candidateText = textParts.join(" ").trim();
-          if (candidateText && !/^silence\.?$/i.test(candidateText.trim())) {
-            transcribed = candidateText.replace(/^["']|["']$/g, "").trim();
-          }
-          break;
-        } catch (e: any) {
-          console.warn(`[SNOW Transcribe] Error calling ${modelName}:`, e.message);
         }
-      }
       }
 
       console.log(`[SNOW Transcribe] Transcribed: "${transcribed}" (${Math.round(base64Data.length * 0.75 / 1024)} KB audio)`);
@@ -2199,6 +2186,47 @@ async function startServer() {
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
+  });
+
+  // ── Snow-Critic Specialist Agent Endpoints ─────────────────────────────────
+  app.post("/api/snow/critic/evaluate", async (req, res) => {
+    try {
+      const { objective, output, codeSnippet, strictness, context } = req.body;
+      if (!objective || output === undefined) {
+        return res.status(400).json({ error: "objective and output are required" });
+      }
+      const evaluation = await snowCritic.evaluate({
+        objective,
+        output,
+        codeSnippet,
+        strictness,
+        context,
+      });
+      res.json(evaluation);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/snow/critic/refine", async (req, res) => {
+    try {
+      const { objective, initialOutput, evaluation } = req.body;
+      if (!objective || !initialOutput || !evaluation) {
+        return res.status(400).json({ error: "objective, initialOutput, and evaluation are required" });
+      }
+      const refined = await snowCritic.refine(objective, initialOutput, evaluation);
+      res.json(refined);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/snow/critic/metrics", (_req, res) => {
+    res.json(snowCritic.getMetrics());
+  });
+
+  app.get("/api/snow/critic/history", (_req, res) => {
+    res.json(snowCritic.getHistory());
   });
 
   // ── MCP Server Client Management ───────────────────────────────────────────

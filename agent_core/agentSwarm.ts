@@ -7,8 +7,9 @@ import { TaskManager } from "./TaskManager.js";
 import type { TaskId, TaskState } from "./types.js";
 import { snowGuard } from "../services/snowGuard.js";
 import { snowPlanner } from "../services/snowPlanner.js";
+import { snowCritic, CritiqueEvaluation } from "../services/snowCritic.js";
 
-export type SpecialistRole = "architect" | "planner" | "executor" | "sentinel" | "guard" | "telemetry" | "desk" | "coder";
+export type SpecialistRole = "architect" | "planner" | "executor" | "sentinel" | "guard" | "telemetry" | "desk" | "coder" | "critic";
 
 export interface SwarmMember {
   role: SpecialistRole;
@@ -22,6 +23,7 @@ export interface SwarmTaskResult {
   architectPlan: string;
   executorOutputs: string[];
   sentinelAudit: { passed: boolean; notes: string };
+  criticEvaluation?: CritiqueEvaluation;
   telemetryReport: string;
   timestamp: string;
 }
@@ -60,6 +62,11 @@ export class AgentSwarmCoordinator {
       role: "sentinel",
       name: "Snow-Guard",
       directive: "Zero-trust security sentinel: audits commands, paths, blast-radius boundaries, dual-boot Windows partitions, and scrubs secrets.",
+    });
+    this.members.set("critic", {
+      role: "critic",
+      name: "Snow-Critic",
+      directive: "Reflexion self-correction, rigorous intent verification, hallucination checks, quality scoring, and self-healing refinement loops.",
     });
     this.members.set("telemetry", {
       role: "telemetry",
@@ -103,14 +110,22 @@ export class AgentSwarmCoordinator {
     // 2. Sentinel / Guard Pre-Audit Phase
     const sentinelAudit = snowGuard.auditObjective(objective);
 
-    // 3. Telemetry Phase
-    const telemetryReport = `Swarm coordination cycle active. Tasks mapped to [${architectTask.id}]. System vitals nominal.`;
+    // 3. Snow-Critic Pre-Evaluation & Quality Assertion
+    const criticEvaluation = await snowCritic.evaluate({
+      objective,
+      output: planSummary,
+      strictness: "standard",
+    });
+
+    // 4. Telemetry Phase
+    const telemetryReport = `Swarm coordination cycle active. Tasks mapped to [${architectTask.id}]. Critic verdict: [${criticEvaluation.verdict}] (Score: ${criticEvaluation.score}/100). System vitals nominal.`;
 
     return {
       objective,
       architectPlan: planSummary,
       executorOutputs: [`Execution pathway prepared under containment plan [${architectTask.id}]`],
       sentinelAudit,
+      criticEvaluation,
       telemetryReport,
       timestamp,
     };
