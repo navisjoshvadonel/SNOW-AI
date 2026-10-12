@@ -61,6 +61,7 @@ import { createAgent, Message } from "./agent_core/index.ts";
 import { exportFineTuningDatasets } from "./dataset_exporter";
 import { routineScheduler } from "./services/routineScheduler";
 import { desktopActuator } from "./services/desktopActuator";
+import { computerUse } from "./services/computerUse";
 import { runPythonCode } from "./python_sandbox";
 import { voiceDuplex } from "./services/voiceDuplex";
 import { ambientPerception } from "./services/ambientPerception";
@@ -75,6 +76,9 @@ import { reflexionEngine } from "./services/reflexionEngine";
 import { skillSynthesizer } from "./services/skillSynthesizer";
 import { goalEngine } from "./services/goalEngine";
 import { dreamCycle } from "./services/dreamCycle";
+import { animaEngine } from "./services/animaEngine";
+import { snowGuard } from "./services/snowGuard";
+import { snowCoder } from "./services/snowCoder";
 import { startNightlyCron } from "./services/cronManager";
 import {
   verifyPassword,
@@ -1888,6 +1892,19 @@ async function startServer() {
     res.json({ insights: proactiveIntelligence.getLatestInsights() });
   });
 
+  // 3b. Anima Engine (Autonomous Heartbeat & Synthetic Consciousness)
+  app.get("/api/snow/anima/status", (_req, res) => {
+    res.json(animaEngine.getStatus());
+  });
+  app.post("/api/snow/anima/pulse", async (req, res) => {
+    const reason = req.body?.reason || "OPERATOR_API_TRIGGER";
+    const entry = await animaEngine.triggerPulseNow(reason);
+    res.json({ success: !!entry, entry, status: animaEngine.getStatus() });
+  });
+  app.get("/api/snow/anima/monologue", (_req, res) => {
+    res.json({ monologues: animaEngine.getStatus().recentMonologues });
+  });
+
   // 4. Linux System Actuation (Audio, Windows, Power, Media, Session)
   app.get("/api/snow/linux/state", async (_req, res) => {
     res.json(await linuxSystemActuator.getSystemActuatorState());
@@ -2008,6 +2025,131 @@ async function startServer() {
       console.warn("[SNOW ACTUATOR] Ground-and-act error:", e.message);
       res.status(500).json({ error: e.message });
     }
+  });
+
+  // ── Snow-Desk Specialist Agent Endpoints ─────────────────────────────────
+  app.get("/api/snow/desk/state", async (_req, res) => {
+    res.json(await computerUse.getDeskState());
+  });
+
+  app.get("/api/snow/desk/screenshot", async (req, res) => {
+    const maxDim = req.query.maxDim ? parseInt(String(req.query.maxDim), 10) : 1280;
+    res.json(await computerUse.takeScreenshot(maxDim));
+  });
+
+  app.post("/api/snow/desk/actuate", async (req, res) => {
+    const { action, ...params } = req.body;
+    try {
+      switch (action) {
+        case "focus":
+          return res.json(await computerUse.focusWindow(String(params.title || "")));
+        case "close":
+          return res.json(await computerUse.closeWindow(String(params.title || "")));
+        case "volume":
+          return res.json(await computerUse.setVolume(Number(params.volume ?? params.pct ?? 50)));
+        case "mute":
+          return res.json(await computerUse.toggleMute());
+        case "media":
+          return res.json(await computerUse.mediaControl(params.mediaAction || "play-pause"));
+        case "launch":
+          return res.json(await computerUse.launch(String(params.target || params.app || "")));
+        case "type":
+          return res.json(await computerUse.typeText(String(params.text || ""), Boolean(params.pressEnter)));
+        case "hotkey":
+          return res.json(await computerUse.hotkey(params.keys));
+        case "click":
+          return res.json(await computerUse.mouseClick(params.x, params.y, params.button, params.clicks));
+        case "move":
+          return res.json(await computerUse.mouseMove(params.x, params.y));
+        case "drag":
+          return res.json(await computerUse.drag(params.startX, params.startY, params.endX, params.endY));
+        case "screenshot":
+          return res.json(await computerUse.takeScreenshot(params.maxDim || 1280));
+        default:
+          return res.status(400).json({ error: `Unknown desk action: ${action}` });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Snow-Guard Sentinel Agent Endpoints ──────────────────────────────────
+  app.get("/api/snow/guard/status", (_req, res) => {
+    res.json(snowGuard.getSecurityStatus());
+  });
+
+  app.get("/api/snow/guard/incidents", (_req, res) => {
+    res.json(snowGuard.getIncidents());
+  });
+
+  app.post("/api/snow/guard/audit", (req, res) => {
+    const { type, target, command, path: targetPath, mode } = req.body;
+    if (type === "command" || command) {
+      const cmdToAudit = command || target || "";
+      const result = snowGuard.auditCommand(cmdToAudit);
+      return res.json(result);
+    }
+    if (type === "path" || targetPath) {
+      const pathToAudit = targetPath || target || "";
+      const result = snowGuard.auditPath(pathToAudit, mode || "read");
+      return res.json(result);
+    }
+    return res.status(400).json({ error: "Specify type ('command' or 'path') and target to audit." });
+  });
+
+  app.post("/api/snow/guard/posture", (req, res) => {
+    const { posture } = req.body;
+    if (posture === "STRICT" || posture === "LOCKDOWN" || posture === "PERMISSIVE") {
+      snowGuard.setPosture(posture);
+      return res.json({ success: true, posture: snowGuard.getPosture() });
+    }
+    return res.status(400).json({ error: "Invalid posture. Must be STRICT, LOCKDOWN, or PERMISSIVE." });
+  });
+
+  // ── Snow-Coder Specialist Agent Endpoints ─────────────────────────────────
+  app.post("/api/snow/coder/run", async (req, res) => {
+    try {
+      const { code, language = "python", timeoutMs, maxMemoryMb, autoFix, snippetName } = req.body;
+      const result = await snowCoder.execute({
+        code,
+        language,
+        timeoutMs,
+        maxMemoryMb,
+        autoFix,
+        snippetName,
+      });
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/snow/coder/validate", async (req, res) => {
+    try {
+      const { code, language = "python" } = req.body;
+      const result = await snowCoder.validateSyntax(code, language);
+      res.json(result);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/snow/coder/metrics", async (_req, res) => {
+    try {
+      res.json(await snowCoder.getMetrics());
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/snow/coder/snippets", (_req, res) => {
+    res.json(snowCoder.listSnippets());
+  });
+
+  app.get("/api/snow/coder/snippets/:id", (req, res) => {
+    const snippet = snowCoder.getSnippet(req.params.id);
+    if (!snippet) return res.status(404).json({ error: "Snippet not found" });
+    res.json(snippet);
   });
 
   // ── MCP Server Client Management ───────────────────────────────────────────
@@ -2785,6 +2927,7 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
     ambientPerception.start(10000);
     goalEngine.start(4000);
     dreamCycle.start(3 * 60 * 1000); // 3-minute check interval, triggers after 5 min idle
+    animaEngine.start(60 * 1000);    // 1-minute autonomous consciousness heartbeat
     startNightlyCron();
   });
 
@@ -2798,6 +2941,7 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
       ambientPerception.stop();
       goalEngine.stop();
       dreamCycle.stop();
+      animaEngine.stop();
     } catch (e: any) {
       console.warn("[Server] Notice while stopping daemons:", e.message);
     }

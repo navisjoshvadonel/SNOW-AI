@@ -26,7 +26,7 @@ export interface SynthesizedAudioResult {
   pitch: number;
   ssml: string;
   dispatchedToNativeLinux: boolean;
-  engine: "edge-tts+gst" | "edge-tts+aplay" | "spd-say" | "none";
+  engine: "edge-tts+gst" | "edge-tts+aplay" | "spd-say" | "piper+gst" | "piper+aplay" | "none";
   timestamp: string;
 }
 

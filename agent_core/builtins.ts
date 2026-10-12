@@ -45,6 +45,8 @@ import {
   purgeConsolidatedEpisodes,
 } from "../brain.js";
 import { dreamCycle } from "../services/dreamCycle.js";
+import { snowGuard } from "../services/snowGuard.js";
+import { snowCoder } from "../services/snowCoder.js";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -56,33 +58,7 @@ const execFileAsync = promisify(execFile);
  * and active sensitive environment variables from any tool output or diagnostic stream.
  */
 export function scrubSecrets(text: string): string {
-  if (!text || typeof text !== "string") return text;
-  let scrubbed = text;
-
-  // 1. Google Gemini API keys (AIzaSy...)
-  scrubbed = scrubbed.replace(/AIza[0-9A-Za-z-_]{35}/g, "[REDACTED_GEMINI_KEY]");
-  // 2. OpenAI API keys (sk-...)
-  scrubbed = scrubbed.replace(/sk-[a-zA-Z0-9_-]{20,}/g, "[REDACTED_OPENAI_KEY]");
-  // 3. GitHub PAT & OAuth tokens
-  scrubbed = scrubbed.replace(/(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}/g, "[REDACTED_GITHUB_TOKEN]");
-  scrubbed = scrubbed.replace(/github_pat_[A-Za-z0-9_]{50,}/g, "[REDACTED_GITHUB_PAT]");
-  // 4. Slack tokens
-  scrubbed = scrubbed.replace(/xox[baprs]-[A-Za-z0-9-]+/g, "[REDACTED_SLACK_TOKEN]");
-  // 5. AWS Access Keys
-  scrubbed = scrubbed.replace(/AKIA[0-9A-Z]{16}/g, "[REDACTED_AWS_KEY]");
-  // 6. Cryptographic Private Keys
-  scrubbed = scrubbed.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED_PRIVATE_KEY]");
-  // 7. Authorization Bearer tokens
-  scrubbed = scrubbed.replace(/(Bearer\s+)[A-Za-z0-9\-_.~+/]+=*/gi, "$1[REDACTED_BEARER_TOKEN]");
-
-  // 8. Loaded environment variable values that match credential naming patterns
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v && v.length >= 6 && /(?:KEY|SECRET|TOKEN|PASSWORD|AUTH|CREDENTIAL|PRIVATE)/i.test(k)) {
-      scrubbed = scrubbed.split(v).join(`[REDACTED_${k}]`);
-    }
-  }
-
-  return scrubbed;
+  return snowGuard.scrubSecrets(text);
 }
 
 // ─── BashTool ─────────────────────────────────────────────────────────────────
@@ -109,7 +85,7 @@ export const BashTool: ToolDefinition<BashInput> = {
     required: ["command"],
   },
 
-  validate(input) {
+  validate(input, ctx) {
     if (!input.command?.trim()) {
       return { valid: false, message: "Command cannot be empty", code: 400 };
     }
@@ -118,33 +94,9 @@ export const BashTool: ToolDefinition<BashInput> = {
       return { valid: false, message: "Timeout cannot exceed 600 seconds", code: 400 };
     }
 
-    // Comprehensive zero-trust security blocklist for system disruption, destructive commands, secret exfiltration, and dual-boot Windows safety
-    const BLOCKED_COMMANDS: { pattern: RegExp; reason: string }[] = [
-      { pattern: /\brm\s+-(?:r[fv]|fr|rf)\s+(?:\/|\~|\$HOME|\.\.|\*)(?:\s|$)/, reason: "Recursive deletion of root, home, parent, or wildcard directory is prohibited" },
-      { pattern: /\bmkfs\b/, reason: "Filesystem formatting is prohibited" },
-      { pattern: /\b(fdisk|parted|gdisk|sfdisk|sgdisk|wipefs)\b/, reason: "Disk partition modification or wipe is prohibited" },
-      { pattern: /\bdd\s+if=.*of=\/dev/, reason: "Direct low-level block device write is prohibited" },
-      { pattern: /\b(shutdown|reboot|poweroff|halt|init\s+[06])\b/, reason: "System shutdown or reboot commands are prohibited" },
-      { pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: "Fork bombs are prohibited" },
-      { pattern: /(?:curl|wget|fetch)\s+[^|]+\|\s*(?:bash|sh|zsh|dash)/, reason: "Piping untrusted remote content into shell is prohibited" },
-      { pattern: /\b(?:nc|netcat|ncat)\s+.*-e\b/, reason: "Reverse shell command is prohibited" },
-      { pattern: /\/dev\/tcp\//, reason: "Direct bash TCP socket redirection is prohibited" },
-      { pattern: /\b(?:cat|less|more|head|tail|grep|strings)\s+.*(?:\.env|\.ssh|id_rsa|id_ed25519)/, reason: "Command attempts to read protected credentials or keys" },
-      { pattern: /\b(?:chmod|chown)\s+-[rR]\s+777\s+\//, reason: "Global permission escalation on root filesystem is prohibited" },
-      { pattern: />\s*(?:\/etc|\/boot|\/sys|\/proc|\/root)/, reason: "Direct writing or redirecting into system directories is prohibited" },
-      { pattern: /\bgit\s+clean\s+-(?:[a-zA-Z]*f[a-zA-Z]*x|[a-zA-Z]*x[a-zA-Z]*f)/, reason: "Aggressive git clean -fdx wiping untracked ignored files is prohibited" },
-      // Dual-Boot Windows Partition & Bootloader Containment Protection
-      { pattern: /\b(?:rm|truncate|wipefs|shred|dd)\b.*(?:\/mnt\/[cd]|(?:windows|win10|win11|bootmgfw|bcd|pagefile\.sys|hiberfil\.sys))/i, reason: "Destructive operations targeting Windows partitions or system files are strictly prohibited in dual-boot environment" },
-      { pattern: /\b(?:mkfs|format|fdisk|gdisk|parted|wipefs|ntfsfix\s+-b)\b.*(?:\/dev\/(?:sd[a-z]|nvme[0-9]n[0-9]|mapper\/))/i, reason: "Direct disk formatting or partition modification is strictly prohibited" },
-      { pattern: />\s*(?:\/boot\/efi|\/mnt\/[cd]|\/media\/)/i, reason: "Direct writing or shell redirection into EFI boot or Windows mount points is prohibited" },
-      { pattern: /\b(?:rm|truncate|shred)\b.*(?:\/boot\/efi\/EFI\/(?:Microsoft|Boot))/i, reason: "Modifying or deleting Windows EFI bootloader files is strictly prohibited" },
-      { pattern: /\b(?:umount|mount)\s+.*(?:\/mnt\/[cd]|\/dev\/nvme0n1p[3457])/i, reason: "Unauthorized remounting or unmounting of Windows NTFS partitions is restricted" },
-    ];
-
-    for (const { pattern, reason } of BLOCKED_COMMANDS) {
-      if (pattern.test(input.command)) {
-        return { valid: false, message: `Security violation: ${reason}`, code: 403 };
-      }
+    const audit = snowGuard.auditCommand(input.command, ctx?.cwd);
+    if (!audit.allowed) {
+      return { valid: false, message: audit.violation || "Security violation: Prohibited command", code: 403 };
     }
     return { valid: true };
   },
@@ -1352,28 +1304,10 @@ export const GitManagerTool: ToolDefinition<GitManagerInput> = {
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
 
-const SENSITIVE_FILE_PATTERNS = [
-  /(?:^|\/)\.env(?:\..*)?$/i,
-  /(?:^|\/)\.git(?:\/|$)/i,
-  /\.(pem|key|crt|p12|kdbx)$/i,
-  /id_rsa|id_ed25519/i,
-  /(?:^|\/)data\/.*\.db$/i,
-  // Dual-boot Windows & EFI bootloader protection
-  /(?:^|\/)(?:mnt\/[cd]|media\/|boot\/efi\/EFI\/Microsoft|Windows|Program Files|hiberfil\.sys|pagefile\.sys)/i
-];
-
-function safeResolvePath(inputPath: string, cwd: string): string | null {
-  const abs = resolve(cwd, inputPath);
-  const resolvedCwd = resolve(cwd);
-  if (!abs.startsWith(resolvedCwd)) return null;
-
-  const rel = relative(resolvedCwd, abs);
-  for (const pattern of SENSITIVE_FILE_PATTERNS) {
-    if (pattern.test(rel) || pattern.test(abs)) {
-      return null; // Deny access to sensitive credentials or databases
-    }
-  }
-  return abs;
+function safeResolvePath(inputPath: string, cwd: string, mode: "read" | "write" | "delete" = "read"): string | null {
+  const audit = snowGuard.auditPath(inputPath, mode, cwd);
+  if (!audit.allowed) return null;
+  return audit.normalizedPath;
 }
 
 function countOccurrences(haystack: string, needle: string): number {
@@ -1994,6 +1928,151 @@ export const MemoryConsolidationTool: ToolDefinition<MemoryConsolidationInput> =
 
 
 
+// ─── SecurityGuardTool ─────────────────────────────────────────────────────────
+
+type SecurityGuardInput = {
+  action: "status" | "audit_command" | "audit_path" | "set_posture" | "incidents";
+  command?: string;
+  path?: string;
+  mode?: "read" | "write" | "delete";
+  posture?: "STRICT" | "LOCKDOWN" | "PERMISSIVE";
+};
+
+export const SecurityGuardTool: ToolDefinition<SecurityGuardInput> = {
+  name: "SecurityGuard",
+  description:
+    "Security Sentinel & Blast-Radius Gatekeeper tool. Inspect security posture, " +
+    "audit commands/paths for zero-trust compliance, inspect security incidents, or adjust posture.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["status", "audit_command", "audit_path", "set_posture", "incidents"] },
+      command: { type: "string", description: "Command to audit (for audit_command action)" },
+      path: { type: "string", description: "Path to audit (for audit_path action)" },
+      mode: { type: "string", enum: ["read", "write", "delete"], description: "Path access mode (default: read)" },
+      posture: { type: "string", enum: ["STRICT", "LOCKDOWN", "PERMISSIVE"], description: "New security posture" },
+    },
+    required: ["action"],
+  },
+
+  async *execute(input, ctx) {
+    yield { type: "progress" as const, data: null, label: `SecurityGuard: ${input.action}` };
+
+    switch (input.action) {
+      case "status": {
+        const status = snowGuard.getSecurityStatus();
+        return { content: JSON.stringify(status, null, 2), isError: false };
+      }
+      case "incidents": {
+        const incidents = snowGuard.getIncidents();
+        return { content: JSON.stringify(incidents, null, 2), isError: false };
+      }
+      case "audit_command": {
+        if (!input.command) {
+          return { content: "Error: command is required for audit_command action", isError: true };
+        }
+        const audit = snowGuard.auditCommand(input.command, ctx.cwd);
+        return { content: JSON.stringify(audit, null, 2), isError: !audit.allowed };
+      }
+      case "audit_path": {
+        if (!input.path) {
+          return { content: "Error: path is required for audit_path action", isError: true };
+        }
+        const audit = snowGuard.auditPath(input.path, input.mode || "read", ctx.cwd);
+        return { content: JSON.stringify(audit, null, 2), isError: !audit.allowed };
+      }
+      case "set_posture": {
+        if (!input.posture) {
+          return { content: "Error: posture is required for set_posture action", isError: true };
+        }
+        snowGuard.setPosture(input.posture);
+        return { content: `Security posture updated to: ${input.posture}`, isError: false };
+      }
+      default:
+        return { content: `Unknown action: ${(input as any).action}`, isError: true };
+    }
+  },
+};
+
+// ─── CoderTool ────────────────────────────────────────────────────────────────
+
+type CoderInput = {
+  action: "run" | "validate" | "metrics" | "list_snippets" | "get_snippet";
+  code?: string;
+  language?: "python" | "javascript" | "typescript" | "bash";
+  auto_fix?: boolean;
+  timeout_ms?: number;
+  snippet_name?: string;
+  snippet_id?: string;
+};
+
+export const CoderTool: ToolDefinition<CoderInput> = {
+  name: "Coder",
+  description:
+    "Snow-Coder Multi-Language Sandbox & Code Execution Tool. Run code in isolated sandboxes " +
+    "(Python with RLIMIT & audit hooks, Node.js with memory/network containment, Bash with Snow-Guard sentinel), " +
+    "validate syntax with AST checks, and apply autonomous self-healing repairs.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["run", "validate", "metrics", "list_snippets", "get_snippet"] },
+      code: { type: "string", description: "Source code to run or validate" },
+      language: { type: "string", enum: ["python", "javascript", "typescript", "bash"], description: "Programming language (default: python)" },
+      auto_fix: { type: "boolean", description: "Enable autonomous AST-guided error repair if execution or syntax fails" },
+      timeout_ms: { type: "number", description: "Execution timeout in milliseconds (1000 - 15000, default 10000)" },
+      snippet_name: { type: "string", description: "Optional name to persist snippet into coder library" },
+      snippet_id: { type: "string", description: "ID of snippet to retrieve" },
+    },
+    required: ["action"],
+  },
+
+  async *execute(input, _ctx) {
+    yield { type: "progress" as const, data: null, label: `Coder: ${input.action} (${input.language || "python"})` };
+
+    switch (input.action) {
+      case "run": {
+        if (!input.code) {
+          return { content: "Error: code is required for run action", isError: true };
+        }
+        const lang = input.language || "python";
+        const result = await snowCoder.execute({
+          code: input.code,
+          language: lang,
+          autoFix: Boolean(input.auto_fix),
+          timeoutMs: input.timeout_ms || 10000,
+          snippetName: input.snippet_name,
+        });
+        return { content: JSON.stringify(result, null, 2), isError: !result.success };
+      }
+      case "validate": {
+        if (!input.code) {
+          return { content: "Error: code is required for validate action", isError: true };
+        }
+        const lang = input.language || "python";
+        const syntax = await snowCoder.validateSyntax(input.code, lang);
+        return { content: JSON.stringify(syntax, null, 2), isError: !syntax.valid };
+      }
+      case "metrics": {
+        const metrics = await snowCoder.getMetrics();
+        return { content: JSON.stringify(metrics, null, 2), isError: false };
+      }
+      case "list_snippets": {
+        const list = snowCoder.listSnippets();
+        return { content: JSON.stringify(list, null, 2), isError: false };
+      }
+      case "get_snippet": {
+        if (!input.snippet_id) {
+          return { content: "Error: snippet_id is required", isError: true };
+        }
+        const snippet = snowCoder.getSnippet(input.snippet_id);
+        return { content: JSON.stringify(snippet, null, 2), isError: !snippet };
+      }
+      default:
+        return { content: `Unknown action: ${(input as any).action}`, isError: true };
+    }
+  },
+};
+
 export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>> {
   const registry = new Map<string, ToolDefinition<unknown>>();
   for (const tool of [
@@ -2002,7 +2081,8 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
     SystemTelemetryTool, MemoryStoreTool, AppLauncherTool, MediaControlTool,
     PythonSandboxTool, ClipboardTool, NotificationTool, ProcessManagerTool,
     ServiceManagerTool, GitManagerTool, ComputerUseTool, LinuxSystemTool,
-    SkillSynthesizerTool, GoalManagerTool, MemoryConsolidationTool
+    SkillSynthesizerTool, GoalManagerTool, MemoryConsolidationTool,
+    SecurityGuardTool, CoderTool
   ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }

@@ -498,6 +498,29 @@ export default function App() {
     }
   };
 
+  // Autonomous Anima Consciousness Status
+  const [animaStatus, setAnimaStatus] = useState<{
+    currentPulseState?: "ENGAGED" | "LIGHT_IDLE" | "DEEP_IDLE" | "SELF_HEALING";
+    thought?: string;
+    pulseCount?: number;
+  }>({});
+
+  const fetchAnimaStatus = async () => {
+    try {
+      const res = await fetch("/api/snow/anima/status");
+      if (res.ok) {
+        const data = await res.json();
+        setAnimaStatus({
+          currentPulseState: data.currentPulseState,
+          thought: data.lastMonologue?.thought || "",
+          pulseCount: data.pulseCount,
+        });
+      }
+    } catch {
+      // Non-fatal
+    }
+  };
+
   // Weather State
   const [weatherState, setWeatherState] = useState<WeatherType>("default");
   const [liveWeather, setLiveWeather] = useState<WeatherData>({
@@ -869,8 +892,12 @@ export default function App() {
     };
     fetchStats();
     fetchTelemetryPackage();
+    fetchAnimaStatus();
     const interval = setInterval(fetchStats, 5000);
-    const telemetryInterval = setInterval(fetchTelemetryPackage, 10000);
+    const telemetryInterval = setInterval(() => {
+      fetchTelemetryPackage();
+      fetchAnimaStatus();
+    }, 10000);
     return () => {
       clearInterval(interval);
       clearInterval(telemetryInterval);
@@ -2148,6 +2175,8 @@ export default function App() {
                   isMuted={isMuted}
                   micVolume={micVolume}
                   onCoreClick={toggleSpeechRecognition}
+                  animaThought={animaStatus.thought}
+                  animaPulseState={animaStatus.currentPulseState}
                 />
               </div>
 

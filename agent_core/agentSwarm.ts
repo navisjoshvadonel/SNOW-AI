@@ -5,8 +5,9 @@
 
 import { TaskManager } from "./TaskManager.js";
 import type { TaskId, TaskState } from "./types.js";
+import { snowGuard } from "../services/snowGuard.js";
 
-export type SpecialistRole = "architect" | "executor" | "sentinel" | "telemetry";
+export type SpecialistRole = "architect" | "executor" | "sentinel" | "guard" | "telemetry" | "desk" | "coder";
 
 export interface SwarmMember {
   role: SpecialistRole;
@@ -44,15 +45,30 @@ export class AgentSwarmCoordinator {
       name: "Snow-Executor",
       directive: "Perform targeted code modifications, shell commands, and file updates with high precision.",
     });
+    this.members.set("guard", {
+      role: "guard",
+      name: "Snow-Guard",
+      directive: "Zero-trust security sentinel: audits commands, paths, blast-radius boundaries, dual-boot Windows partitions, and scrubs secrets.",
+    });
     this.members.set("sentinel", {
       role: "sentinel",
-      name: "Snow-Sentinel",
-      directive: "Audit all operations for secret containment, syntax safety, non-destructive boundaries, and regression risk.",
+      name: "Snow-Guard",
+      directive: "Zero-trust security sentinel: audits commands, paths, blast-radius boundaries, dual-boot Windows partitions, and scrubs secrets.",
     });
     this.members.set("telemetry", {
       role: "telemetry",
       name: "Snow-Telemetry",
       directive: "Synthesize operational telemetry and package status logs for HUD visualization and executive briefings.",
+    });
+    this.members.set("desk", {
+      role: "desk",
+      name: "Snow-Desk",
+      directive: "Execute Linux desktop GUI controls, window switching, audio/media actuation, screen captures, and application launches with closed-loop verification.",
+    });
+    this.members.set("coder", {
+      role: "coder",
+      name: "Snow-Coder",
+      directive: "Autonomous code generation, sandboxed multi-language execution (Python/Node/Bash), AST syntax validation, and self-healing error repair.",
     });
   }
 
@@ -76,11 +92,8 @@ export class AgentSwarmCoordinator {
 
     const planSummary = `Architectural Blueprint formulated for objective: "${objective}".\n- Decomposed into 3 verification milestones.\n- Risk perimeter: Low.\n- Strategy: Incremental verification pass.`;
 
-    // 2. Sentinel Pre-Audit Phase
-    const sentinelAudit = {
-      passed: true,
-      notes: "Zero destructive targets detected. Blast-radius containment confirmed within workspace bounds."
-    };
+    // 2. Sentinel / Guard Pre-Audit Phase
+    const sentinelAudit = snowGuard.auditObjective(objective);
 
     // 3. Telemetry Phase
     const telemetryReport = `Swarm coordination cycle active. Tasks mapped to [${architectTask.id}]. System vitals nominal.`;
