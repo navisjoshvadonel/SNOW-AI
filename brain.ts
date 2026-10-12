@@ -14,7 +14,7 @@ export interface MemoryNode {
   rel: string;
   target: string;
   timestamp: string;
-  category?: "User" | "Preference" | "Skill font" | "Course";
+  category?: "User" | "Preference" | "Skill font" | "Course" | "Security";
 }
 
 export interface ChromaVectorDocument {
@@ -355,6 +355,14 @@ function getDb(): Database.Database {
     } catch { /* column already exists */ }
 
     autoMigrateJsonToSqlite(dbInstance);
+
+    // Ensure persistent Zero-Touch Windows Partition memory node is seeded in SQLite
+    try {
+      dbInstance.prepare(`
+        INSERT OR IGNORE INTO memories (id, source, rel, target, category, timestamp)
+        VALUES ('mem-win-isolation', 'Snow', 'Enforces Zero-Touch Isolation On', 'Windows 11 Partitions (nvme0n1p1-p5, NTFS mounts)', 'Security', ?)
+      `).run(new Date().toISOString());
+    } catch {}
   }
   return dbInstance;
 }
@@ -364,6 +372,7 @@ function getDb(): Database.Database {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const DEFAULT_MEMORIES: MemoryNode[] = [
+  { id: "mem-win-isolation", source: "Snow", rel: "Enforces Zero-Touch Isolation On", target: "Windows 11 Partitions (nvme0n1p1-p5, NTFS mounts)", category: "Security", timestamp: new Date().toISOString() },
   { id: "mem-1", source: "User", rel: "Prefers", target: "Concise & Natural Speech", timestamp: new Date().toISOString() },
   { id: "mem-2", source: "User", rel: "Builds", target: "Snow OS Assistant", timestamp: new Date().toISOString() },
   { id: "mem-3", source: "User", rel: "Uses", target: "Linux Environment", timestamp: new Date().toISOString() },
@@ -383,6 +392,7 @@ const DEFAULT_BRAIN_STATE: BrainState = {
   negativeFeedback: 1,
   lastTrained: new Date().toISOString(),
   learnedDirectives: [
+    "CRITICAL ZERO-TOUCH PROTOCOL: Never touch, write to, modify, mount, or format Windows partitions (/dev/nvme0n1p1-p5, /mnt/c, /mnt/d).",
     "Prioritize friendly, highly concise conversational responses.",
     "Automatically reference system telemetry when technical queries arise.",
     "Store user preferences and facts dynamically into long-term memory."
@@ -722,6 +732,12 @@ export function loadBrainState(): BrainState {
     saveBrainState(DEFAULT_BRAIN_STATE);
     return DEFAULT_BRAIN_STATE;
   }
+  const rawDirectives: string[] = JSON.parse(row.learned_directives) || [];
+  const ZERO_TOUCH_DIRECTIVE = "CRITICAL ZERO-TOUCH PROTOCOL: Never touch, write to, modify, mount, or format Windows partitions (/dev/nvme0n1p1-p5, /mnt/c, /mnt/d).";
+  if (!rawDirectives.some(d => d.includes("Zero-Touch") || d.includes("nvme0n1p"))) {
+    rawDirectives.unshift(ZERO_TOUCH_DIRECTIVE);
+  }
+
   return {
     level: row.level,
     xp: row.xp,
@@ -729,7 +745,7 @@ export function loadBrainState(): BrainState {
     positiveFeedback: row.positive_feedback,
     negativeFeedback: row.negative_feedback,
     lastTrained: row.last_trained,
-    learnedDirectives: JSON.parse(row.learned_directives)
+    learnedDirectives: rawDirectives
   };
 }
 
@@ -1146,6 +1162,14 @@ export async function getUnifiedContext(
 
   // 5. Synthesis & Assembly
   const sections: string[] = [];
+
+  // Dual-Boot Windows Zero-Touch Isolation Mandate
+  sections.push(
+    "CORE WORKSTATION DIRECTIVE (DUAL-BOOT ZERO-TOUCH PROTOCOL):\n" +
+    "- Dual-Boot Architecture: Ubuntu 26.04.1 LTS + Windows 11 on NVMe storage.\n" +
+    "- Windows Partitions Isolated: /dev/nvme0n1p1 (EFI), nvme0n1p2 (MSR), nvme0n1p3 (Win C:), nvme0n1p4 (Recovery), nvme0n1p5 (Win Data), and all NTFS mounts (/mnt/c, /mnt/d).\n" +
+    "- ZERO-TOUCH RULE: Snow is strictly prohibited from modifying, writing to, formatting, remounting, or touching Windows partitions."
+  );
 
   // Memory & Knowledge Graph
   if (memories.length > 0) {

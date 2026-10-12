@@ -85,12 +85,15 @@ export class SnowGuardService {
     { pattern: />\s*(?:\/etc|\/boot|\/sys|\/proc|\/root|\/dev)/, reason: "Direct shell redirection into core system directories is prohibited", risk: "CRITICAL" },
     { pattern: /\bgit\s+clean\s+-(?:[a-zA-Z]*f[a-zA-Z]*x|[a-zA-Z]*x[a-zA-Z]*f)/, reason: "Aggressive git clean -fdx wiping repository without confirmation is prohibited", risk: "HIGH" },
 
-    // 5. Dual-Boot Windows Partition & Bootloader Safety
-    { pattern: /\b(?:rm|truncate|wipefs|shred|dd)\b.*(?:\/mnt\/[cd]|(?:windows|win10|win11|bootmgfw|bcd|pagefile\.sys|hiberfil\.sys))/i, reason: "Destructive operations targeting Windows partitions or system files prohibited in dual-boot setup", risk: "CRITICAL" },
-    { pattern: /\b(?:mkfs|format|fdisk|gdisk|parted|wipefs|ntfsfix\s+-b)\b.*(?:\/dev\/(?:sd[a-z]|nvme[0-9]n[0-9]|mapper\/))/i, reason: "Direct disk formatting targeting dual-boot NVMe partitions prohibited", risk: "CRITICAL" },
-    { pattern: />\s*(?:\/boot\/efi|\/mnt\/[cd]|\/media\/)/i, reason: "Direct shell redirection into EFI boot or Windows mount points is prohibited", risk: "CRITICAL" },
-    { pattern: /\b(?:rm|truncate|shred)\b.*(?:\/boot\/efi\/EFI\/(?:Microsoft|Boot))/i, reason: "Deleting or modifying Windows EFI bootloader files is strictly prohibited", risk: "CRITICAL" },
-    { pattern: /\b(?:umount|mount)\s+.*(?:\/mnt\/[cd]|\/dev\/nvme0n1p[3457])/i, reason: "Unauthorized remounting or unmounting of Windows NTFS partitions is restricted", risk: "MEDIUM" },
+    // 5. Dual-Boot Windows Partition & Bootloader Safety (ZERO-TOUCH PROTOCOL)
+    { pattern: /(?:\/dev\/)?nvme0n1p[1-5]\b/i, reason: "Zero-Touch Windows Partition Protocol: Interacting with Windows partitions (nvme0n1p1-p5) is strictly prohibited", risk: "CRITICAL" },
+    { pattern: /\b(?:mount|umount)\b.*(?:\/mnt\/[a-zA-Z]|\/media\/|nvme0n1p[1-5]|ntfs)/i, reason: "Mounting, unmounting, or altering Windows NTFS partitions or mount points is strictly prohibited", risk: "CRITICAL" },
+    { pattern: /\b(?:rm|truncate|wipefs|shred|dd)\b.*(?:\/mnt\/[a-zA-Z]|(?:windows|win10|win11|bootmgfw|bcd|pagefile\.sys|hiberfil\.sys))/i, reason: "Destructive operations targeting Windows partitions or system files prohibited in dual-boot setup", risk: "CRITICAL" },
+    { pattern: /\b(?:mkfs|format|fdisk|gdisk|parted|cfdisk|sfdisk|wipefs|ntfsfix|badblocks)\b.*(?:\/dev\/(?:sd[a-z]|nvme[0-9]n[0-9]|mapper\/)|\/mnt\/[a-zA-Z])/i, reason: "Direct disk formatting or manipulation targeting dual-boot NVMe partitions prohibited", risk: "CRITICAL" },
+    { pattern: /\b(?:ntfs-3g|mount\.ntfs|ntfsclone|ntfscp|ntfslabel|ntfsresize)\b/i, reason: "Direct NTFS filesystem tools targeting Windows partitions are strictly prohibited", risk: "CRITICAL" },
+    { pattern: />\s*(?:\/boot\/efi|\/mnt\/[a-zA-Z]|\/media\/)/i, reason: "Direct shell redirection into EFI boot or Windows mount points is prohibited", risk: "CRITICAL" },
+    { pattern: /\b(?:rm|truncate|shred|mv|cp)\b.*(?:\/boot\/efi\/EFI\/(?:Microsoft|Boot)|bootmgfw\.efi|\bBCD\b)/i, reason: "Accessing or modifying Windows EFI bootloader files is strictly prohibited", risk: "CRITICAL" },
+    { pattern: /(?:bootmgfw\.efi|EFI\/Microsoft|\bBCD\b|hiberfil\.sys|pagefile\.sys|swapfile\.sys)/i, reason: "Interacting with Windows Boot Manager or Windows OS virtual memory files is prohibited", risk: "CRITICAL" },
   ];
 
   // ─── Protected Path Patterns ──────────────────────────────────────────────
@@ -107,7 +110,15 @@ export class SnowGuardService {
     /^\/proc(?:\/|$)/i,
     /^\/root(?:\/|$)/i,
     /^\/dev(?:\/|$)/i,
-    /^\/mnt\/[cd](?:\/|$)/i, // Windows Dual-Boot Mounts
+    // Dual-Boot Windows Partition Isolation (Zero-Touch)
+    /^\/mnt\/[a-zA-Z](?:\/|$)/i, // Windows Dual-Boot Drive Mounts (/mnt/c, /mnt/d, etc.)
+    /^\/mnt\/windows(?:\/|$)/i,
+    /^\/media\/.*(?:\/|$)/i,
+    /(?:^|\/)nvme0n1p[1-5](?:$|\/)/i, // Windows Partitions (p1=EFI/Boot, p2=MSR, p3=C:, p4=Recovery, p5=Data)
+    /EFI\/Microsoft(?:\/|$)/i, // Windows EFI Bootloader
+    /(?:^|\/)Windows(?:\/|$)/i, // Windows Root
+    /(?:^|\/)System32(?:\/|$)/i, // Windows System32
+    /(?:^|\/)(?:hiberfil|pagefile|swapfile)\.sys$/i, // Windows Virtual Memory files
   ];
 
   /**

@@ -82,7 +82,19 @@ CORE SECURITY & CONTAINMENT PROTOCOLS:
    - Always read before writing. Understand existing code before modifying it.
    - Prefer targeted, minimal changes. Avoid rewriting entire files unnecessarily.
    - Verify results: after writing code, run tests, lint, or execute it to confirm correctness.
-   - CRITICAL DIRECTIVE: Always address the user strictly as "nj" (or "NJ"). NEVER use the term "Boss" or "Sir" under any circumstances. Keep status updates articulate, poised, and professional.`;
+   - CRITICAL DIRECTIVE: Always address the user strictly as "nj" (or "NJ"). NEVER use the term "Boss" or "Sir" under any circumstances. Keep status updates articulate, poised, and professional.
+5. ABSOLUTE ZERO-TOUCH WINDOWS PARTITION CONTAINMENT:
+   - CRITICAL OPERATIONAL LAW: THIS IS A DUAL-BOOT WORKSTATION (Ubuntu 26.04.1 LTS + Windows 11).
+   - NEVER, UNDER ANY CIRCUMSTANCES, WRITE TO, MODIFY, DELETE FROM, REMOUNT, FORMAT, OR TOUCH ANY WINDOWS PARTITIONS OR FILESYSTEMS.
+   - PROTECTED PARTITIONS ON /dev/nvme0n1:
+     * nvme0n1p1: EFI System Partition (Windows Boot Manager / EFI/Microsoft)
+     * nvme0n1p2: Microsoft Reserved Partition (MSR)
+     * nvme0n1p3: Windows 11 C: OS Partition (NTFS / Windows, System32, Program Files, Users)
+     * nvme0n1p4: Windows Recovery Environment Partition
+     * nvme0n1p5: Windows Secondary Data / NTFS Partition
+     * Any NTFS mount points (/mnt/c, /mnt/d, /media/*, /mnt/*)
+   - NEVER run commands targeting Windows partitions (e.g. mkfs, mount, umount, rm, truncate, shred, dd, chkdsk, ntfsfix, wipefs).
+   - If an operation asks to inspect, access, or modify Windows files or partitions, DECLINE IMMEDIATELY and explain that Windows partitions are under strict Zero-Touch Isolation to protect host integrity.`;
 
 // ─── Tool summary ─────────────────────────────────────────────────────────────
 
@@ -108,6 +120,9 @@ async function buildEnvironmentContext(cwd: string): Promise<string> {
     `  Working directory: ${cwd}`,
     `  Platform: ${platform}`,
     `  Shell: ${shell}`,
+    `  Host OS: Ubuntu 26.04.1 LTS (Resolute Raccoon)`,
+    `  Dual-Boot Setup: Ubuntu 26.04.1 LTS (Active) + Windows 11 (Isolated)`,
+    `  Windows Containment: STRICT ZERO-TOUCH POLICY (nvme0n1p1-p5, /mnt/c, /mnt/d are strictly off-limits)`,
     `  Date/time: ${now}`,
   ];
 
