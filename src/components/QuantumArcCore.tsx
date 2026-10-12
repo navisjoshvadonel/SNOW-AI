@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Snowflake, Sparkles, Shield, Zap, BrainCircuit, Radio, Volume2 } from "lucide-react";
+import { Snowflake, Sparkles, Shield, Zap, BrainCircuit, Radio, Volume2, Activity } from "lucide-react";
 
 export interface QuantumArcCoreProps {
   state: "standby" | "thinking" | "listening" | "speaking";
@@ -31,12 +31,16 @@ export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
     });
   }, []);
 
-  // Orbital Swarm Specialist Agents
+  // 8 Orbital Swarm Specialist Agents of S.N.O.W. OS
   const swarmAgents = [
-    { name: "PLAN", label: "Planner", color: "#38bdf8", icon: BrainCircuit, initialAngle: 0 },
-    { name: "BLD", label: "Builder", color: "#22d3ee", icon: Zap, initialAngle: 90 },
-    { name: "SEC", label: "Security", color: "#34d399", icon: Shield, initialAngle: 180 },
-    { name: "SYS", label: "System", color: "#a78bfa", icon: Radio, initialAngle: 270 },
+    { name: "VOX", label: "Snow-Voice", color: "#22d3ee", icon: Radio, initialAngle: 0 },
+    { name: "ANM", label: "Snow-Anima", color: "#34d399", icon: Activity, initialAngle: 45 },
+    { name: "PLN", label: "Snow-Planner", color: "#38bdf8", icon: BrainCircuit, initialAngle: 90 },
+    { name: "GRD", label: "Snow-Guard", color: "#f59e0b", icon: Shield, initialAngle: 135 },
+    { name: "COD", label: "Snow-Coder", color: "#a78bfa", icon: Zap, initialAngle: 180 },
+    { name: "DSK", label: "Snow-Desk", color: "#60a5fa", icon: Volume2, initialAngle: 225 },
+    { name: "CRT", label: "Snow-Critic", color: "#f43f5e", icon: Sparkles, initialAngle: 270 },
+    { name: "MEM", label: "Snow-Memory", color: "#e879f9", icon: Snowflake, initialAngle: 315 },
   ];
 
   // Dynamic state colors
@@ -149,15 +153,15 @@ export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
           {swarmAgents.map((agent) => (
             <div
               key={agent.name}
-              className="absolute w-6 h-6 -ml-3 -mt-3 flex items-center justify-center"
+              className="absolute w-6 h-6 -ml-3 -mt-3 flex items-center justify-center group/pip"
               style={{
                 top: `${50 - 47 * Math.cos((agent.initialAngle * Math.PI) / 180)}%`,
                 left: `${50 + 47 * Math.sin((agent.initialAngle * Math.PI) / 180)}%`,
               }}
             >
-              {/* Satellite Pip with glowing aura */}
+              {/* Satellite Pip with glowing aura and hover tooltip */}
               <div
-                className="relative w-3.5 h-3.5 rounded-full border flex items-center justify-center shadow-lg transition-transform group-hover:scale-125"
+                className="relative w-3.5 h-3.5 rounded-full border flex items-center justify-center shadow-lg transition-transform group-hover/pip:scale-150 cursor-pointer pointer-events-auto"
                 style={{
                   borderColor: agent.color,
                   backgroundColor: "rgba(2, 6, 23, 0.95)",
@@ -165,6 +169,10 @@ export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
                 }}
               >
                 <div className="w-1.5 h-1.5 rounded-full animate-ping" style={{ backgroundColor: agent.color }} />
+                {/* Floating Micro Badge on Hover */}
+                <div className="absolute -top-6 left-1/2 -translate-x-1/2 opacity-0 group-hover/pip:opacity-100 transition-opacity bg-slate-950/95 border border-cyan-500/50 px-2 py-0.5 rounded text-[8px] font-mono text-cyan-200 whitespace-nowrap shadow-[0_0_10px_rgba(6,182,212,0.4)] pointer-events-none z-50">
+                  {agent.label} ({agent.name})
+                </div>
               </div>
             </div>
           ))}
@@ -213,7 +221,9 @@ export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
             const sineHarmonic = Math.sin(angleRad * 3) * 6 + Math.cos(angleRad * 2) * 4;
             const voiceBoost =
               state === "listening" && micVolume > 2
-                ? Math.min(26, Math.round((micVolume / 100) * 26))
+                ? Math.min(32, Math.round((micVolume / 100) * 32))
+                : state === "speaking"
+                ? 14
                 : 0;
 
             const barHeight =
@@ -221,11 +231,11 @@ export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
                 ? [6, 20 + Math.abs(sineHarmonic) * 1.6, 8, 26 + (band.id % 4) * 3, 6]
                 : state === "listening"
                 ? [
-                    6 + voiceBoost * 0.3,
+                    6 + voiceBoost * 0.35,
                     16 + voiceBoost + (band.id % 6) * 2,
-                    8 + voiceBoost * 0.6,
-                    22 + voiceBoost * 1.3,
-                    6 + voiceBoost * 0.3,
+                    8 + voiceBoost * 0.7,
+                    24 + voiceBoost * 1.4,
+                    6 + voiceBoost * 0.35,
                   ]
                 : state === "thinking"
                 ? [4, 18, 5, 22, 4]

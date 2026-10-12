@@ -416,17 +416,21 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
 
           {/* Live Voice Audio Waveform Equalizer when Listening */}
           {isListening && (
-            <div className="hidden sm:flex items-center gap-0.5 px-2 py-1 rounded-lg bg-rose-500/15 border border-rose-500/30">
-              {[0.4, 0.8, 1.0, 0.7, 0.5].map((factor, i) => (
+            <div className="hidden sm:flex items-center gap-0.5 px-2.5 py-1 rounded-xl bg-rose-500/15 border border-rose-500/40 shadow-[0_0_15px_rgba(244,63,94,0.3)]">
+              {[0.3, 0.6, 0.9, 1.2, 0.8, 1.0, 0.5, 0.3].map((factor, i) => (
                 <span
                   key={i}
-                  className="w-1 bg-rose-400 rounded-full transition-all duration-75"
+                  className="w-1 bg-gradient-to-t from-rose-500 to-rose-300 rounded-full transition-all duration-75"
                   style={{
-                    height: `${Math.max(4, Math.min(16, Math.round(((micVolume || 10) * factor * 0.4) + 4)))}px`
+                    height: `${Math.max(4, Math.min(20, Math.round(((micVolume || 12) * factor * 0.45) + 4)))}px`,
+                    boxShadow: (micVolume || 0) > 15 ? "0 0 8px rgba(244, 63, 94, 0.8)" : "none"
                   }}
                 />
               ))}
-              <span className="text-[9px] font-mono font-bold text-rose-300 ml-1">REC</span>
+              <span className="text-[9px] font-mono font-bold text-rose-300 ml-1.5 flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-ping" />
+                <span>{(micVolume || 0) > 15 ? "SPEAKING" : "LISTENING"}</span>
+              </span>
             </div>
           )}
 

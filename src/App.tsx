@@ -396,6 +396,7 @@ export default function App() {
   const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const availableVoicesRef = useRef<SpeechSynthesisVoice[]>([]);
   const lastSpacePressRef = useRef<number>(0);
+  const hasTriggeredWakeRef = useRef<boolean>(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -1009,6 +1010,56 @@ export default function App() {
     }
   };
 
+  // ─── Snow Web Audio Directive Acknowledge Chime ──────────────────────────────
+  const playSnowAcknowledgeChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      // Sci-Fi twin confirmation pulse: A5 (880Hz) -> D6 (1174Hz)
+      const notes = [880.00, 1174.66];
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now + idx * 0.065);
+        gain.gain.setValueAtTime(0.001, now + idx * 0.065);
+        gain.gain.exponentialRampToValueAtTime(0.14, now + idx * 0.065 + 0.015);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.065 + 0.17);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + idx * 0.065);
+        osc.stop(now + idx * 0.065 + 0.18);
+      });
+    } catch (e) {}
+  };
+
+  // ─── Snow Web Audio Soft Barge-In Interruption Cue ────────────────────────────
+  const playSnowBargeInChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const now = ctx.currentTime;
+      // Gentle descending pulse: E5 (659Hz) -> C5 (523Hz)
+      const notes = [659.25, 523.25];
+      notes.forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "sine";
+        osc.frequency.setValueAtTime(freq, now + idx * 0.04);
+        gain.gain.setValueAtTime(0.001, now + idx * 0.04);
+        gain.gain.exponentialRampToValueAtTime(0.09, now + idx * 0.04 + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.04 + 0.12);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + idx * 0.04);
+        osc.stop(now + idx * 0.04 + 0.13);
+      });
+    } catch (e) {}
+  };
+
   // ─── Speech Text Cleaner (Strips Markdown/Code/Tags for Crisp Voice) ─────────
   const cleanForSpeech = (rawText: string): string => {
     if (!rawText) return "";
@@ -1041,13 +1092,20 @@ export default function App() {
   }, [isSpeaking]);
 
   // ─── Stop Ongoing Snow Speech (Barge-In) ─────────────────────────────────────
-  const stopSnowSpeech = () => {
+  const stopSnowSpeech = (playCue = false) => {
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
+    if (speechWatchdogRef.current) {
+      clearTimeout(speechWatchdogRef.current);
+    }
+    activeUtteranceRef.current = null;
+    (window as any)._snowActiveUtterance = null;
     setIsSpeaking(false);
     isSpeakingRef.current = false;
+    if (playCue) playSnowBargeInChime();
     fetch("/api/snow/voice/barge-in", { method: "POST" }).catch(() => {});
+    fetch("/api/snow/tts/cancel", { method: "POST" }).catch(() => {});
   };
 
   // Cache available synthesis voices on load & voice changes
@@ -1288,6 +1346,7 @@ export default function App() {
     shouldKeepListeningRef.current = true;
     accumulatedTranscriptRef.current = "";
     hasSpokenRef.current = false;
+    hasTriggeredWakeRef.current = false;
     lastSpeechTimestampRef.current = 0;
     audioChunksRef.current = [];
 
@@ -1341,7 +1400,7 @@ export default function App() {
           // Barge-in check: If Snow is speaking and user speaks loud enough
           if (isSpeakingRef.current) {
             if (normalizedVol > 20) {
-              stopSnowSpeech();
+              stopSnowSpeech(true);
             }
             // Do not treat Snow's own TTS output as user voice
             animFrameRef.current = requestAnimationFrame(updateAudioMetrics);
@@ -1498,11 +1557,25 @@ export default function App() {
             hasSpokenRef.current = true;
             lastSpeechTimestampRef.current = Date.now();
 
-            // Instant wake-word trigger on Web Speech API
-            if (/^(?:hey|hi|hello|yo|ok)?\s*(?:snow|SNOW)[.!?]*$/i.test(activeSpeech.trim())) {
-              stopSnowVoiceListening(true);
-              handleSendMessageRef.current(activeSpeech.trim());
-              return;
+            // Intelligent Wake-Word Recognition: "Hey Snow", "Snow", "Hi Snow", "OK Snow"
+            const wakeMatch = activeSpeech.match(/^(?:hey|hi|hello|yo|ok)?\s*(?:snow|SNOW)[,.:!?\s]*(.*)$/i);
+            if (wakeMatch) {
+              const directiveAfterWake = wakeMatch[1]?.trim();
+              if (directiveAfterWake && directiveAfterWake.length > 2) {
+                // Wake word WITH directive spoken in one breath: "Hey Snow, what's the weather?"
+                playSnowAcknowledgeChime();
+                stopSnowVoiceListening(true);
+                handleSendMessageRef.current(directiveAfterWake);
+                return;
+              } else if (!directiveAfterWake && !hasTriggeredWakeRef.current) {
+                // Wake word ALONE: "Hey Snow!" -> acknowledge and listen attentively
+                hasTriggeredWakeRef.current = true;
+                playSnowWakeChime();
+                triggerToast("⚡ S.N.O.W. Listening... Speak your directive.");
+                setInputText("");
+                accumulatedTranscriptRef.current = "";
+                return;
+              }
             }
           }
         };
@@ -1744,6 +1817,9 @@ export default function App() {
 
     // Barge-in: immediately stop any active Snow speech
     stopSnowSpeech();
+    if (textToSend) {
+      playSnowAcknowledgeChime();
+    }
 
     let promptForBackend = rawText.trim();
     if (attachedContextFiles.length > 0) {
