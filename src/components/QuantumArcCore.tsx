@@ -8,8 +8,6 @@ export interface QuantumArcCoreProps {
   isMuted?: boolean;
   micVolume?: number;
   onCoreClick?: () => void;
-  animaThought?: string;
-  animaPulseState?: "ENGAGED" | "LIGHT_IDLE" | "DEEP_IDLE" | "SELF_HEALING";
 }
 
 export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
@@ -18,8 +16,6 @@ export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
   isMuted = false,
   micVolume = 0,
   onCoreClick,
-  animaThought,
-  animaPulseState,
 }) => {
   const [ripples, setRipples] = useState<{ id: number; x: number; y: number }[]>([]);
 
@@ -487,35 +483,7 @@ export const QuantumArcCore: React.FC<QuantumArcCoreProps> = ({
             <span className="text-slate-400">OPERATOR:</span>
             <span className="text-cyan-200 font-bold">NJ</span>
           </div>
-          {animaPulseState && (
-            <>
-              <span className="text-cyan-500/30">•</span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-400">ANIMA:</span>
-                <span className={`font-bold ${
-                  animaPulseState === "SELF_HEALING" ? "text-amber-400" :
-                  animaPulseState === "DEEP_IDLE" ? "text-indigo-400" :
-                  animaPulseState === "LIGHT_IDLE" ? "text-cyan-300" : "text-emerald-400"
-                }`}>
-                  {animaPulseState}
-                </span>
-              </div>
-            </>
-          )}
         </div>
-
-        {/* Autonomous Anima Consciousness Monologue Ticker */}
-        {animaThought && (
-          <motion.div
-            initial={{ opacity: 0, y: 4 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="max-w-md w-full px-3.5 py-1.5 rounded-lg bg-slate-950/80 border border-cyan-500/25 backdrop-blur-md text-[10px] font-mono text-cyan-200/90 text-center shadow-[0_0_20px_rgba(6,182,212,0.15)] flex items-center justify-center gap-2"
-          >
-            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-ping flex-shrink-0" />
-            <span className="text-cyan-400 font-bold tracking-widest text-[9px] flex-shrink-0">ANIMA //</span>
-            <span className="truncate">{animaThought}</span>
-          </motion.div>
-        )}
       </div>
     </div>
   );

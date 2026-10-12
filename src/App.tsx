@@ -2296,8 +2296,6 @@ export default function App() {
                   isMuted={isMuted}
                   micVolume={micVolume}
                   onCoreClick={toggleSpeechRecognition}
-                  animaThought={animaStatus.thought}
-                  animaPulseState={animaStatus.currentPulseState}
                 />
               </div>
 
