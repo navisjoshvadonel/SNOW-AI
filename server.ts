@@ -946,6 +946,11 @@ function buildPersonaPrompt(brainState: any, temporal: any, memoryContext: strin
   4. Only execute the action after NJ provides explicit confirmation.
   5. Dual-Boot Security: Verify Windows partitions (/dev/nvme0n1p1-p5) and EFI records are never touched.
 
+# ZERO-HARDCODING POLICY (STRICT REAL-TIME DYNAMIC OS SOURCING):
+- MANDATE: NEVER HARDCODE, GUESS, OR FABRICATE UPGRADE COUNTS, PACKAGE NAMES, OR DISK METRICS.
+- All numbers, pending updates, orphan lists, disk usage, and memory metrics must be retrieved dynamically and freshly from the live operating system at runtime.
+- Never cite static sample numbers; state only what the live host OS commands report right now.
+
 # MEMORY & CONTINUITY:
 ${memoryContext}
 Synthesize this memory seamlessly. Do not mechanically recite memories; let them naturally inform your decisions and responses.
@@ -1391,6 +1396,7 @@ RULES:
 - Rich Markdown Delivery: Provide structured, beautiful output in the chat interface. Voice TTS sanitization is handled downstream by our speech engine, so never withhold markdown or code blocks from your response.
 - Autonomous Tool Execution: You have full access to native Linux tools (SystemMaintenance, GoalManager, SkillSynthesizer, ComputerUse, LinuxSystem, SystemTelemetry, ProcessManager, Bash, etc.). Invoke them autonomously immediately to execute multi-step reasoning. Do not ask for permission to run standard non-destructive inspection, telemetry, or safe user-space maintenance commands.
 - MANDATORY SUDO PERMISSION PROTOCOL: For any privileged administrative 'sudo' operation (such as \`sudo apt upgrade\`, \`sudo apt autoremove\`, \`sudo apt clean\`), you MUST stage the plan using SystemMaintenance 'plan_maintenance' and ASK NJ FOR EXPLICIT PERMISSION before executing. Never run sudo commands silently.
+- ZERO-HARDCODING LAW: Never hardcode, guess, or hallucinate package upgrade counts, security patches, orphan numbers, or disk metrics. Query them live from the system in real-time.
 - CLOSED-LOOP REASONING: When controlling the desktop, verify stateChanged. When executing code or maintenance, inspect output and self-heal by fixing parameters and re-executing until verified.
 - DYNAMIC CAPABILITY: If you lack a tool, use SkillSynthesizer to author one on the fly.
 - LONG-RUNNING TASKS: Use GoalManager for background tasks to avoid blocking the user.`;
@@ -2527,6 +2533,22 @@ async function startServer() {
       );
     }
 
+    let liveMaintenance: { updates: any; autoremove: any } | null = null;
+    const isMaintenanceQuery = /\b(update|updates|upgrad|autoremove|clean|cache|orphan|packages?|apt|maintenance|storage|headroom)\b/i.test(effectivePrompt);
+    if (isMaintenanceQuery) {
+      fetches.push(
+        Promise.all([
+          systemMaintenance.checkAvailableUpdates(),
+          systemMaintenance.getAutoremoveCandidates(),
+        ])
+          .then(([upd, arm]) => {
+            liveMaintenance = { updates: upd, autoremove: arm };
+            toolsUsed.push("LiveSystemMaintenanceTelemetry");
+          })
+          .catch(() => {})
+      );
+    }
+
     const searchQuery = intent.webQuery || intent.stockQuery || effectivePrompt;
 
     // Structured Financial Data API query for stock/crypto
@@ -2577,6 +2599,18 @@ async function startServer() {
     if (financialData) {
       contextLines.push(
         `Market telemetry (${financialData.symbol}): Price ${financialData.price}, 24h change ${financialData.change} via ${financialData.source}.`
+      );
+    }
+    if (liveMaintenance) {
+      contextLines.push(
+        `LIVE HOST OS PACKAGE TELEMETRY (DYNAMICALLY QUERIED DIRECTLY FROM UBUNTU SYSTEM AT ${liveMaintenance.updates.timestamp}):\n` +
+        `- Total Upgradable Packages: ${liveMaintenance.updates.totalUpgradable}\n` +
+        `- Security Updates Available: ${liveMaintenance.updates.securityUpdatesCount}\n` +
+        `- Reboot Required: ${liveMaintenance.updates.rebootRequired ? "YES" : "NO"}\n` +
+        `- Unused Autoremovable Orphan Packages: ${liveMaintenance.autoremove.totalRemovable}\n` +
+        `- Sample Upgradable Packages: ${liveMaintenance.updates.packages.slice(0, 15).map((p: any) => `${p.name} (${p.oldVersion || "?"} -> ${p.newVersion})`).join(", ") || "None"}\n` +
+        `- Sample Autoremove Candidates: ${liveMaintenance.autoremove.packages.slice(0, 15).map((p: any) => p.name).join(", ") || "None"}\n` +
+        `MANDATE: State these exact live metrics queried dynamically from the host operating system right now. Never hardcode or hallucinate numbers.`
       );
     }
     if (searchResults.length > 0) {
@@ -2719,6 +2753,7 @@ async function startServer() {
     let weather: WeatherData | null = null;
     let system: SystemData | null = null;
     let searchResults: WebSearchResult[] = [];
+    let liveMaintenanceStream: { updates: any; autoremove: any } | null = null;
 
     const fetches: Promise<void>[] = [];
     if (intent.isWeather && intent.weatherLocation) {
@@ -2726,6 +2761,19 @@ async function startServer() {
     }
     if (intent.isSystem) {
       fetches.push(fetchSystemCached().then(d => { system = d; }));
+    }
+    const isMaintenanceStream = /\b(update|updates|upgrad|autoremove|clean|cache|orphan|packages?|apt|maintenance|storage|headroom)\b/i.test(effectivePrompt);
+    if (isMaintenanceStream) {
+      fetches.push(
+        Promise.all([
+          systemMaintenance.checkAvailableUpdates(),
+          systemMaintenance.getAutoremoveCandidates(),
+        ])
+          .then(([upd, arm]) => {
+            liveMaintenanceStream = { updates: upd, autoremove: arm };
+          })
+          .catch(() => {})
+      );
     }
     const searchQuery = intent.webQuery || intent.stockQuery || effectivePrompt;
     if (intent.isNews || intent.isSports || intent.isWeb) {
@@ -2736,6 +2784,18 @@ async function startServer() {
     const contextLines: string[] = [];
     if (weather) contextLines.push(`Weather: ${weather.location}, ${weather.temp}, ${weather.condition}.`);
     if (system) contextLines.push(`System: CPU ${system.cpu}, RAM ${system.ram}, temp ${system.temp}.`);
+    if (liveMaintenanceStream) {
+      contextLines.push(
+        `LIVE HOST OS PACKAGE TELEMETRY (DYNAMICALLY QUERIED DIRECTLY FROM UBUNTU SYSTEM AT ${liveMaintenanceStream.updates.timestamp}):\n` +
+        `- Total Upgradable Packages: ${liveMaintenanceStream.updates.totalUpgradable}\n` +
+        `- Security Updates Available: ${liveMaintenanceStream.updates.securityUpdatesCount}\n` +
+        `- Reboot Required: ${liveMaintenanceStream.updates.rebootRequired ? "YES" : "NO"}\n` +
+        `- Unused Autoremovable Orphan Packages: ${liveMaintenanceStream.autoremove.totalRemovable}\n` +
+        `- Sample Upgradable Packages: ${liveMaintenanceStream.updates.packages.slice(0, 15).map((p: any) => `${p.name} (${p.oldVersion || "?"} -> ${p.newVersion})`).join(", ") || "None"}\n` +
+        `- Sample Autoremove Candidates: ${liveMaintenanceStream.autoremove.packages.slice(0, 15).map((p: any) => p.name).join(", ") || "None"}\n` +
+        `MANDATE: State these exact live metrics queried dynamically from the host operating system right now. Never hardcode or hallucinate numbers.`
+      );
+    }
     if (searchResults.length) contextLines.push(`Web search: ${searchResults[0].title} - ${searchResults[0].snippet}`);
 
     const result = await callAIStream(

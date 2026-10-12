@@ -139,7 +139,7 @@ export class SystemMaintenanceService {
       totalUpgradable: packages.length,
       securityUpdatesCount: securityCount,
       rebootRequired,
-      packages: packages.slice(0, 50),
+      packages, // 100% live unsliced package list directly from host OS
       timestamp,
     };
   }
@@ -286,21 +286,22 @@ export class SystemMaintenanceService {
       this.getTopProcesses(5),
     ]);
 
-    // Check disk headroom
+    // Check disk headroom dynamically from host system
     const diskHeadroom: SystemHealthAudit["diskHeadroom"] = [];
     try {
       const { stdout } = await execAsync("df -h / /home 2>/dev/null | tail -n +2 || echo ''");
       const lines = stdout.trim().split("\n");
       for (const line of lines) {
         const p = line.trim().split(/\s+/);
-        if (p.length >= 6) {
-          diskHeadroom.push({
-            mountPoint: p[5],
-            size: p[1],
-            used: p[2],
-            available: p[3],
-            usePercent: p[4],
-          });
+        if (p.length >= 5) {
+          const mountPoint = p[p.length - 1];
+          const usePercent = p[p.length - 2];
+          const available = p[p.length - 3];
+          const used = p[p.length - 4];
+          const size = p[p.length - 5];
+          if (!diskHeadroom.some((d) => d.mountPoint === mountPoint)) {
+            diskHeadroom.push({ mountPoint, size, used, available, usePercent });
+          }
         }
       }
     } catch {}
@@ -389,7 +390,7 @@ export class SystemMaintenanceService {
 
     return {
       totalRemovable: packages.length,
-      packages: packages.slice(0, 100),
+      packages, // 100% live unsliced package list directly from host OS
       summary: `${packages.length} unused orphan packages identified for removal`,
       timestamp,
     };
