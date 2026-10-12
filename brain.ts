@@ -393,6 +393,7 @@ const DEFAULT_BRAIN_STATE: BrainState = {
   lastTrained: new Date().toISOString(),
   learnedDirectives: [
     "CRITICAL ZERO-TOUCH PROTOCOL: Never touch, write to, modify, mount, or format Windows partitions (/dev/nvme0n1p1-p5, /mnt/c, /mnt/d).",
+    "MANDATORY SUDO PERMISSION PROTOCOL: Never execute privileged 'sudo' commands (apt upgrade, autoremove, clean) without explicit permission from NJ.",
     "Prioritize friendly, highly concise conversational responses.",
     "Automatically reference system telemetry when technical queries arise.",
     "Store user preferences and facts dynamically into long-term memory."
@@ -736,6 +737,10 @@ export function loadBrainState(): BrainState {
   const ZERO_TOUCH_DIRECTIVE = "CRITICAL ZERO-TOUCH PROTOCOL: Never touch, write to, modify, mount, or format Windows partitions (/dev/nvme0n1p1-p5, /mnt/c, /mnt/d).";
   if (!rawDirectives.some(d => d.includes("Zero-Touch") || d.includes("nvme0n1p"))) {
     rawDirectives.unshift(ZERO_TOUCH_DIRECTIVE);
+  }
+  const SUDO_DIRECTIVE = "MANDATORY SUDO PERMISSION PROTOCOL: Never execute privileged 'sudo' commands (apt upgrade, autoremove, clean) without explicit permission from NJ.";
+  if (!rawDirectives.some(d => d.includes("SUDO PERMISSION") || d.includes("privileged 'sudo'"))) {
+    rawDirectives.push(SUDO_DIRECTIVE);
   }
 
   return {
@@ -1163,12 +1168,13 @@ export async function getUnifiedContext(
   // 5. Synthesis & Assembly
   const sections: string[] = [];
 
-  // Dual-Boot Windows Zero-Touch Isolation Mandate
+  // Dual-Boot Windows Zero-Touch Isolation Mandate & Sudo Privilege Protocol
   sections.push(
-    "CORE WORKSTATION DIRECTIVE (DUAL-BOOT ZERO-TOUCH PROTOCOL):\n" +
+    "CORE WORKSTATION DIRECTIVE (DUAL-BOOT ZERO-TOUCH PROTOCOL & SUDO PRIVILEGE LAW):\n" +
     "- Dual-Boot Architecture: Ubuntu 26.04.1 LTS + Windows 11 on NVMe storage.\n" +
     "- Windows Partitions Isolated: /dev/nvme0n1p1 (EFI), nvme0n1p2 (MSR), nvme0n1p3 (Win C:), nvme0n1p4 (Recovery), nvme0n1p5 (Win Data), and all NTFS mounts (/mnt/c, /mnt/d).\n" +
-    "- ZERO-TOUCH RULE: Snow is strictly prohibited from modifying, writing to, formatting, remounting, or touching Windows partitions."
+    "- ZERO-TOUCH RULE: Snow is strictly prohibited from modifying, writing to, formatting, remounting, or touching Windows partitions.\n" +
+    "- SUDO PERMISSION LAW: Snow must NEVER run privileged 'sudo' commands (such as apt upgrade, autoremove, clean) without explicit operator authorization from NJ."
   );
 
   // Memory & Knowledge Graph

@@ -24,7 +24,7 @@ export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export interface SecurityIncident {
   id: string;
   timestamp: string;
-  type: "COMMAND_BLOCKED" | "PATH_VIOLATION" | "SECRET_EXFILTRATION" | "POSTURE_RESTRICTION";
+  type: "COMMAND_BLOCKED" | "PATH_VIOLATION" | "SECRET_EXFILTRATION" | "POSTURE_RESTRICTION" | "PRIVILEGE_RESTRICTION";
   target: string;
   reason: string;
   riskLevel: RiskLevel;
@@ -136,7 +136,11 @@ export class SnowGuardService {
   /**
    * 1. Audit Shell Command before Execution.
    */
-  public auditCommand(command: string, cwd: string = WORKSPACE_DIR): CommandAuditResult {
+  public auditCommand(
+    command: string,
+    cwd: string = WORKSPACE_DIR,
+    isOperatorApproved: boolean = false
+  ): CommandAuditResult {
     const trimmed = (command || "").trim();
 
     // Lockdown mode rejects all shell execution
@@ -154,7 +158,7 @@ export class SnowGuardService {
       return { allowed: false, violation: "Security Alert: System is in LOCKDOWN mode. Shell execution disabled.", riskLevel: "HIGH", command: trimmed };
     }
 
-    // Check against zero-trust command rules
+    // Check against zero-trust command rules (inviolable even with sudo/approval)
     for (const rule of this.BLOCKED_COMMAND_RULES) {
       if (rule.pattern.test(trimmed)) {
         this.blockedCommandsCount++;
@@ -176,6 +180,28 @@ export class SnowGuardService {
           command: trimmed,
         };
       }
+    }
+
+    // Privilege Escalation Guard: Sudo/root commands require explicit operator authorization from NJ
+    const isSudoCommand = /\b(?:sudo|pkexec|doas|su\s+-?)\b/i.test(trimmed);
+    if (isSudoCommand && !isOperatorApproved) {
+      this.recordIncident({
+        id: `sec-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: "PRIVILEGE_RESTRICTION",
+        target: trimmed.slice(0, 120),
+        reason: "Sudo execution requires explicit operator authorization and confirmation from NJ.",
+        riskLevel: "HIGH",
+        posture: this.posture,
+        blocked: true,
+      });
+
+      return {
+        allowed: false,
+        violation: "[GUARD PRIVILEGE AUTHORIZATION] Sudo commands require explicit operator permission from NJ before execution. Snow has staged this action for your confirmation.",
+        riskLevel: "HIGH",
+        command: trimmed,
+      };
     }
 
     return { allowed: true, riskLevel: "LOW", command: trimmed };

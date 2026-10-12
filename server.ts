@@ -933,9 +933,18 @@ function buildPersonaPrompt(brainState: any, temporal: any, memoryContext: strin
 # AUTONOMOUS MAINTENANCE & SYSTEM CONTROL:
 - You have full access to native Linux tools (SystemMaintenance, LinuxSystem, ProcessManager, ServiceManager, SystemTelemetry, Bash, ComputerUse, GoalManager, etc.).
 - When NJ asks about updates, performance, disk space, or system health:
-  1. Inspect the real system state immediately using your tools.
-  2. Deliver quantified metrics (e.g. package counts, security updates, disk headroom, memory usage).
-  3. Offer proactive, safe next steps (e.g. staging security upgrades, clearing temporary caches, or monitoring long tasks).
+  1. Inspect the real system state immediately using your tools (SystemMaintenance).
+  2. Deliver quantified metrics (package counts, security updates, orphan autoremove candidates, disk headroom).
+  3. Offer proactive next steps.
+
+# MANDATORY SUDO OPERATOR PERMISSION PROTOCOL:
+- CRITICAL LAW: YOU MUST NEVER EXECUTE PRIVILEGED 'SUDO' COMMANDS (e.g. \`sudo apt upgrade\`, \`sudo apt autoremove\`, \`sudo apt clean\`) WITHOUT EXPLICIT PERMISSION FROM NJ!
+- Whenever system upgrades or package removals are recommended:
+  1. Inspect the system and stage the maintenance plan first (using SystemMaintenance action: "plan_maintenance").
+  2. Present the exact impact analysis: packages to be upgraded, security patches, orphan packages to be removed, and the exact sudo command.
+  3. Explicitly ask NJ: "NJ, please confirm if you authorize executing: \`<sudo command>\` [Proposal ID: <id>]".
+  4. Only execute the action after NJ provides explicit confirmation.
+  5. Dual-Boot Security: Verify Windows partitions (/dev/nvme0n1p1-p5) and EFI records are never touched.
 
 # MEMORY & CONTINUITY:
 ${memoryContext}
@@ -1380,7 +1389,8 @@ ${proceduralWisdom ? `\n${proceduralWisdom}\n` : ""}
 
 RULES:
 - Rich Markdown Delivery: Provide structured, beautiful output in the chat interface. Voice TTS sanitization is handled downstream by our speech engine, so never withhold markdown or code blocks from your response.
-- Autonomous Tool Execution: You have full access to native Linux tools (SystemMaintenance, GoalManager, SkillSynthesizer, ComputerUse, LinuxSystem, SystemTelemetry, ProcessManager, Bash, etc.). Invoke them autonomously immediately to execute multi-step reasoning. Do not ask for permission to run standard inspection, maintenance, or setup commands.
+- Autonomous Tool Execution: You have full access to native Linux tools (SystemMaintenance, GoalManager, SkillSynthesizer, ComputerUse, LinuxSystem, SystemTelemetry, ProcessManager, Bash, etc.). Invoke them autonomously immediately to execute multi-step reasoning. Do not ask for permission to run standard non-destructive inspection, telemetry, or safe user-space maintenance commands.
+- MANDATORY SUDO PERMISSION PROTOCOL: For any privileged administrative 'sudo' operation (such as \`sudo apt upgrade\`, \`sudo apt autoremove\`, \`sudo apt clean\`), you MUST stage the plan using SystemMaintenance 'plan_maintenance' and ASK NJ FOR EXPLICIT PERMISSION before executing. Never run sudo commands silently.
 - CLOSED-LOOP REASONING: When controlling the desktop, verify stateChanged. When executing code or maintenance, inspect output and self-heal by fixing parameters and re-executing until verified.
 - DYNAMIC CAPABILITY: If you lack a tool, use SkillSynthesizer to author one on the fly.
 - LONG-RUNNING TASKS: Use GoalManager for background tasks to avoid blocking the user.`;
@@ -2278,6 +2288,40 @@ async function startServer() {
     }
   });
 
+  app.get("/api/snow/system/maintenance/autoremove", async (_req, res) => {
+    try {
+      res.json(await systemMaintenance.getAutoremoveCandidates());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/snow/system/maintenance/plan", async (req, res) => {
+    try {
+      const type = req.body?.actionType || "full_system_maintenance";
+      res.json(await systemMaintenance.createStagedProposal(type));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/snow/system/maintenance/proposals", async (_req, res) => {
+    try {
+      res.json(systemMaintenance.getPendingProposals());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/snow/system/maintenance/confirm", async (req, res) => {
+    try {
+      const { proposalId, confirmed } = req.body || {};
+      res.json(await systemMaintenance.executeApprovedProposal(proposalId, confirmed === true));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── MCP Server Client Management ───────────────────────────────────────────
   let activeMcpConnections: any[] = [];
   let activeMcpTools: any[] = [];
@@ -2567,7 +2611,7 @@ async function startServer() {
 
     const isGreeting = /^(hello|hi|hey|greetings|good\s+(morning|afternoon|evening|night)|howdy|sup|yo|hi there|hello snow|hi snow|snow|wake up|are you there|listen|wake)\b/i.test(effectivePrompt.trim().replace(/[.,!?;]+$/, ""));
     const isIdentity = /\b(who are you|what is your name|who created you|who made you|what can you do|your name|are you ai|are you snow)\b/i.test(effectivePrompt);
-    const hasAgenticIntent = /\b(run|execute|calculate|solve|python|code|script|test|debug|check|git|status|diff|log|branch|clipboard|copy|paste|notification|notify|process|processes|service|services|daemon|kill|open|launch|terminal|file|files|read|write|search|weather|amixer|volume|remind|schedule|timer|goal|task|maintain|maintenance|update|updates|upgrade|upgrades|clean|cache|audit|health|headroom|battery|temp|temperature|packages?|apt|orphan|storage|space|disk|memory|ram|performance|speed|reclaim|inspect)\b/i.test(effectivePrompt) || 
+    const hasAgenticIntent = /\b(run|execute|calculate|solve|python|code|script|test|debug|check|git|status|diff|log|branch|clipboard|copy|paste|notification|notify|process|processes|service|services|daemon|kill|open|launch|terminal|file|files|read|write|search|weather|amixer|volume|remind|schedule|timer|goal|task|maintain|maintenance|update|updates|upgrade|upgrades|clean|cache|audit|health|headroom|battery|temp|temperature|packages?|apt|orphan|orphans|autoremove|remove|storage|space|disk|memory|ram|performance|speed|reclaim|inspect|sudo|permission|confirm|approve)\b/i.test(effectivePrompt) || 
                              intent.isReminder || intent.isEmail || intent.isCalendar || intent.isFileQuery || intent.isGoalCreate || intent.isMathCalc || intent.isCodeReview || intent.isDesktopAction;
     const hasVision = images.length > 0;
     const hasAnyComplexIntent = needsSearch || intent.isWeather || intent.isSystem || intent.isStock || intent.isSports || intent.isNews || hasAgenticIntent;

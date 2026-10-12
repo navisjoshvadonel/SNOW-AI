@@ -2222,7 +2222,10 @@ export const CriticTool: ToolDefinition<CriticInput> = {
 // ─── SystemMaintenanceTool ──────────────────────────────────────────────────
 
 type MaintenanceInput = {
-  action: "check_updates" | "health_audit" | "clean_cache" | "failed_services" | "top_processes";
+  action: "check_updates" | "inspect_autoremove" | "plan_maintenance" | "execute_approved" | "health_audit" | "clean_cache" | "failed_services" | "top_processes";
+  maintenanceType?: "upgrade" | "autoremove" | "clean_cache" | "full_system_maintenance";
+  proposalId?: string;
+  confirmedByNJ?: boolean;
   limit?: number;
 };
 
@@ -2230,16 +2233,24 @@ export const SystemMaintenanceTool: ToolDefinition<MaintenanceInput> = {
   name: "SystemMaintenance",
   description:
     "Autonomous Ubuntu Linux System Care & Maintenance Tool. Inspects upgradable apt packages " +
-    "and security patches, checks failed systemd services, audits CPU/RAM/Disk headroom, " +
-    "identifies runaway processes, and safely reclaims stale temporary/journal caches.",
+    "and security patches, identifies unused autoremovable packages, stages maintenance proposals " +
+    "requiring NJ's explicit sudo authorization, executes approved maintenance, checks failed systemd services, " +
+    "audits CPU/RAM/Disk headroom, and safely reclaims stale temporary/journal caches.",
   inputSchema: {
     type: "object",
     properties: {
       action: {
         type: "string",
-        enum: ["check_updates", "health_audit", "clean_cache", "failed_services", "top_processes"],
+        enum: ["check_updates", "inspect_autoremove", "plan_maintenance", "execute_approved", "health_audit", "clean_cache", "failed_services", "top_processes"],
         description: "Maintenance operation to perform",
       },
+      maintenanceType: {
+        type: "string",
+        enum: ["upgrade", "autoremove", "clean_cache", "full_system_maintenance"],
+        description: "Type of maintenance to stage (for plan_maintenance)",
+      },
+      proposalId: { type: "string", description: "ID of staged proposal to execute (for execute_approved)" },
+      confirmedByNJ: { type: "boolean", description: "Whether NJ has granted explicit permission to execute the sudo command" },
       limit: { type: "number", description: "Process limit count (for top_processes)" },
     },
     required: ["action"],
@@ -2252,6 +2263,25 @@ export const SystemMaintenanceTool: ToolDefinition<MaintenanceInput> = {
       case "check_updates": {
         const updates = await systemMaintenance.checkAvailableUpdates();
         return { content: JSON.stringify(updates, null, 2), isError: false };
+      }
+      case "inspect_autoremove": {
+        const autoremove = await systemMaintenance.getAutoremoveCandidates();
+        return { content: JSON.stringify(autoremove, null, 2), isError: false };
+      }
+      case "plan_maintenance": {
+        const proposal = await systemMaintenance.createStagedProposal(input.maintenanceType || "full_system_maintenance");
+        return { content: JSON.stringify(proposal, null, 2), isError: false };
+      }
+      case "execute_approved": {
+        if (!input.proposalId) {
+          const pending = systemMaintenance.getPendingProposals();
+          if (pending.length === 0) {
+            return { content: "No pending proposals found. Please call action 'plan_maintenance' first.", isError: true };
+          }
+          input.proposalId = pending[0].id;
+        }
+        const result = await systemMaintenance.executeApprovedProposal(input.proposalId, input.confirmedByNJ === true);
+        return { content: JSON.stringify(result, null, 2), isError: !result.success };
       }
       case "health_audit": {
         const audit = await systemMaintenance.runFullHealthAudit();

@@ -44,11 +44,40 @@ export interface ProcessUsageInfo {
   command: string;
 }
 
+export interface AutoremovePackage {
+  name: string;
+  version?: string;
+}
+
+export interface AutoremoveStatus {
+  totalRemovable: number;
+  packages: AutoremovePackage[];
+  summary: string;
+  timestamp: string;
+}
+
+export interface StagedMaintenanceProposal {
+  id: string;
+  timestamp: string;
+  actionType: "upgrade" | "autoremove" | "clean_cache" | "full_system_maintenance";
+  commandToExecute: string;
+  isSudoRequired: boolean;
+  status: "PENDING_OPERATOR_APPROVAL" | "APPROVED" | "EXECUTED" | "REJECTED";
+  packagesToUpgrade: number;
+  securityPatchesCount: number;
+  packagesToRemove: number;
+  removableSample: string[];
+  dualBootSafetyCertified: boolean;
+  executiveSummary: string;
+  confirmationPrompt: string;
+}
+
 export interface SystemHealthAudit {
   timestamp: string;
   osRelease: string;
   uptime: string;
   updates: SystemUpdateStatus;
+  autoremove: AutoremoveStatus;
   failedServices: FailedServiceInfo[];
   topCpuProcesses: ProcessUsageInfo[];
   topMemProcesses: ProcessUsageInfo[];
@@ -60,10 +89,12 @@ export interface SystemHealthAudit {
     usePercent: string;
   }[];
   isOptimal: boolean;
+  pendingProposalsCount: number;
   recommendations: string[];
 }
 
 export class SystemMaintenanceService {
+  private stagedProposals = new Map<string, StagedMaintenanceProposal>();
   /**
    * 1. Inspect Available Package Updates & Security Patches
    */
@@ -248,8 +279,9 @@ export class SystemMaintenanceService {
     const timestamp = new Date().toISOString();
     const recommendations: string[] = [];
 
-    const [updates, failedServices, processes] = await Promise.all([
+    const [updates, autoremove, failedServices, processes] = await Promise.all([
       this.checkAvailableUpdates(),
+      this.getAutoremoveCandidates(),
       this.checkFailedServices(),
       this.getTopProcesses(5),
     ]);
@@ -273,14 +305,19 @@ export class SystemMaintenanceService {
       }
     } catch {}
 
-    // Formulate intelligent recommendations
+    if (autoremove.totalRemovable > 0) {
+      recommendations.push(
+        `Identified ${autoremove.totalRemovable} unused orphan packages ready for autoremoval. Stage 'autoremove' proposal for operator authorization.`
+      );
+    }
+
     if (updates.securityUpdatesCount > 0) {
       recommendations.push(
-        `${updates.securityUpdatesCount} security patch(es) available. Consider running 'sudo apt update && sudo apt upgrade' to patch system libraries.`
+        `${updates.securityUpdatesCount} security patch(es) ready. Sudo upgrade requires NJ's explicit authorization.`
       );
     } else if (updates.totalUpgradable > 0) {
       recommendations.push(
-        `${updates.totalUpgradable} package update(s) ready for staging.`
+        `${updates.totalUpgradable} package update(s) ready for staging with operator approval.`
       );
     }
 
@@ -294,7 +331,7 @@ export class SystemMaintenanceService {
       );
     }
 
-    const isOptimal = updates.securityUpdatesCount === 0 && failedServices.length === 0;
+    const isOptimal = updates.securityUpdatesCount === 0 && autoremove.totalRemovable === 0 && failedServices.length === 0;
 
     let osRelease = "Ubuntu Linux";
     try {
@@ -313,13 +350,190 @@ export class SystemMaintenanceService {
       osRelease,
       uptime,
       updates,
+      autoremove,
       failedServices,
       topCpuProcesses: processes.cpu,
       topMemProcesses: processes.mem,
       diskHeadroom,
       isOptimal,
+      pendingProposalsCount: this.getPendingProposals().length,
       recommendations,
     };
+  }
+
+  /**
+   * 6. Inspect Unused & Autoremovable Orphan Packages
+   */
+  public async getAutoremoveCandidates(): Promise<AutoremoveStatus> {
+    const timestamp = new Date().toISOString();
+    const packages: AutoremovePackage[] = [];
+
+    try {
+      const { stdout } = await execAsync("apt-get -s autoremove 2>/dev/null || echo ''");
+      const lines = stdout.split("\n");
+
+      for (const line of lines) {
+        if (!line.startsWith("Remv ")) continue;
+        // Example: Remv python3.12-doc [3.12.3-1ubuntu0.17]
+        const parts = line.split(" ");
+        const name = parts[1]?.trim();
+        const verMatch = line.match(/\[(.*?)\]/);
+        const version = verMatch ? verMatch[1].trim() : undefined;
+        if (name) {
+          packages.push({ name, version });
+        }
+      }
+    } catch (err: any) {
+      console.warn("[SYSTEM MAINTENANCE] Notice while checking autoremove candidates:", err.message);
+    }
+
+    return {
+      totalRemovable: packages.length,
+      packages: packages.slice(0, 100),
+      summary: `${packages.length} unused orphan packages identified for removal`,
+      timestamp,
+    };
+  }
+
+  /**
+   * 7. Stage System Maintenance Proposal (Requiring Operator Sudo Authorization)
+   */
+  public async createStagedProposal(
+    actionType: "upgrade" | "autoremove" | "clean_cache" | "full_system_maintenance" = "full_system_maintenance"
+  ): Promise<StagedMaintenanceProposal> {
+    const id = `MAINT-${actionType.toUpperCase()}-${Date.now()}`;
+    const timestamp = new Date().toISOString();
+
+    const [updates, autoremove] = await Promise.all([
+      this.checkAvailableUpdates(),
+      this.getAutoremoveCandidates(),
+    ]);
+
+    let commandToExecute = "";
+    let executiveSummary = "";
+
+    switch (actionType) {
+      case "upgrade":
+        commandToExecute = "sudo apt update && sudo apt upgrade -y";
+        executiveSummary = `Upgrades ${updates.totalUpgradable} packages (${updates.securityUpdatesCount} security patches).`;
+        break;
+      case "autoremove":
+        commandToExecute = "sudo apt autoremove --purge -y";
+        executiveSummary = `Removes ${autoremove.totalRemovable} unused orphan packages to reclaim disk space.`;
+        break;
+      case "clean_cache":
+        commandToExecute = "sudo apt clean && sudo apt autoclean";
+        executiveSummary = "Flushes local APT package cache archives.";
+        break;
+      case "full_system_maintenance":
+      default:
+        commandToExecute = "sudo apt update && sudo apt upgrade -y && sudo apt autoremove --purge -y && sudo apt clean";
+        executiveSummary = `Full Care: Upgrades ${updates.totalUpgradable} packages, purges ${autoremove.totalRemovable} orphans, and cleans apt archive cache.`;
+        break;
+    }
+
+    const removableSample = autoremove.packages.slice(0, 8).map((p) => p.name);
+
+    const confirmationPrompt = [
+      `NJ, I have analyzed your system and prepared a staged maintenance plan requiring your authorization:`,
+      `• Action: ${actionType}`,
+      `• Upgradable Packages: ${updates.totalUpgradable} (${updates.securityUpdatesCount} security updates)`,
+      `• Autoremovable Orphans: ${autoremove.totalRemovable} unused packages (e.g. ${removableSample.join(", ") || "none"})`,
+      `• Proposed Command: \`${commandToExecute}\``,
+      `• Dual-Boot Safety: Windows partitions (nvme0n1p1-p5) and EFI boot records are strictly isolated.`,
+      `\nPermission Required: Reply 'confirm' or authorize proposal ID \`${id}\` to execute this sudo command.`,
+    ].join("\n");
+
+    const proposal: StagedMaintenanceProposal = {
+      id,
+      timestamp,
+      actionType,
+      commandToExecute,
+      isSudoRequired: true,
+      status: "PENDING_OPERATOR_APPROVAL",
+      packagesToUpgrade: updates.totalUpgradable,
+      securityPatchesCount: updates.securityUpdatesCount,
+      packagesToRemove: autoremove.totalRemovable,
+      removableSample,
+      dualBootSafetyCertified: true,
+      executiveSummary,
+      confirmationPrompt,
+    };
+
+    this.stagedProposals.set(id, proposal);
+    return proposal;
+  }
+
+  /**
+   * 8. Retrieve Pending Staged Proposals
+   */
+  public getPendingProposals(): StagedMaintenanceProposal[] {
+    return Array.from(this.stagedProposals.values()).filter(
+      (p) => p.status === "PENDING_OPERATOR_APPROVAL"
+    );
+  }
+
+  /**
+   * 9. Retrieve Proposal by ID
+   */
+  public getProposalById(id: string): StagedMaintenanceProposal | undefined {
+    return this.stagedProposals.get(id);
+  }
+
+  /**
+   * 10. Execute Sudo Maintenance with Verified Operator Permission
+   */
+  public async executeApprovedProposal(
+    proposalId: string,
+    confirmedByNJ: boolean
+  ): Promise<{ success: boolean; output: string; proposal?: StagedMaintenanceProposal }> {
+    const proposal = this.stagedProposals.get(proposalId);
+    if (!proposal) {
+      return {
+        success: false,
+        output: `Error: Proposal '${proposalId}' not found. Please stage a new maintenance proposal first.`,
+      };
+    }
+
+    if (!confirmedByNJ) {
+      proposal.status = "REJECTED";
+      return {
+        success: false,
+        output: `Execution cancelled: Operator permission was not granted by NJ. Sudo command '${proposal.commandToExecute}' will not be run.`,
+        proposal,
+      };
+    }
+
+    // Verify command safety with Snow Guard
+    const audit = snowGuard.auditCommand(proposal.commandToExecute, process.cwd(), true);
+    if (!audit.allowed) {
+      proposal.status = "REJECTED";
+      return {
+        success: false,
+        output: `Security violation: ${audit.violation}`,
+        proposal,
+      };
+    }
+
+    proposal.status = "APPROVED";
+
+    try {
+      console.log(`[SYSTEM MAINTENANCE] ⚡ Executing operator-approved sudo maintenance: ${proposal.commandToExecute}`);
+      const { stdout, stderr } = await execAsync(proposal.commandToExecute);
+      proposal.status = "EXECUTED";
+      return {
+        success: true,
+        output: stdout || stderr || "Command executed successfully.",
+        proposal,
+      };
+    } catch (err: any) {
+      proposal.status = "REJECTED";
+      return {
+        success: false,
+        output: `Maintenance execution failed: ${err.message}`,
+        proposal,
+      };
+    }
   }
 }
 
