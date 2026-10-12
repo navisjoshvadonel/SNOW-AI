@@ -12,7 +12,7 @@ import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import { tmpdir } from "os";
 import { join } from "path";
-import { unlink, access } from "fs/promises";
+import { unlink, access, readFile } from "fs/promises";
 import { voiceDuplex } from "./voiceDuplex";
 
 const execAsync = promisify(exec);
@@ -25,8 +25,10 @@ export interface SynthesizedAudioResult {
   rate: number;
   pitch: number;
   ssml: string;
+  audioBase64?: string;
+  mimeType?: string;
   dispatchedToNativeLinux: boolean;
-  engine: "edge-tts+gst" | "edge-tts+aplay" | "spd-say" | "piper+gst" | "piper+aplay" | "none";
+  engine: "edge-tts+gst" | "edge-tts+aplay" | "edge-tts+mp3" | "spd-say" | "piper+gst" | "piper+aplay" | "none";
   timestamp: string;
 }
 
@@ -55,16 +57,34 @@ async function hasGstPlay(): Promise<boolean> {
   return _gstAvailable;
 }
 
-let _edgeTtsAvailable: boolean | null = null;
-async function hasEdgeTts(): Promise<boolean> {
-  if (_edgeTtsAvailable !== null) return _edgeTtsAvailable;
-  try {
-    await execAsync("which edge-tts");
-    _edgeTtsAvailable = true;
-  } catch {
-    _edgeTtsAvailable = false;
+let _edgeTtsCmd: string | null = null;
+async function getEdgeTtsCmd(): Promise<string | null> {
+  if (_edgeTtsCmd !== null) return _edgeTtsCmd;
+  const candidates = [
+    join(process.cwd(), ".venv", "bin", "edge-tts"),
+    join(process.cwd(), "node_modules", ".bin", "edge-tts"),
+    "/home/snowjd/.local/share/pipx/venvs/edge-tts/bin/edge-tts",
+    "/home/snowjd/.local/bin/edge-tts",
+    "edge-tts",
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (candidate.includes("/")) {
+        await access(candidate);
+        _edgeTtsCmd = candidate;
+        return _edgeTtsCmd;
+      } else {
+        await execAsync(`which ${candidate}`);
+        _edgeTtsCmd = candidate;
+        return _edgeTtsCmd;
+      }
+    } catch {}
   }
-  return _edgeTtsAvailable;
+  return null;
+}
+
+async function hasEdgeTts(): Promise<boolean> {
+  return (await getEdgeTtsCmd()) !== null;
 }
 
 let _piperAvailable: boolean | null = null;
@@ -85,7 +105,7 @@ let _activePlayPid: number | null = null;
 
 class AudioSynthesisService {
   /**
-   * Synthesize audio with S.N.O.W. executive prosody using the best available engine.
+   * Synthesize audio with humanized, clear, slow and steady female neural persona.
    */
   public async synthesize(
     text: string,
@@ -106,7 +126,7 @@ class AudioSynthesisService {
       return {
         text,
         urgency,
-        rate: 1.0,
+        rate: 0.95,
         pitch: 1.0,
         ssml: "",
         dispatchedToNativeLinux: false,
@@ -115,23 +135,28 @@ class AudioSynthesisService {
       };
     }
 
-    // 2. Prosody curves for soothing female neural persona
-    let rate = 1.03;
-    let pitch = 1.15;
+    // 2. Humanized prosody: clear, steady, deliberate pacing (never rushed or shrill)
+    // -5% rate = relaxed, articulate, natural breathing cadence
+    // +0Hz pitch = grounded, warm, soothing feminine presence
+    let rateStr = "-5%";
+    let pitchStr = "+0Hz";
+    let numericalRate = 0.95;
+    let numericalPitch = 1.0;
 
     if (urgency === "alert") {
-      rate = 1.18;
-      pitch = 1.20;
+      rateStr = "-2%";
+      pitchStr = "+2Hz";
+      numericalRate = 0.98;
+      numericalPitch = 1.02;
     } else if (urgency === "emergency") {
-      rate = 1.28;
-      pitch = 1.25;
+      rateStr = "+2%";
+      pitchStr = "+4Hz";
+      numericalRate = 1.02;
+      numericalPitch = 1.04;
     }
 
-    // 3. SSML for logging/metadata (not all engines use it directly)
-    const pitchPct = pitch > 1
-      ? `+${Math.round((pitch - 1) * 100)}%`
-      : `-${Math.round((1 - pitch) * 100)}%`;
-    const ssml = `<speak><prosody rate="${rate}" pitch="${pitchPct}">${cleanSpoken
+    // 3. SSML for telemetry and logging
+    const ssml = `<speak><prosody rate="${rateStr}" pitch="${pitchStr}">${cleanSpoken
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")}</prosody></speak>`;
@@ -139,18 +164,13 @@ class AudioSynthesisService {
     // 4. Register with voice duplex tracker
     voiceDuplex.startSpeaking(cleanSpoken, urgency === "calm" ? "normal" : "urgent");
 
-    // 5. Build edge-tts rate / pitch strings
-    const rateDiff = Math.round((rate - 1.0) * 100);
-    const rateStr  = rateDiff >= 0 ? `+${rateDiff}%` : `${rateDiff}%`;
-    const pitchHz  = Math.round((pitch - 1.0) * 50);  // heuristic: 0.15 → +7 Hz
-    const pitchStr = pitchHz >= 0 ? `+${pitchHz}Hz` : `${pitchHz}Hz`;
-
     let dispatched = false;
-    let engine: SynthesizedAudioResult["engine"] | "piper+gst" | "piper+aplay" = "none" as any;
+    let audioBase64: string | undefined = undefined;
+    let engine: SynthesizedAudioResult["engine"] = "none";
     const preferLocal = process.env.USE_LOCAL_FAST_PATH !== "false";
 
     try {
-      // 6a. Try Piper TTS (Project Metal Mind - Zero Latency Local)
+      // 5a. Check Piper TTS (if locally preloaded with onnx model)
       if (preferLocal && await hasPiper()) {
         const tmpFile = join(tmpdir(), `snow_tts_${Date.now()}.wav`);
         _activeTmpFile = tmpFile;
@@ -161,6 +181,11 @@ class AudioSynthesisService {
             `echo ${JSON.stringify(cleanSpoken)} | piper --model "${modelPath}" --output_file "${tmpFile}" 2>/dev/null`,
             { timeout: 15_000 }
           );
+
+          try {
+            const buf = await readFile(tmpFile);
+            audioBase64 = buf.toString("base64");
+          } catch {}
 
           if (await hasGstPlay()) {
             const child = spawn("gst-play-1.0", ["--quiet", tmpFile], { stdio: "ignore" });
@@ -184,60 +209,60 @@ class AudioSynthesisService {
         }
       }
 
-      // 6b. Try edge-tts → temp mp3 → gst-play-1.0 (preferred cloud path)
-      if (!dispatched && await hasEdgeTts()) {
-      const tmpFile = join(tmpdir(), `snow_tts_${Date.now()}.mp3`);
-      _activeTmpFile = tmpFile;
-      try {
-        // Write mp3 to temp file
-        await execAsync(
-          `edge-tts --voice en-US-AriaNeural --rate "${rateStr}" --pitch "${pitchStr}" --write-media "${tmpFile}" --text ${JSON.stringify(cleanSpoken)} 2>/dev/null`,
-          { timeout: 15_000 }
-        );
-
-        if (await hasGstPlay()) {
-          // Play with gst-play (best quality, handles mp3 natively)
-          const child = spawn("gst-play-1.0", ["--quiet", tmpFile], { stdio: "ignore" });
-          _activePlayPid = child.pid ?? null;
-          await new Promise<void>((resolve) => {
-            child.on("close", () => resolve());
-            child.on("error", () => resolve());
-          });
-          _activePlayPid = null;
-          engine = "edge-tts+gst";
-        } else {
-          // Fallback: aplay can't play mp3 directly — use ffmpeg if present, else skip
-          // We attempt gst-launch as another method
+      // 5b. High-Fidelity Humanized Microsoft Neural Voice (Ava / Jenny / Emma)
+      const edgeCmd = await getEdgeTtsCmd();
+      if (!dispatched && edgeCmd) {
+        const tmpFile = join(tmpdir(), `snow_tts_${Date.now()}.mp3`);
+        _activeTmpFile = tmpFile;
+        try {
+          // Default: en-US-AvaNeural (Expressive, Caring, Pleasant, Natural Human Cadence)
+          const voice = process.env.SNOW_TTS_VOICE || "en-US-AvaNeural";
           await execAsync(
-            `gst-launch-1.0 filesrc location="${tmpFile}" ! mpegaudioparse ! mpg123audiodec ! audioconvert ! autoaudiosink 2>/dev/null`,
-            { timeout: 30_000 }
+            `"${edgeCmd}" --voice "${voice}" --rate "${rateStr}" --pitch "${pitchStr}" --write-media "${tmpFile}" --text ${JSON.stringify(cleanSpoken)} 2>/dev/null`,
+            { timeout: 20_000 }
           );
-          engine = "edge-tts+aplay";
+
+          // Read generated mp3 into base64 for browser HTML5 Audio playback
+          try {
+            const buf = await readFile(tmpFile);
+            audioBase64 = buf.toString("base64");
+          } catch {}
+
+          if (await hasGstPlay()) {
+            // Play through native Linux sound subsystem
+            const child = spawn("gst-play-1.0", ["--quiet", tmpFile], { stdio: "ignore" });
+            _activePlayPid = child.pid ?? null;
+            await new Promise<void>((resolve) => {
+              child.on("close", () => resolve());
+              child.on("error", () => resolve());
+            });
+            _activePlayPid = null;
+            engine = "edge-tts+gst";
+          } else {
+            engine = "edge-tts+mp3";
+          }
+
+          dispatched = true;
+        } catch (err) {
+          console.warn("[SNOW TTS] edge-tts path failed:", (err as Error).message);
+        } finally {
+          _activeTmpFile = null;
+          try { await unlink(tmpFile); } catch {}
         }
-
-        dispatched = true;
-      } catch (err) {
-        console.warn("[SNOW TTS] edge-tts path failed:", (err as Error).message);
-      } finally {
-        // Clean up temp file
-        _activeTmpFile = null;
-        try { await unlink(tmpFile); } catch {}
       }
-    }
 
-    // 6b. Fallback: spd-say (basic quality but always works if installed)
-    if (!dispatched) {
-      try {
-        const escaped = cleanSpoken.replace(/"/g, '\\"').replace(/[\r\n]+/g, " ");
-        const speedParam = urgency === "calm" ? 0 : urgency === "alert" ? 25 : 40;
-        await execAsync(`spd-say -w -t female1 -p 15 -r ${speedParam} "${escaped}" 2>/dev/null`, {
-          timeout: 30_000,
-        });
-        dispatched = true;
-        engine = "spd-say";
-      } catch {
-        // Silent — no TTS engine available
-      }
+      // 5c. Fallback: spd-say with calm steady parameters
+      if (!dispatched) {
+        try {
+          const escaped = cleanSpoken.replace(/"/g, '\\"').replace(/[\r\n]+/g, " ");
+          await execAsync(`spd-say -w -t female1 -p 0 -r -10 "${escaped}" 2>/dev/null`, {
+            timeout: 30_000,
+          });
+          dispatched = true;
+          engine = "spd-say";
+        } catch {
+          // Silent — no TTS engine available
+        }
       }
     } finally {
       voiceDuplex.finishSpeaking();
@@ -246,9 +271,11 @@ class AudioSynthesisService {
     return {
       text,
       urgency,
-      rate,
-      pitch,
+      rate: numericalRate,
+      pitch: numericalPitch,
       ssml,
+      audioBase64,
+      mimeType: "audio/mp3",
       dispatchedToNativeLinux: dispatched,
       engine,
       timestamp: new Date().toISOString(),

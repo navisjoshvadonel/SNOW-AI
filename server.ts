@@ -1109,7 +1109,17 @@ async function callAI(
       const res = await fetch(`${ollamaHost}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: modelName, messages: ollamaMessages, stream: false })
+        body: JSON.stringify({
+          model: modelName,
+          messages: ollamaMessages,
+          stream: false,
+          options: {
+            temperature: 0.65,
+            top_p: 0.9,
+            repeat_penalty: 1.15,
+            num_ctx: 8192
+          }
+        })
       });
       if (!res.ok) throw new Error(`Ollama HTTP ${res.status}`);
       const data: any = await res.json();
@@ -1121,10 +1131,25 @@ async function callAI(
     return null;
   };
 
+  const tryLocalChain = async () => {
+    const localCandidates = Array.from(new Set([
+      localTarget.model,
+      "snow_custom",
+      "llama3.2:3b",
+      "snow:latest",
+      "llama3.2:1b"
+    ]));
+    for (const cand of localCandidates) {
+      const res = await tryOllama(cand, cand === localTarget.model ? localTarget.label : `S.N.O.W. Local Core (${cand})`);
+      if (res) return res;
+    }
+    return null;
+  };
+
   let finalRes = null;
   if (!isHybrid) {
-    // S.N.O.W. LOCAL-FIRST: Always run sovereign on-device neural engine first
-    finalRes = await tryOllama(localTarget.model, localTarget.label);
+    // S.N.O.W. LOCAL-FIRST: Always run sovereign on-device neural engine first with multi-model failover
+    finalRes = await tryLocalChain();
     if (!finalRes) {
       console.warn("[SNOW] Local core offline/busy, falling back to Adaptive Neural Uplink...");
       finalRes = await tryGemini();
@@ -1132,7 +1157,7 @@ async function callAI(
   } else {
     // Explicit hybrid co-processor requested
     finalRes = await tryGemini();
-    if (!finalRes) finalRes = await tryOllama(localTarget.model, localTarget.label);
+    if (!finalRes) finalRes = await tryLocalChain();
   }
 
   if (finalRes) return finalRes;
@@ -1209,7 +1234,17 @@ async function callAIStream(
       const res = await fetch(`${ollamaHost}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: modelName, messages: ollamaMessages, stream: true })
+        body: JSON.stringify({
+          model: modelName,
+          messages: ollamaMessages,
+          stream: true,
+          options: {
+            temperature: 0.65,
+            top_p: 0.9,
+            repeat_penalty: 1.15,
+            num_ctx: 8192
+          }
+        })
       });
       if (res.body) {
         const reader = (res.body as any).getReader();
@@ -1239,10 +1274,25 @@ async function callAIStream(
     return null;
   };
 
+  const tryLocalChainStream = async () => {
+    const localCandidates = Array.from(new Set([
+      localTarget.model,
+      "snow_custom",
+      "llama3.2:3b",
+      "snow:latest",
+      "llama3.2:1b"
+    ]));
+    for (const cand of localCandidates) {
+      const res = await tryOllamaStream(cand, cand === localTarget.model ? localTarget.label : `S.N.O.W. Local Stream (${cand})`);
+      if (res) return res;
+    }
+    return null;
+  };
+
   let finalRes = null;
   if (!isHybrid) {
-    // S.N.O.W. LOCAL-FIRST: Always run sovereign on-device neural stream first
-    finalRes = await tryOllamaStream(localTarget.model, localTarget.label);
+    // S.N.O.W. LOCAL-FIRST: Always run sovereign on-device neural stream first with multi-model failover
+    finalRes = await tryLocalChainStream();
     if (!finalRes) {
       console.warn("[SNOW STREAM] Local neural stream offline/busy, falling back to Adaptive Neural Uplink...");
       finalRes = await tryGeminiStream();
@@ -1250,7 +1300,7 @@ async function callAIStream(
   } else {
     // Explicit hybrid co-processor requested
     finalRes = await tryGeminiStream();
-    if (!finalRes) finalRes = await tryOllamaStream(localTarget.model, localTarget.label);
+    if (!finalRes) finalRes = await tryLocalChainStream();
   }
   if (finalRes) return finalRes;
 

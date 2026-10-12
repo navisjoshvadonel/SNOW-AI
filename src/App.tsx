@@ -394,6 +394,7 @@ export default function App() {
   const hasAutoStartedVoiceRef = useRef<boolean>(false);
   const speechWatchdogRef = useRef<any>(null);
   const activeUtteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const activeHtmlAudioRef = useRef<HTMLAudioElement | null>(null);
   const availableVoicesRef = useRef<SpeechSynthesisVoice[]>([]);
   const lastSpacePressRef = useRef<number>(0);
   const hasTriggeredWakeRef = useRef<boolean>(false);
@@ -1092,7 +1093,15 @@ export default function App() {
   }, [isSpeaking]);
 
   // ─── Stop Ongoing Snow Speech (Barge-In) ─────────────────────────────────────
+  // ─── Stop Ongoing Snow Speech (Barge-In) ─────────────────────────────────────
   const stopSnowSpeech = (playCue = false) => {
+    if (activeHtmlAudioRef.current) {
+      try {
+        activeHtmlAudioRef.current.pause();
+        activeHtmlAudioRef.current.currentTime = 0;
+      } catch {}
+      activeHtmlAudioRef.current = null;
+    }
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -1119,7 +1128,7 @@ export default function App() {
     }
   }, []);
 
-  // ─── Speak Response as Snow (Articulate Female Voice) ────────────────────────
+  // ─── Speak Response as Snow (Humanized, Clear, Steady Female Voice) ───────────
   const speakSnow = async (textToSpeak: string) => {
     if (isMuted) {
       if (isContinuousModeRef.current) {
@@ -1140,7 +1149,14 @@ export default function App() {
       return;
     }
 
-    // Stop browser TTS if any is running
+    // Stop ongoing audio/speech
+    if (activeHtmlAudioRef.current) {
+      try {
+        activeHtmlAudioRef.current.pause();
+        activeHtmlAudioRef.current.currentTime = 0;
+      } catch {}
+      activeHtmlAudioRef.current = null;
+    }
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
@@ -1150,7 +1166,7 @@ export default function App() {
     isSpeakingRef.current = true;
 
     try {
-      // 1. Try S.N.O.W. Backend Neural Engine (edge-tts + native playback)
+      // 1. Primary: S.N.O.W. High-Fidelity Humanized Neural Engine (edge-tts Ava/Jenny)
       const res = await fetch("/api/snow/tts/synthesize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1160,26 +1176,69 @@ export default function App() {
       if (!res.ok) throw new Error("Backend TTS unavailable");
       
       const data = await res.json();
-      if (!data.dispatchedToNativeLinux) {
-        throw new Error("Backend TTS did not dispatch native playback");
+
+      // If backend generated high-definition neural MP3 audio payload
+      if (data.audioBase64) {
+        await new Promise<void>((resolve) => {
+          const audio = new Audio("data:audio/mp3;base64," + data.audioBase64);
+          activeHtmlAudioRef.current = audio;
+
+          // Wire into Web Audio analyser so the QuantumArc HUD ripples synchronously
+          try {
+            if (audioContextRef.current && audioContextRef.current.state === "running") {
+              const source = audioContextRef.current.createMediaElementSource(audio);
+              if (analyserRef.current) source.connect(analyserRef.current);
+              source.connect(audioContextRef.current.destination);
+            }
+          } catch {}
+
+          const handleFinish = () => {
+            activeHtmlAudioRef.current = null;
+            setIsSpeaking(false);
+            isSpeakingRef.current = false;
+            resolve();
+          };
+
+          audio.onplay = () => {
+            setIsSpeaking(true);
+            isSpeakingRef.current = true;
+          };
+          audio.onended = handleFinish;
+          audio.onerror = handleFinish;
+
+          audio.play().catch(() => handleFinish());
+        });
+
+        setIsSpeaking(false);
+        isSpeakingRef.current = false;
+        if (isContinuousModeRef.current && !isMuted) {
+          setTimeout(() => {
+            if (isContinuousModeRef.current && !isSpeakingRef.current) {
+              startSnowVoiceListening(true);
+            }
+          }, 350);
+        }
+        return; // Pure humanized audio delivery complete
       }
 
-      // Speech finished via backend successfully
-      setIsSpeaking(false);
-      isSpeakingRef.current = false;
-      if (isContinuousModeRef.current && !isMuted) {
-        setTimeout(() => {
-          if (isContinuousModeRef.current && !isSpeakingRef.current) {
-            startSnowVoiceListening(true);
-          }
-        }, 350);
+      if (data.dispatchedToNativeLinux) {
+        // Dispatched and played natively via host sound subsystem
+        setIsSpeaking(false);
+        isSpeakingRef.current = false;
+        if (isContinuousModeRef.current && !isMuted) {
+          setTimeout(() => {
+            if (isContinuousModeRef.current && !isSpeakingRef.current) {
+              startSnowVoiceListening(true);
+            }
+          }, 350);
+        }
+        return;
       }
-      return; // Exit here if backend succeeded
     } catch (err) {
-      console.warn("[Snow Voice] Backend Neural Engine failed, falling back to Browser Web Speech API:", err);
+      console.warn("[Snow Voice] Neural Audio stream unavailable, using Web Speech fallback:", err);
     }
 
-    // 2. Fallback: Browser Web Speech API
+    // 2. Secondary Fallback: Browser Web Speech API with calm, steady, clear female prosody
     if (!("speechSynthesis" in window)) {
       setIsSpeaking(false);
       isSpeakingRef.current = false;
@@ -1193,16 +1252,18 @@ export default function App() {
         : cleaned.slice(0, 260).trim();
 
       const utterance = new SpeechSynthesisUtterance(spokenSummary);
-      utterance.rate = 1.02;
-      utterance.pitch = 1.14;
+      // Pacing: Clear, slow, and steady cadence (never rushed or high-pitched)
+      utterance.rate = 0.94;
+      utterance.pitch = 1.0;
 
       const voices = (availableVoicesRef.current && availableVoicesRef.current.length > 0)
         ? availableVoicesRef.current
         : window.speechSynthesis.getVoices();
 
+      // Top-tier humanized female voice prioritizer
       const femaleVoice = voices.find(v => 
         v.lang.startsWith("en") && (
-          /female|samantha|victoria|karen|zira|jenny|aria|sonia|ava|emma|natasha|susan|moira|tessa|stephanie|allison|fiona|veena|catherine|linda/i.test(v.name)
+          /ava|jenny|emma|aria|samantha|victoria|karen|zira|sonia|natasha|susan|moira|tessa|stephanie|allison|fiona|veena|catherine|linda/i.test(v.name)
         )
       ) || voices.find(v =>
         v.lang.startsWith("en") && (
@@ -1247,7 +1308,7 @@ export default function App() {
         handleSpeechDone();
       };
 
-      const maxSpeechMs = Math.max(3500, (spokenSummary.length * 90) + 1500);
+      const maxSpeechMs = Math.max(3500, (spokenSummary.length * 95) + 2000);
       speechWatchdogRef.current = setTimeout(() => {
         if (isSpeakingRef.current) {
           console.log("[Snow Voice] Speech watchdog auto-recovered state.");
@@ -1408,7 +1469,7 @@ export default function App() {
           }
 
           // Voice Activity Detection (VAD) - calibrated threshold for crisp speech detection
-          if (normalizedVol > 11) {
+          if (normalizedVol > 7) {
             if (!hasSpokenRef.current) {
               firstSpeechTimestampRef.current = Date.now();
             }
@@ -1417,16 +1478,17 @@ export default function App() {
           }
 
           // Adaptive conversational silence detection:
-          // 1,400ms of sustained pause after speaking (or 2,000ms if ending on a connecting thought)
-          // Maximum speaking duration: 25,000ms (25 seconds)
+          // 2,000ms pause buffer allows natural human cadence and breathing without cut-offs
+          // 2,600ms if ending on a connecting thought (and, or, but, then, so...)
+          // Maximum speaking duration: 30,000ms (30 seconds)
           if (hasSpokenRef.current && lastSpeechTimestampRef.current > 0) {
             const silentDuration = Date.now() - lastSpeechTimestampRef.current;
             const totalSpeakingDuration = firstSpeechTimestampRef.current > 0 ? (Date.now() - firstSpeechTimestampRef.current) : 0;
             const currentTranscript = accumulatedTranscriptRef.current.trim();
-            const endsWithConnector = /(?:and|or|then|but|if|because|like|with|also|to|for)\s*$/i.test(currentTranscript);
-            const silenceThreshold = endsWithConnector ? 2000 : 1400;
+            const endsWithConnector = /(?:and|or|then|but|if|because|like|with|also|to|for|so|that)\s*$/i.test(currentTranscript);
+            const silenceThreshold = endsWithConnector ? 2600 : 2000;
 
-            if (silentDuration > silenceThreshold || totalSpeakingDuration > 25000) {
+            if (silentDuration > silenceThreshold || totalSpeakingDuration > 30000) {
               hasSpokenRef.current = false;
               lastSpeechTimestampRef.current = 0;
               firstSpeechTimestampRef.current = 0;
