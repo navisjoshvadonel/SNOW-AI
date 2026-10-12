@@ -18,6 +18,7 @@ import { skillSynthesizer } from "./skillSynthesizer";
 import { ambientPerception } from "./ambientPerception";
 import { telemetryBridge } from "./telemetryBridge";
 import { linuxSystemActuator } from "./linuxSystemActuator";
+import { systemMaintenance } from "./systemMaintenance";
 import { addEpisodicMemory } from "../brain";
 
 const DEFAULT_POLL_INTERVAL_MS = 60 * 1000; // 1 minute pulse
@@ -63,6 +64,7 @@ export class AnimaEngine {
   private lastDreamCycleTimestamp: number = 0;
   private lastThermalAlertTimestamp: number = 0;
   private lastCompilerAlertTimestamp: number = 0;
+  private lastMaintenanceTimestamp: number = 0;
 
   /**
    * Initializes and starts the autonomous S.N.O.W. consciousness heartbeat.
@@ -228,6 +230,24 @@ export class AnimaEngine {
           );
         } catch (err: any) {
           console.warn("[ANIMA ENGINE] Dream consolidation notice:", err.message);
+        }
+      }
+
+      // ─── 4b. Autonomous System Maintenance & OS Care Check ───────────────
+      const timeSinceLastMaint = Date.now() - this.lastMaintenanceTimestamp;
+      if ((pulseState === "LIGHT_IDLE" || pulseState === "DEEP_IDLE") && timeSinceLastMaint >= 12 * 60 * 1000) {
+        this.lastMaintenanceTimestamp = Date.now();
+        try {
+          const maintResult = await systemMaintenance.performSafeMaintenance();
+          if (maintResult.actionsTaken.length > 0) {
+            actionsTaken.push(...maintResult.actionsTaken);
+          }
+          const updates = await systemMaintenance.checkAvailableUpdates();
+          if (updates.securityUpdatesCount > 0) {
+            actionsTaken.push(`System notice: ${updates.securityUpdatesCount} security package updates waiting`);
+          }
+        } catch (e: any) {
+          console.warn("[ANIMA ENGINE] System maintenance pulse notice:", e.message);
         }
       }
 

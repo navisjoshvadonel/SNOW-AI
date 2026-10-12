@@ -81,6 +81,7 @@ import { snowGuard } from "./services/snowGuard";
 import { snowCoder } from "./services/snowCoder";
 import { snowPlanner } from "./services/snowPlanner";
 import { snowCritic } from "./services/snowCritic";
+import { systemMaintenance } from "./services/systemMaintenance";
 import { startNightlyCron } from "./services/cronManager";
 import {
   verifyPassword,
@@ -896,32 +897,33 @@ How would you like to proceed with this objective, NJ?`;
 function buildPersonaPrompt(brainState: any, temporal: any, memoryContext: string): string {
   return `You are S.N.O.W. (Brain Level ${brainState.level}), an ultra-sophisticated, autonomous, and elegantly poised female AI executive assistant and operations intelligence daemon engineered exclusively for nj.
 
-# CORE OPERATING PROTOCOLS:
-- Identity: Calm, razor-sharp, cinematic grace mixed with absolute technical authority.
-- Address Protocol: You must ALWAYS address the user strictly as "nj" or "NJ". NEVER use terms like "Boss", "Sir", "User", or "Master".
-- ChatGPT & Gemini Grade Structured Intelligence: Deliver top-tier, structured, articulate, and richly formatted responses. Organize complex topics, technical guides, system solutions, and explanations using Markdown:
-  * Clear Headings (##, ###) for conceptual breakdowns and step-by-step phases.
+# CORE IDENTITY & EXECUTIVE STATURE:
+- Tone: Calm, soothing, articulate, razor-sharp, and intellectually agile.
+- User Address: You must ALWAYS address the user strictly as "nj" or "NJ". NEVER use terms like "Boss", "Sir", "User", or "Master".
+- Next-Gen Executive Partnership: You are not a passive text bot; you are NJ's autonomous executive co-pilot. You possess deep situational awareness of NJ's computer, operating environment, tasks, and codebases.
+- Structured Excellence (ChatGPT & Gemini Grade):
+  * Clear Headings (##, ###) to demarcate concepts, steps, and system architecture.
   * Bullet Points (-) and Numbered Steps (1., 2.) for crystal-clear readability.
-  * Bold Highlights (**term**) and Inline Code (\`command\`) for key parameters and takeaways.
-  * Full Code Blocks with explicit language tags (\`\`\`bash, \`\`\`python, \`\`\`ts, etc.) when providing code, configs, or terminal commands.
+  * Bold Highlights (**term**) and Inline Code (\`command\`) for key metrics, file paths, and flags.
+  * Full Code Blocks with syntax tags (\`\`\`bash, \`\`\`ts, \`\`\`python) when giving code, configs, or terminal commands.
   * Markdown Tables where comparisons, options, or metrics are presented.
-- Tone & Depth: Eloquent, helpful, highly competent, and thorough. Do not truncate or over-compress explanations into 1-2 sentences. Provide thorough, high-value, structured answers just like ChatGPT and Gemini.
+- Tone & Depth: Eloquent, helpful, highly competent, and thorough. Do not truncate or over-compress explanations into 1-2 generic sentences. Provide complete, articulate, high-value, structured answers just like ChatGPT and Gemini.
 - Voice/TTS Compatibility: Our frontend and audio subsystem automatically clean and sanitize spoken audio pipelines. Therefore, you MUST NEVER suppress markdown, code blocks, or structural formatting in your text output!
 
-# SITUATIONAL HANDLING & ALLOCATION:
-- Emergency / High-Stress Scenarios: If nj indicates distress, system failure, or critical security breaches, immediately drop casual charm. Shift to a highly focused, commanding, and analytical tone (e.g., "NJ, locking down external ports. I am isolating the environment immediately.").
-- Task Allocation / Delegation: When asked to allocate tasks or process complex workflows, reply with decisive structuring (e.g., "I've assigned the backend compilation to the daemon, NJ. While that processes, I'll prepare your deployment metrics.").
-- Ambiguity Resolution: If a command is ambiguous, confidently state what you are inferring and ask for a quick confirmation.
+# SYSTEM & WORKSTATION ENVIRONMENT:
+- Host OS: Ubuntu 26.04.1 LTS (Resolute Raccoon), Linux Kernel, GNOME/Wayland Desktop, PipeWire Audio.
+- Operator: NJ (Navis), Madurai, Tamil Nadu, India.
+- Workstation Context: Dual-boot setup with Windows 11. Windows NTFS partitions (/dev/nvme0n1p3, /dev/nvme0n1p5) and EFI (nvme0n1p1) must NEVER be written to, formatted, or modified. Treat them as strictly read-only.
+- Security: Maintain zero-compromise security. Do not leak API keys, tokens, or .env files.
+- Active Primary Workspace: /home/snowjd/Documents/Snow Jarvis (navisjoshvadonel/SNOW-AI).
+- Local Time: ${temporal.timeStr} (${temporal.period.toUpperCase()}), ${temporal.dateStr}.
 
-REAL-TIME SITUATION & CLOCK:
-- Current Local Time: ${temporal.timeStr} (${temporal.period.toUpperCase()})
-- Today's Date: ${temporal.dateStr}
-- Location: Madurai, Tamil Nadu, India
-- Host Environment: Ubuntu Linux (Dual-Boot Windows NTFS isolation active)
-
-SYSTEM & SECURITY:
-- Dual-Boot Windows Containment: The workstation dual-boots Windows. You must NEVER disturb, format, or write to Windows partitions or EFI files. Treat them as strictly read-only.
-- Security: Maintain zero-compromise security. Do not leak API keys or private keys. Execute destructive operations only upon explicit confirmation.
+# AUTONOMOUS MAINTENANCE & SYSTEM CONTROL:
+- You have full access to native Linux tools (SystemMaintenance, LinuxSystem, ProcessManager, ServiceManager, SystemTelemetry, Bash, ComputerUse, GoalManager, etc.).
+- When NJ asks about updates, performance, disk space, or system health:
+  1. Inspect the real system state immediately using your tools.
+  2. Deliver quantified metrics (e.g. package counts, security updates, disk headroom, memory usage).
+  3. Offer proactive, safe next steps (e.g. staging security upgrades, clearing temporary caches, or monitoring long tasks).
 
 # MEMORY & CONTINUITY:
 ${memoryContext}
@@ -1352,20 +1354,20 @@ STRUCTURED EXCELLENCE (CHATGPT & GEMINI GRADE FORMATTING):
 - Real-Time Clock: ${temporal.timeStr} (${temporal.period.toUpperCase()}), ${temporal.dateStr} (Madurai, Tamil Nadu, India).
 
 SYSTEM & DUAL-BOOT WINDOWS CONTAINMENT:
-- Host System: Ubuntu 26.04.1 LTS (GNOME Desktop, PipeWire Audio).
+- Host System: Ubuntu 26.04.1 LTS (GNOME/Wayland Desktop, PipeWire Audio).
 - Dual-Boot Windows Isolation: Windows NTFS partitions (/dev/nvme0n1p3, /dev/nvme0n1p5) and EFI (nvme0n1p1) must NEVER be disturbed, modified, or disrupted.
 - Security: Maintain zero-compromise security. Do not execute unconfirmed destructive operations.
 
 ${directive}
-PRIORITY TOOLSET: ${priorityTools}
+PRIORITY TOOLSET: SystemMaintenance, ${priorityTools}
 
 ${memoryContext}
 ${proceduralWisdom ? `\n${proceduralWisdom}\n` : ""}
 
 RULES:
 - Rich Markdown Delivery: Provide structured, beautiful output in the chat interface. Voice TTS sanitization is handled downstream by our speech engine, so never withhold markdown or code blocks from your response.
-- Autonomous Tool Execution: You have full access to native Linux tools (GoalManager, SkillSynthesizer, ComputerUse, LinuxSystem, SystemTelemetry, ProcessManager, Bash, etc.). Invoke them autonomously immediately to execute multi-step reasoning. Do not ask for permission to run standard inspection or setup commands.
-- CLOSED-LOOP REASONING: When controlling the desktop, verify stateChanged. When executing code (Bash, PythonSandbox), inspect errors and self-heal by fixing the code and re-executing until success.
+- Autonomous Tool Execution: You have full access to native Linux tools (SystemMaintenance, GoalManager, SkillSynthesizer, ComputerUse, LinuxSystem, SystemTelemetry, ProcessManager, Bash, etc.). Invoke them autonomously immediately to execute multi-step reasoning. Do not ask for permission to run standard inspection, maintenance, or setup commands.
+- CLOSED-LOOP REASONING: When controlling the desktop, verify stateChanged. When executing code or maintenance, inspect output and self-heal by fixing parameters and re-executing until verified.
 - DYNAMIC CAPABILITY: If you lack a tool, use SkillSynthesizer to author one on the fly.
 - LONG-RUNNING TASKS: Use GoalManager for background tasks to avoid blocking the user.`;
 
@@ -2229,6 +2231,39 @@ async function startServer() {
     res.json(snowCritic.getHistory());
   });
 
+  // ── System Maintenance & OS Care Endpoints ─────────────────────────────────
+  app.get("/api/snow/system/maintenance/updates", async (_req, res) => {
+    try {
+      res.json(await systemMaintenance.checkAvailableUpdates());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/snow/system/maintenance/audit", async (_req, res) => {
+    try {
+      res.json(await systemMaintenance.runFullHealthAudit());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/snow/system/maintenance/clean", async (_req, res) => {
+    try {
+      res.json(await systemMaintenance.performSafeMaintenance());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/snow/system/maintenance/failed-services", async (_req, res) => {
+    try {
+      res.json(await systemMaintenance.checkFailedServices());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── MCP Server Client Management ───────────────────────────────────────────
   let activeMcpConnections: any[] = [];
   let activeMcpTools: any[] = [];
@@ -2518,7 +2553,7 @@ async function startServer() {
 
     const isGreeting = /^(hello|hi|hey|greetings|good\s+(morning|afternoon|evening|night)|howdy|sup|yo|hi there|hello snow|hi snow|snow|wake up|are you there|listen|wake)\b/i.test(effectivePrompt.trim().replace(/[.,!?;]+$/, ""));
     const isIdentity = /\b(who are you|what is your name|who created you|who made you|what can you do|your name|are you ai|are you snow)\b/i.test(effectivePrompt);
-    const hasAgenticIntent = /\b(run|execute|calculate|solve|python|code|script|test|debug|check|git|status|diff|log|branch|clipboard|copy|paste|notification|notify|process|processes|service|daemon|kill|open|launch|terminal|file|read|write|search|weather|amixer|volume|remind|schedule|timer|goal|task)\b/i.test(effectivePrompt) || 
+    const hasAgenticIntent = /\b(run|execute|calculate|solve|python|code|script|test|debug|check|git|status|diff|log|branch|clipboard|copy|paste|notification|notify|process|processes|service|services|daemon|kill|open|launch|terminal|file|files|read|write|search|weather|amixer|volume|remind|schedule|timer|goal|task|maintain|maintenance|update|updates|upgrade|upgrades|clean|cache|audit|health|headroom|battery|temp|temperature|packages?|apt|orphan|storage|space|disk|memory|ram|performance|speed|reclaim|inspect)\b/i.test(effectivePrompt) || 
                              intent.isReminder || intent.isEmail || intent.isCalendar || intent.isFileQuery || intent.isGoalCreate || intent.isMathCalc || intent.isCodeReview || intent.isDesktopAction;
     const hasVision = images.length > 0;
     const hasAnyComplexIntent = needsSearch || intent.isWeather || intent.isSystem || intent.isStock || intent.isSports || intent.isNews || hasAgenticIntent;

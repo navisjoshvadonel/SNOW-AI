@@ -49,6 +49,7 @@ import { snowGuard } from "../services/snowGuard.js";
 import { snowCoder } from "../services/snowCoder.js";
 import { snowPlanner } from "../services/snowPlanner.js";
 import { snowCritic } from "../services/snowCritic.js";
+import { systemMaintenance } from "../services/systemMaintenance.js";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -2218,6 +2219,62 @@ export const CriticTool: ToolDefinition<CriticInput> = {
   },
 };
 
+// ─── SystemMaintenanceTool ──────────────────────────────────────────────────
+
+type MaintenanceInput = {
+  action: "check_updates" | "health_audit" | "clean_cache" | "failed_services" | "top_processes";
+  limit?: number;
+};
+
+export const SystemMaintenanceTool: ToolDefinition<MaintenanceInput> = {
+  name: "SystemMaintenance",
+  description:
+    "Autonomous Ubuntu Linux System Care & Maintenance Tool. Inspects upgradable apt packages " +
+    "and security patches, checks failed systemd services, audits CPU/RAM/Disk headroom, " +
+    "identifies runaway processes, and safely reclaims stale temporary/journal caches.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["check_updates", "health_audit", "clean_cache", "failed_services", "top_processes"],
+        description: "Maintenance operation to perform",
+      },
+      limit: { type: "number", description: "Process limit count (for top_processes)" },
+    },
+    required: ["action"],
+  },
+
+  async *execute(input, _ctx) {
+    yield { type: "progress" as const, data: null, label: `SystemMaintenance: ${input.action}` };
+
+    switch (input.action) {
+      case "check_updates": {
+        const updates = await systemMaintenance.checkAvailableUpdates();
+        return { content: JSON.stringify(updates, null, 2), isError: false };
+      }
+      case "health_audit": {
+        const audit = await systemMaintenance.runFullHealthAudit();
+        return { content: JSON.stringify(audit, null, 2), isError: false };
+      }
+      case "clean_cache": {
+        const result = await systemMaintenance.performSafeMaintenance();
+        return { content: JSON.stringify(result, null, 2), isError: false };
+      }
+      case "failed_services": {
+        const failed = await systemMaintenance.checkFailedServices();
+        return { content: JSON.stringify(failed, null, 2), isError: false };
+      }
+      case "top_processes": {
+        const procs = await systemMaintenance.getTopProcesses(input.limit || 5);
+        return { content: JSON.stringify(procs, null, 2), isError: false };
+      }
+      default:
+        return { content: `Unknown action: ${(input as any).action}`, isError: true };
+    }
+  },
+};
+
 export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>> {
   const registry = new Map<string, ToolDefinition<unknown>>();
   for (const tool of [
@@ -2227,7 +2284,7 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
     PythonSandboxTool, ClipboardTool, NotificationTool, ProcessManagerTool,
     ServiceManagerTool, GitManagerTool, ComputerUseTool, LinuxSystemTool,
     SkillSynthesizerTool, GoalManagerTool, MemoryConsolidationTool,
-    SecurityGuardTool, CoderTool, PlannerTool, CriticTool
+    SecurityGuardTool, CoderTool, PlannerTool, CriticTool, SystemMaintenanceTool
   ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }
