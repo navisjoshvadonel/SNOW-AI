@@ -79,6 +79,7 @@ import { dreamCycle } from "./services/dreamCycle";
 import { animaEngine } from "./services/animaEngine";
 import { snowGuard } from "./services/snowGuard";
 import { snowCoder } from "./services/snowCoder";
+import { snowPlanner } from "./services/snowPlanner";
 import { startNightlyCron } from "./services/cronManager";
 import {
   verifyPassword,
@@ -2150,6 +2151,54 @@ async function startServer() {
     const snippet = snowCoder.getSnippet(req.params.id);
     if (!snippet) return res.status(404).json({ error: "Snippet not found" });
     res.json(snippet);
+  });
+
+  // ── Snow-Planner Specialist Agent Endpoints ────────────────────────────────
+  app.post("/api/snow/planner/plan", async (req, res) => {
+    try {
+      const { objective, goalId, context } = req.body;
+      if (!objective) return res.status(400).json({ error: "Objective is required" });
+      const plan = await snowPlanner.createPlan(objective, goalId, context);
+      res.json(plan);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get("/api/snow/planner/plans", (_req, res) => {
+    res.json(snowPlanner.listPlans());
+  });
+
+  app.get("/api/snow/planner/plan/:id", (req, res) => {
+    const plan = snowPlanner.getPlan(req.params.id);
+    if (!plan) return res.status(404).json({ error: "Plan not found" });
+    res.json(plan);
+  });
+
+  app.post("/api/snow/planner/milestone", (req, res) => {
+    try {
+      const { planId, milestoneId, status, resultSummary } = req.body;
+      const updated = snowPlanner.updateMilestone(planId, milestoneId, status, resultSummary);
+      if (!updated) return res.status(404).json({ error: "Plan or milestone not found" });
+      res.json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post("/api/snow/planner/replan", async (req, res) => {
+    try {
+      const { planId, failedMilestoneId, errorDiagnostic } = req.body;
+      const replanned = await snowPlanner.replan({
+        planId,
+        failedMilestoneId,
+        errorDiagnostic: errorDiagnostic || "Milestone failure",
+      });
+      if (!replanned) return res.status(404).json({ error: "Plan or milestone not found" });
+      res.json(replanned);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
   });
 
   // ── MCP Server Client Management ───────────────────────────────────────────

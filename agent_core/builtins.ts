@@ -47,6 +47,7 @@ import {
 import { dreamCycle } from "../services/dreamCycle.js";
 import { snowGuard } from "../services/snowGuard.js";
 import { snowCoder } from "../services/snowCoder.js";
+import { snowPlanner } from "../services/snowPlanner.js";
 
 const execAsync = promisify(exec);
 const execFileAsync = promisify(execFile);
@@ -2073,6 +2074,84 @@ export const CoderTool: ToolDefinition<CoderInput> = {
   },
 };
 
+// ─── PlannerTool ──────────────────────────────────────────────────────────────
+
+type PlannerInput = {
+  action: "create_plan" | "get_plan" | "list_plans" | "update_milestone" | "replan";
+  objective?: string;
+  plan_id?: string;
+  milestone_id?: string;
+  status?: "pending" | "ready" | "running" | "completed" | "failed" | "skipped";
+  result_summary?: string;
+  error_diagnostic?: string;
+};
+
+export const PlannerTool: ToolDefinition<PlannerInput> = {
+  name: "Planner",
+  description:
+    "Snow-Planner Hierarchical Goal Decomposition & DAG Milestone Tool. Formulate execution " +
+    "DAGs with specialist routing (Desk, Coder, Guard, Memory, Voice), verify milestone criteria, " +
+    "and synthesize dynamic contingencies on failure.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      action: { type: "string", enum: ["create_plan", "get_plan", "list_plans", "update_milestone", "replan"] },
+      objective: { type: "string", description: "Objective or intent to decompose (for create_plan)" },
+      plan_id: { type: "string", description: "Plan identifier" },
+      milestone_id: { type: "string", description: "Milestone identifier" },
+      status: { type: "string", enum: ["pending", "ready", "running", "completed", "failed", "skipped"], description: "Milestone status update" },
+      result_summary: { type: "string", description: "Outcome summary of milestone execution" },
+      error_diagnostic: { type: "string", description: "Failure diagnostic error for replanning" },
+    },
+    required: ["action"],
+  },
+
+  async *execute(input, _ctx) {
+    yield { type: "progress" as const, data: null, label: `Planner: ${input.action}` };
+
+    switch (input.action) {
+      case "create_plan": {
+        if (!input.objective) {
+          return { content: "Error: objective is required for create_plan", isError: true };
+        }
+        const plan = await snowPlanner.createPlan(input.objective);
+        return { content: JSON.stringify(plan, null, 2), isError: false };
+      }
+      case "get_plan": {
+        if (!input.plan_id) {
+          return { content: "Error: plan_id is required", isError: true };
+        }
+        const plan = snowPlanner.getPlan(input.plan_id);
+        return { content: JSON.stringify(plan, null, 2), isError: !plan };
+      }
+      case "list_plans": {
+        const plans = snowPlanner.listPlans();
+        return { content: JSON.stringify(plans, null, 2), isError: false };
+      }
+      case "update_milestone": {
+        if (!input.plan_id || !input.milestone_id || !input.status) {
+          return { content: "Error: plan_id, milestone_id, and status are required", isError: true };
+        }
+        const updated = snowPlanner.updateMilestone(input.plan_id, input.milestone_id, input.status, input.result_summary);
+        return { content: JSON.stringify(updated, null, 2), isError: !updated };
+      }
+      case "replan": {
+        if (!input.plan_id || !input.milestone_id) {
+          return { content: "Error: plan_id and milestone_id are required for replan", isError: true };
+        }
+        const replanned = await snowPlanner.replan({
+          planId: input.plan_id,
+          failedMilestoneId: input.milestone_id,
+          errorDiagnostic: input.error_diagnostic || "Milestone execution failed",
+        });
+        return { content: JSON.stringify(replanned, null, 2), isError: !replanned };
+      }
+      default:
+        return { content: `Unknown action: ${(input as any).action}`, isError: true };
+    }
+  },
+};
+
 export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>> {
   const registry = new Map<string, ToolDefinition<unknown>>();
   for (const tool of [
@@ -2082,7 +2161,7 @@ export function createDefaultToolRegistry(): Map<string, ToolDefinition<unknown>
     PythonSandboxTool, ClipboardTool, NotificationTool, ProcessManagerTool,
     ServiceManagerTool, GitManagerTool, ComputerUseTool, LinuxSystemTool,
     SkillSynthesizerTool, GoalManagerTool, MemoryConsolidationTool,
-    SecurityGuardTool, CoderTool
+    SecurityGuardTool, CoderTool, PlannerTool
   ]) {
     registry.set(tool.name, tool as ToolDefinition<unknown>);
   }

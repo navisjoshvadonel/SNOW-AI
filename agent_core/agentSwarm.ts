@@ -6,8 +6,9 @@
 import { TaskManager } from "./TaskManager.js";
 import type { TaskId, TaskState } from "./types.js";
 import { snowGuard } from "../services/snowGuard.js";
+import { snowPlanner } from "../services/snowPlanner.js";
 
-export type SpecialistRole = "architect" | "executor" | "sentinel" | "guard" | "telemetry" | "desk" | "coder";
+export type SpecialistRole = "architect" | "planner" | "executor" | "sentinel" | "guard" | "telemetry" | "desk" | "coder";
 
 export interface SwarmMember {
   role: SpecialistRole;
@@ -35,10 +36,15 @@ export class AgentSwarmCoordinator {
   }
 
   private initMembers(): void {
+    this.members.set("planner", {
+      role: "planner",
+      name: "Snow-Planner",
+      directive: "Hierarchical goal decomposition, DAG dependency formulation, multi-agent milestone dispatching, and dynamic contingency re-planning.",
+    });
     this.members.set("architect", {
       role: "architect",
-      name: "Snow-Architect",
-      directive: "Deconstruct system objectives into structured milestone plans, dependencies, and verification criteria.",
+      name: "Snow-Planner",
+      directive: "Hierarchical goal decomposition, DAG dependency formulation, multi-agent milestone dispatching, and dynamic contingency re-planning.",
     });
     this.members.set("executor", {
       role: "executor",
@@ -82,15 +88,17 @@ export class AgentSwarmCoordinator {
   public async coordinateTask(objective: string): Promise<SwarmTaskResult> {
     const timestamp = new Date().toISOString();
 
-    // 1. Architect Phase: Generate Plan
-    const architectTask = await this.taskManager.create("local_agent", `Architect Plan: ${objective}`, {
-      milestones: [
-        { name: "Deconstruct objective", status: "completed", verification: "Plan synthesized" },
-        { name: "Establish dependencies", status: "completed", verification: "Dependencies identified" },
-      ]
+    // 1. Planner Phase: Formulate DAG Milestone Plan
+    const plan = await snowPlanner.createPlan(objective);
+    const architectTask = await this.taskManager.create("local_agent", `Planner Plan: ${objective}`, {
+      milestones: plan.milestones.map((m) => ({
+        name: m.title,
+        status: m.status === "ready" ? "running" : "pending",
+        verification: m.verificationCriteria,
+      })),
     });
 
-    const planSummary = `Architectural Blueprint formulated for objective: "${objective}".\n- Decomposed into 3 verification milestones.\n- Risk perimeter: Low.\n- Strategy: Incremental verification pass.`;
+    const planSummary = `Strategic Blueprint formulated by Snow-Planner for: "${objective}".\n- Strategy: ${plan.reasoning}\n- Decomposed into ${plan.milestones.length} verification milestone(s).\n- Risk perimeter: ${plan.riskPerimeter.passed ? "Nominal" : "Restricted"}.`;
 
     // 2. Sentinel / Guard Pre-Audit Phase
     const sentinelAudit = snowGuard.auditObjective(objective);

@@ -27,6 +27,9 @@ import { runPythonCode } from "../python_sandbox";
 import { reflexionEngine } from "./reflexionEngine";
 import { skillSynthesizer } from "./skillSynthesizer";
 import { linuxSystemActuator } from "./linuxSystemActuator";
+import { snowPlanner } from "./snowPlanner";
+import { snowCoder } from "./snowCoder";
+import { snowGuard } from "./snowGuard";
 
 const execAsync = promisify(exec);
 
@@ -147,158 +150,22 @@ class GoalEngineService {
   }
 
   /**
-   * Decomposes a high-level goal into structured subtasks using Gemini with heuristic fallback
+   * Decomposes a high-level goal into structured subtasks using Snow-Planner
    */
   private async decomposeGoal(goal: AutonomousGoal): Promise<void> {
-    const apiKey = process.env.GEMINI_API_KEY || "";
     updateGoalStatus(goal.id, "planning");
-    logGoalEvent(goal.id, "Deconstructing objective into structured subtasks...");
+    logGoalEvent(goal.id, "Snow-Planner formulating milestone DAG...");
 
-    let subtasksCreated: Array<{
-      stepOrder: number;
-      title: string;
-      assignedTool: string;
-      inputPayload: any;
-    }> = [];
-
-    if (apiKey) {
-      try {
-        const ai = new GoogleGenAI({ apiKey });
-        const prompt = `You are SNOW's Advanced Autonomous Executive Goal Architect.
-You operate with full agency. Your task is to decompose a high-level system objective into a comprehensive, highly robust sequence of atomic subtasks. 
-Think step-by-step. Anticipate failures. If a task involves coding, system config, or external tools, include verification steps.
-
-Available Execution Tools (CRITICAL: Use exact names):
-- "LinuxSystem": OS Actuation {"action": "set_volume" | "toggle_mute" | "power_profile" | "media" | "focus_window" | "close_window" | "notify" | "launch" | "state", "title": "...", "app": "...", "volume": 50, ...}
-- "FileOperation": Safe File I/O {"action": "read" | "write" | "append" | "list" | "exists", "path": "...", "content": "..."}
-- "Bash": Unrestricted Shell Command Execution {"command": "..."}. Useful for deep system interaction, git, npm, docker, etc.
-- "PythonSandbox": Safe Data/Math Python execution {"code": "..."}
-- "ComputerUse": UI Desktop automation {"action": "status" | "click" | "hotkey" | "launch", "x": 0, "y": 0, "keys": "..."}
-- "SkillSynthesizer": Synthesize new capability {"action": "synthesize" | "execute", "name": "...", "description": "..."}
-
-OBJECTIVE:
-Title: "${goal.title}"
-Description: "${goal.description}"
-
-CRITICAL RULES:
-1. Always output valid JSON only. NO MARKDOWN WRAPPING. NO \`\`\`json.
-2. Provide a "reasoning" field first.
-3. Subtasks must be highly specific, safe, and verifiable.
-4. Ensure the last subtask validates the outcome.
-
-Format:
-{
-  "reasoning": "Step-by-step logic explaining the decomposition strategy...",
-  "subtasks": [
-    {
-      "stepOrder": 1,
-      "title": "Clear, verifiable action",
-      "assignedTool": "LinuxSystem | FileOperation | Bash | PythonSandbox | ComputerUse | SkillSynthesizer",
-      "inputPayload": { ... }
-    }
-  ]
-}`;
-
-        // Attempt Pro model for deeper reasoning, fallback to Flash
-        let res;
-        try {
-          res = await ai.models.generateContent({
-            model: "gemini-2.5-pro",
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            config: { responseMimeType: "application/json" }
-          });
-        } catch (e) {
-          console.warn("[GoalEngine] Pro model unavailable/failed, falling back to Flash...", e);
-          res = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: [{ role: "user", parts: [{ text: prompt }] }],
-            config: { responseMimeType: "application/json" }
-          });
-        }
-
-        const raw = res.text?.trim() || "";
-        const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}");
-        if (Array.isArray(parsed.subtasks) && parsed.subtasks.length > 0) {
-          subtasksCreated = parsed.subtasks;
-          console.log(`[GoalEngine] AI Reasoning: ${parsed.reasoning || 'No reasoning provided'}`);
-        }
-      } catch (err: any) {
-        console.warn("[GoalEngine] AI decomposition notice, falling back to heuristic planner:", err.message);
-      }
-    }
-
-    // Heuristic Fallback Planner if AI decomposition failed or offline
-    if (subtasksCreated.length === 0) {
-      const titleLower = goal.title.toLowerCase();
-      const descLower = (goal.description || "").toLowerCase();
-
-      if (titleLower.includes("volume") || titleLower.includes("audio") || titleLower.includes("mute") || titleLower.includes("sound")) {
-        const volMatch = titleLower.match(/(\d+)\s*%/);
-        const targetVol = volMatch ? parseInt(volMatch[1], 10) : 60;
-        subtasksCreated = [
-          {
-            stepOrder: 1,
-            title: `Adjust audio volume to ${targetVol}%`,
-            assignedTool: "LinuxSystem",
-            inputPayload: { action: "set_volume", volume: targetVol }
-          },
-          {
-            stepOrder: 2,
-            title: "Verify audio status",
-            assignedTool: "LinuxSystem",
-            inputPayload: { action: "get_audio" }
-          }
-        ];
-      } else if (titleLower.includes("power") || titleLower.includes("performance") || titleLower.includes("battery")) {
-        const profile = titleLower.includes("performance") ? "performance" : titleLower.includes("power") || titleLower.includes("battery") ? "power-saver" : "balanced";
-        subtasksCreated = [
-          {
-            stepOrder: 1,
-            title: `Set system power profile to ${profile}`,
-            assignedTool: "LinuxSystem",
-            inputPayload: { action: "power_profile", profile }
-          }
-        ];
-      } else if (titleLower.includes("media") || titleLower.includes("play") || titleLower.includes("pause") || titleLower.includes("music")) {
-        const action = titleLower.includes("next") ? "next" : titleLower.includes("prev") ? "previous" : "play-pause";
-        subtasksCreated = [
-          {
-            stepOrder: 1,
-            title: `Send MPRIS media directive: ${action}`,
-            assignedTool: "LinuxSystem",
-            inputPayload: { action: "media", mediaAction: action }
-          }
-        ];
-      } else if (titleLower.includes("python") || descLower.includes("python") || titleLower.includes("calculate") || titleLower.includes("compute")) {
-        subtasksCreated = [
-          {
-            stepOrder: 1,
-            title: `Execute compute routine for "${goal.title}"`,
-            assignedTool: "PythonSandbox",
-            inputPayload: { code: `# Compute routine for ${goal.title}\nprint("Executed computational goal verification successfully")` }
-          }
-        ];
-      } else {
-        // Generic multi-step verification plan
-        subtasksCreated = [
-          {
-            stepOrder: 1,
-            title: `Inspect operational environment for "${goal.title}"`,
-            assignedTool: "LinuxSystem",
-            inputPayload: { action: "state" }
-          },
-          {
-            stepOrder: 2,
-            title: `Execute system check for "${goal.title}"`,
-            assignedTool: "Bash",
-            inputPayload: { command: "echo 'Autonomous environmental verification complete.'" }
-          }
-        ];
-      }
-    }
+    const plan = await snowPlanner.createPlan(goal.title, goal.id, { description: goal.description });
+    const subtasksCreated = plan.milestones.map((m) => ({
+      stepOrder: m.stepOrder,
+      title: m.title,
+      assignedTool: m.assignedTool,
+      inputPayload: m.inputPayload,
+    }));
 
     addGoalSubtasks(goal.id, subtasksCreated);
-    console.log(`[GoalEngine] 📋 Goal "${goal.title}" decomposed into ${subtasksCreated.length} subtask(s).`);
+    console.log(`[GoalEngine] 📋 Goal "${goal.title}" decomposed into ${subtasksCreated.length} milestone subtask(s) via Snow-Planner.`);
   }
 
   /**
@@ -447,7 +314,30 @@ Format:
           success = runRes.success;
         }
 
-      // ── 7. Fallback ──
+      // ── 7. Coder Specialist Execution ──
+      } else if (subtask.assignedTool === "Coder") {
+        const res = await snowCoder.execute({
+          code: payload.code || "",
+          language: payload.language || "python",
+          autoFix: Boolean(payload.auto_fix ?? true),
+          timeoutMs: payload.timeout_ms || 10000,
+        });
+        resultSummary = res.stdout || res.stderr || "Code executed.";
+        success = res.success;
+
+      // ── 8. Security Guard Execution ──
+      } else if (subtask.assignedTool === "SecurityGuard") {
+        if (payload.action === "audit_command") {
+          const audit = snowGuard.auditCommand(payload.command || "");
+          resultSummary = audit.allowed ? "Command permitted" : (audit.violation || "Blocked");
+          success = audit.allowed;
+        } else {
+          const status = snowGuard.getSecurityStatus();
+          resultSummary = `Security posture: ${status.posture}, active rules: ${status.activeRulesCount}`;
+          success = true;
+        }
+
+      // ── 9. Fallback ──
       } else {
         const { stdout } = await execAsync("echo 'Subtask executed'", { timeout: 5000 });
         resultSummary = stdout.trim();
