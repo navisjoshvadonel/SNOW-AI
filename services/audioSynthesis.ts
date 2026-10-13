@@ -12,7 +12,9 @@ import { exec, spawn } from "child_process";
 import { promisify } from "util";
 import { tmpdir } from "os";
 import { join } from "path";
-import { unlink, access, readFile } from "fs/promises";
+import { createHash } from "crypto";
+import { mkdir, readFile, unlink, access } from "fs/promises";
+import { existsSync, mkdirSync } from "fs";
 import { voiceDuplex } from "./voiceDuplex";
 
 const execAsync = promisify(exec);
@@ -28,9 +30,15 @@ export interface SynthesizedAudioResult {
   audioBase64?: string;
   mimeType?: string;
   dispatchedToNativeLinux: boolean;
-  engine: "edge-tts+gst" | "edge-tts+aplay" | "edge-tts+mp3" | "spd-say" | "piper+gst" | "piper+aplay" | "none";
+  engine: "edge-tts+gst" | "edge-tts+aplay" | "edge-tts+mp3" | "spd-say" | "piper+gst" | "piper+aplay" | "cached" | "none";
+  cached?: boolean;
   timestamp: string;
 }
+
+const CACHE_DIR = join(process.cwd(), "data", "tts_cache");
+try {
+  if (!existsSync(CACHE_DIR)) mkdirSync(CACHE_DIR, { recursive: true });
+} catch {}
 
 // ─── Utility: spawn a child process and wait for exit ─────────────────────────
 function spawnAsync(cmd: string, args: string[]): Promise<void> {
@@ -105,11 +113,13 @@ let _activePlayPid: number | null = null;
 
 class AudioSynthesisService {
   /**
-   * Synthesize audio with humanized, clear, slow and steady female neural persona.
+   * Synthesize audio with humanized, clear, slow and steady female neural persona (Ava).
+   * Supports persistent disk caching for zero-latency repeated phrases.
    */
   public async synthesize(
     text: string,
-    urgency: AudioUrgency = "calm"
+    urgency: AudioUrgency = "calm",
+    options?: { nativePlayback?: boolean }
   ): Promise<SynthesizedAudioResult> {
     // 1. Sanitize text for speech
     const cleanSpoken = text
@@ -167,11 +177,39 @@ class AudioSynthesisService {
     let dispatched = false;
     let audioBase64: string | undefined = undefined;
     let engine: SynthesizedAudioResult["engine"] = "none";
+    let isCached = false;
     const preferLocal = process.env.USE_LOCAL_FAST_PATH !== "false";
+    const voice = process.env.SNOW_TTS_VOICE || "en-US-AvaNeural";
+    const allowNativePlayback = options?.nativePlayback === true;
 
     try {
-      // 5a. Check Piper TTS (if locally preloaded with onnx model)
-      if (preferLocal && await hasPiper()) {
+      // 5a. Persistent Disk Cache Check (Zero-Latency Hit)
+      const cacheKey = createHash("sha256").update(`${voice}:${rateStr}:${pitchStr}:${cleanSpoken}`).digest("hex");
+      const cachedFilePath = join(CACHE_DIR, `${cacheKey}.mp3`);
+      
+      try {
+        if (existsSync(cachedFilePath)) {
+          const buf = await readFile(cachedFilePath);
+          audioBase64 = buf.toString("base64");
+          dispatched = true;
+          isCached = true;
+          engine = "cached";
+
+          if (allowNativePlayback && await hasGstPlay()) {
+            const child = spawn("gst-play-1.0", ["--quiet", cachedFilePath], { stdio: "ignore" });
+            _activePlayPid = child.pid ?? null;
+            await new Promise<void>((resolve) => {
+              child.on("close", () => resolve());
+              child.on("error", () => resolve());
+            });
+            _activePlayPid = null;
+            engine = "edge-tts+gst";
+          }
+        }
+      } catch {}
+
+      // 5b. Local Piper TTS (if locally preloaded with onnx model)
+      if (!dispatched && preferLocal && await hasPiper()) {
         const tmpFile = join(tmpdir(), `snow_tts_${Date.now()}.wav`);
         _activeTmpFile = tmpFile;
         const modelPath = process.env.PIPER_MODEL_PATH || join(process.cwd(), "data", "piper_models", "en_US-lessac-medium.onnx");
@@ -179,7 +217,7 @@ class AudioSynthesisService {
         try {
           await execAsync(
             `echo ${JSON.stringify(cleanSpoken)} | piper --model "${modelPath}" --output_file "${tmpFile}" 2>/dev/null`,
-            { timeout: 15_000 }
+            { timeout: 10_000 }
           );
 
           try {
@@ -187,18 +225,22 @@ class AudioSynthesisService {
             audioBase64 = buf.toString("base64");
           } catch {}
 
-          if (await hasGstPlay()) {
-            const child = spawn("gst-play-1.0", ["--quiet", tmpFile], { stdio: "ignore" });
-            _activePlayPid = child.pid ?? null;
-            await new Promise<void>((resolve) => {
-              child.on("close", () => resolve());
-              child.on("error", () => resolve());
-            });
-            _activePlayPid = null;
-            engine = "piper+gst";
+          if (allowNativePlayback) {
+            if (await hasGstPlay()) {
+              const child = spawn("gst-play-1.0", ["--quiet", tmpFile], { stdio: "ignore" });
+              _activePlayPid = child.pid ?? null;
+              await new Promise<void>((resolve) => {
+                child.on("close", () => resolve());
+                child.on("error", () => resolve());
+              });
+              _activePlayPid = null;
+              engine = "piper+gst";
+            } else {
+              await execAsync(`aplay -q "${tmpFile}" 2>/dev/null`, { timeout: 15_000 });
+              engine = "piper+aplay";
+            }
           } else {
-            await execAsync(`aplay -q "${tmpFile}" 2>/dev/null`, { timeout: 30_000 });
-            engine = "piper+aplay";
+            engine = "piper+gst";
           }
           dispatched = true;
         } catch (err) {
@@ -209,27 +251,31 @@ class AudioSynthesisService {
         }
       }
 
-      // 5b. High-Fidelity Humanized Microsoft Neural Voice (Ava / Jenny / Emma)
+      // 5c. High-Fidelity Humanized Microsoft Neural Voice (Ava / Jenny / Emma)
       const edgeCmd = await getEdgeTtsCmd();
       if (!dispatched && edgeCmd) {
         const tmpFile = join(tmpdir(), `snow_tts_${Date.now()}.mp3`);
         _activeTmpFile = tmpFile;
         try {
-          // Default: en-US-AvaNeural (Expressive, Caring, Pleasant, Natural Human Cadence)
-          const voice = process.env.SNOW_TTS_VOICE || "en-US-AvaNeural";
           await execAsync(
             `"${edgeCmd}" --voice "${voice}" --rate "${rateStr}" --pitch "${pitchStr}" --write-media "${tmpFile}" --text ${JSON.stringify(cleanSpoken)} 2>/dev/null`,
-            { timeout: 20_000 }
+            { timeout: 8_000 }
           );
 
           // Read generated mp3 into base64 for browser HTML5 Audio playback
           try {
             const buf = await readFile(tmpFile);
             audioBase64 = buf.toString("base64");
+
+            // Persist to disk cache for future instant responses
+            try {
+              const { writeFile } = await import("fs/promises");
+              await writeFile(cachedFilePath, buf);
+            } catch {}
           } catch {}
 
-          if (await hasGstPlay()) {
-            // Play through native Linux sound subsystem
+          if (allowNativePlayback && await hasGstPlay()) {
+            // Play through native Linux sound subsystem only when requested
             const child = spawn("gst-play-1.0", ["--quiet", tmpFile], { stdio: "ignore" });
             _activePlayPid = child.pid ?? null;
             await new Promise<void>((resolve) => {
@@ -251,19 +297,19 @@ class AudioSynthesisService {
         }
       }
 
-      // 5c. Fallback: spd-say with calm steady parameters
-      if (!dispatched) {
+      // 5d. Fallback: spd-say with calm steady parameters (only if native playback requested)
+      if (!dispatched && allowNativePlayback) {
         try {
           const escaped = cleanSpoken.replace(/"/g, '\\"').replace(/[\r\n]+/g, " ");
           await execAsync(`spd-say -w -t female1 -p 0 -r -10 "${escaped}" 2>/dev/null`, {
-            timeout: 30_000,
+            timeout: 10_000,
           });
           dispatched = true;
           engine = "spd-say";
-        } catch {
-          // Silent — no TTS engine available
-        }
+        } catch {}
       }
+    } catch {
+      // Graceful fallback - no TTS engine available
     } finally {
       voiceDuplex.finishSpeaking();
     }

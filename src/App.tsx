@@ -1149,11 +1149,29 @@ export default function App() {
       return;
     }
 
+    // Adaptive conversational speech extraction:
+    // For vocal delivery, extract top 1-3 articulate, executive sentences (max ~360 chars)
+    // so Ava speaks punchy, immediate answers without multi-minute monologue,
+    // while the full comprehensive markdown/code remains visible on screen.
+    let spokenPayload = cleaned;
+    if (cleaned.length > 320) {
+      const sentences = cleaned.match(/[^.!?]+[.!?]+/g);
+      if (sentences && sentences.length > 0) {
+        spokenPayload = sentences.slice(0, 3).join(" ").trim();
+        if (spokenPayload.length > 380) {
+          spokenPayload = spokenPayload.slice(0, 380).replace(/\s+\S*$/, "") + ".";
+        }
+      } else {
+        spokenPayload = cleaned.slice(0, 320).replace(/\s+\S*$/, "") + ".";
+      }
+    }
+
     // Stop ongoing audio/speech
     if (activeHtmlAudioRef.current) {
       try {
         activeHtmlAudioRef.current.pause();
         activeHtmlAudioRef.current.currentTime = 0;
+        activeHtmlAudioRef.current.src = "";
       } catch {}
       activeHtmlAudioRef.current = null;
     }
@@ -1166,12 +1184,18 @@ export default function App() {
     isSpeakingRef.current = true;
 
     try {
-      // 1. Primary: S.N.O.W. High-Fidelity Humanized Neural Engine (edge-tts Ava/Jenny)
+      // 1. Primary: S.N.O.W. High-Fidelity Humanized Neural Engine (edge-tts Ava)
+      // Fast 3.5s timeout: If network fluctuates or edge-tts is delayed, fail over to Web Speech
+      const abortCtrl = new AbortController();
+      const abortTimer = setTimeout(() => abortCtrl.abort(), 3500);
+
       const res = await fetch("/api/snow/tts/synthesize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: cleaned, urgency: "calm" })
+        body: JSON.stringify({ text: spokenPayload, urgency: "calm" }),
+        signal: abortCtrl.signal
       });
+      clearTimeout(abortTimer);
 
       if (!res.ok) throw new Error("Backend TTS unavailable");
       
@@ -1222,7 +1246,6 @@ export default function App() {
       }
 
       if (data.dispatchedToNativeLinux) {
-        // Dispatched and played natively via host sound subsystem
         setIsSpeaking(false);
         isSpeakingRef.current = false;
         if (isContinuousModeRef.current && !isMuted) {
@@ -1235,7 +1258,7 @@ export default function App() {
         return;
       }
     } catch (err) {
-      console.warn("[Snow Voice] Neural Audio stream unavailable, using Web Speech fallback:", err);
+      console.warn("[Snow Voice] Neural Audio stream timed out or unavailable, using Web Speech fallback:", err);
     }
 
     // 2. Secondary Fallback: Browser Web Speech API with calm, steady, clear female prosody
@@ -1615,6 +1638,11 @@ export default function App() {
           ).trim();
 
           if (activeSpeech) {
+            // Immediate verbal barge-in interruption (<50ms):
+            if (isSpeakingRef.current) {
+              stopSnowSpeech(true);
+            }
+
             setInputText(activeSpeech);
             hasSpokenRef.current = true;
             lastSpeechTimestampRef.current = Date.now();

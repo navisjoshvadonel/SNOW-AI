@@ -1837,16 +1837,17 @@ async function startServer() {
 
   // ── S.N.O.W. Core Endpoints ──────────────────────────────────────────
   // 1. Voice Duplex & Barge-In
-  app.post("/api/snow/voice/barge-in", (_req, res) => {
+  app.post("/api/snow/voice/barge-in", async (_req, res) => {
+    await audioSynthesis.cancelSpeech();
     res.json(voiceDuplex.bargeIn());
   });
   app.get("/api/snow/voice/state", (_req, res) => {
     res.json({ state: voiceDuplex.getState(), activeSession: voiceDuplex.getActiveSession() });
   });
   app.post("/api/snow/tts/synthesize", async (req, res) => {
-    const { text, urgency } = req.body;
+    const { text, urgency, nativePlayback } = req.body;
     if (!text) return res.status(400).json({ error: "Missing text" });
-    const result = await audioSynthesis.synthesize(text, urgency);
+    const result = await audioSynthesis.synthesize(text, urgency, { nativePlayback: nativePlayback === true });
     res.json(result);
   });
   app.post("/api/snow/tts/cancel", async (_req, res) => {
