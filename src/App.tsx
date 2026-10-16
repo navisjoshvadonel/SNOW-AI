@@ -9,7 +9,7 @@ import {
   Keyboard, BarChart3, Play, Pause, X,
   CloudLightning, CloudFog, SunMedium, Moon, Wind,
   FolderOpen, FileText, FileCode, Paperclip, Upload, FilePlus,
-  Volume2, VolumeX, ShieldCheck, Compass, Radio, Lock
+  Volume2, VolumeX, ShieldCheck, Compass, Radio, Lock, Check
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import NetworkGraph from "./components/NetworkGraph";
@@ -398,9 +398,69 @@ export default function App() {
   const availableVoicesRef = useRef<SpeechSynthesisVoice[]>([]);
   const lastSpacePressRef = useRef<number>(0);
   const hasTriggeredWakeRef = useRef<boolean>(false);
+  const ambientNoiseFloorRef = useRef<number>(10);
+  const isThinkingCuePlayingRef = useRef<boolean>(false);
+  const isChatFetchingRef = useRef<boolean>(false);
   const [showConfetti, setShowConfetti] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [selectedVoice, setSelectedVoice] = useState<string>(() => localStorage.getItem("snow_voice") || "en-US-AvaNeural");
+  const [availableNeuralVoices, setAvailableNeuralVoices] = useState<Array<{ id: string; name: string; persona: string; gender: string; locale: string }>>([
+    { id: "en-US-AvaNeural", name: "Ava", persona: "Expressive, warm, and poised (Default)", gender: "female", locale: "en-US" },
+    { id: "en-US-JennyNeural", name: "Jenny", persona: "Crisp, conversational executive co-pilot", gender: "female", locale: "en-US" },
+    { id: "en-US-EmmaNeural", name: "Emma", persona: "Friendly, cheerful, and engaging", gender: "female", locale: "en-US" },
+    { id: "en-US-ChristopherNeural", name: "Christopher", persona: "Deep, authoritative JARVIS cadence", gender: "male", locale: "en-US" },
+    { id: "en-US-GuyNeural", name: "Guy", persona: "Casual, relaxed natural male presence", gender: "male", locale: "en-US" },
+    { id: "en-IN-NeerjaNeural", name: "Neerja", persona: "Fluent Indian English, crisp clarity", gender: "female", locale: "en-IN" },
+  ]);
+  const [showVoiceModal, setShowVoiceModal] = useState<boolean>(false);
+
+  useEffect(() => {
+    fetch("/api/snow/tts/voices")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.voices && Array.isArray(d.voices)) {
+          setAvailableNeuralVoices(d.voices);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const handlePreviewVoice = async (voiceId: string, voiceName: string) => {
+    try {
+      setToastMessage(`Auditioning ${voiceName} neural voice...`);
+      const res = await fetch("/api/snow/tts/synthesize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: `Neural voice switched to ${voiceName}. All systems operational, NJ.`,
+          voice: voiceId,
+          urgency: "calm",
+        }),
+      });
+      const data = await res.json();
+      if (data.audioBase64) {
+        if (activeHtmlAudioRef.current) {
+          try {
+            activeHtmlAudioRef.current.pause();
+            activeHtmlAudioRef.current.currentTime = 0;
+          } catch {}
+        }
+        const audio = new Audio("data:audio/mp3;base64," + data.audioBase64);
+        activeHtmlAudioRef.current = audio;
+        audio.play().catch(() => {});
+      }
+    } catch {
+      setToastMessage("Voice test failed. Check network connection.");
+    }
+  };
+
+  const handleSelectVoice = (voiceId: string, voiceName: string) => {
+    setSelectedVoice(voiceId);
+    localStorage.setItem("snow_voice", voiceId);
+    setToastMessage(`Active neural voice: ${voiceName}.`);
+    handlePreviewVoice(voiceId, voiceName);
+  };
 
   // ── Biometric Auth Gate ────────────────────────────────────────────────────
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -517,6 +577,21 @@ export default function App() {
           thought: data.lastMonologue?.thought || "",
           pulseCount: data.pulseCount,
         });
+      }
+    } catch {
+      // Non-fatal
+    }
+  };
+
+  // Autonomous Goals & Swarm DAG State
+  const [autonomousGoals, setAutonomousGoals] = useState<any[]>([]);
+
+  const fetchAutonomousGoals = async () => {
+    try {
+      const res = await fetch("/api/snow/goals");
+      if (res.ok) {
+        const data = await res.json();
+        setAutonomousGoals(data.goals || []);
       }
     } catch {
       // Non-fatal
@@ -684,6 +759,23 @@ export default function App() {
   const triggerToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 4000);
+  };
+
+  // Seed Autonomous Goal for Specialist Swarm
+  const handleSeedGoal = async (title: string, description: string, priority: number = 1) => {
+    try {
+      const res = await fetch("/api/snow/goals/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, description, priority })
+      });
+      if (res.ok) {
+        triggerToast(`Swarm Goal Initiated: ${title}`);
+        fetchAutonomousGoals();
+      }
+    } catch (err: any) {
+      triggerToast(`Failed to seed goal: ${err.message}`);
+    }
   };
 
   // Fetch Live Memories from backend
@@ -895,14 +987,17 @@ export default function App() {
     fetchStats();
     fetchTelemetryPackage();
     fetchAnimaStatus();
+    fetchAutonomousGoals();
     const interval = setInterval(fetchStats, 5000);
     const telemetryInterval = setInterval(() => {
       fetchTelemetryPackage();
       fetchAnimaStatus();
     }, 10000);
+    const goalsInterval = setInterval(fetchAutonomousGoals, 3500);
     return () => {
       clearInterval(interval);
       clearInterval(telemetryInterval);
+      clearInterval(goalsInterval);
     };
   }, []);
 
@@ -1061,26 +1156,156 @@ export default function App() {
     } catch (e) {}
   };
 
-  // ─── Speech Text Cleaner (Strips Markdown/Code/Tags for Crisp Voice) ─────────
+  // ─── Snow JARVIS Thinking Verbal Cue ("I am thinking...") ───────────────────
+  const playThinkingCue = async () => {
+    if (isThinkingCuePlayingRef.current || isSpeakingRef.current || isMuted) return;
+    isThinkingCuePlayingRef.current = true;
+    try {
+      const res = await fetch("/api/snow/tts/synthesize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: "I am thinking...",
+          urgency: "calm",
+          voice: selectedVoice,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.audioBase64) {
+          const audio = new Audio("data:audio/mp3;base64," + data.audioBase64);
+          activeHtmlAudioRef.current = audio;
+
+          // Wire into Web Audio analyser so the QuantumArc HUD ripples while thinking
+          try {
+            if (audioContextRef.current && audioContextRef.current.state === "running") {
+              const source = audioContextRef.current.createMediaElementSource(audio);
+              if (analyserRef.current) source.connect(analyserRef.current);
+              source.connect(audioContextRef.current.destination);
+            }
+          } catch {}
+
+          const onDone = () => {
+            isThinkingCuePlayingRef.current = false;
+          };
+          audio.onended = onDone;
+          audio.onerror = onDone;
+          await audio.play().catch(() => {
+            isThinkingCuePlayingRef.current = false;
+          });
+          return;
+        }
+      }
+    } catch {
+      // Continue to fallback
+    }
+
+    // Fallback: Web Speech API
+    try {
+      if ("speechSynthesis" in window) {
+        const utt = new SpeechSynthesisUtterance("I am thinking.");
+        utt.rate = 1.0;
+        utt.onend = () => {
+          isThinkingCuePlayingRef.current = false;
+        };
+        utt.onerror = () => {
+          isThinkingCuePlayingRef.current = false;
+        };
+        window.speechSynthesis.speak(utt);
+        return;
+      }
+    } catch {}
+    isThinkingCuePlayingRef.current = false;
+  };
+
+  // ─── High-Fidelity Conversational Spoken Lead Extractor ──────────────────────
   const cleanForSpeech = (rawText: string): string => {
     if (!rawText) return "";
-    return rawText
-      // Strip markdown code blocks
-      .replace(/```[\s\S]*?```/g, "Code omitted for speech.")
-      // Strip inline code
-      .replace(/`([^`]+)`/g, "$1")
-      // Strip markdown bold/italics/headers
-      .replace(/[#*_~>]/g, "")
+
+    // 1. Isolate the opening conversational block before structured markdown sections
+    const lines = rawText.split(/\r?\n/);
+    const leadLines: string[] = [];
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        if (leadLines.length > 0) break; // End of opening paragraph
+        continue;
+      }
+      // Stop before headings, code blocks, tables, horizontal rules, or bullet lists
+      if (/^(?:#{1,6}\s|```|\||---+|\*{3,}|[-*•]\s|\d+\.\s|>)/.test(trimmed)) {
+        break;
+      }
+      leadLines.push(trimmed);
+    }
+
+    const candidateBlock = leadLines.length > 0 ? leadLines.join(" ") : rawText;
+
+    // 2. Clean text specifically for human voice synthesis
+    const cleaned = candidateBlock
+      // Strip markdown code blocks completely (never speak "Code omitted")
+      .replace(/```[\s\S]*?```/g, " ")
+      // Strip markdown tables
+      .replace(/^\|.*\|$/gm, " ")
+      .replace(/\|/g, " ")
+      // Strip images: ![alt](url) -> ""
+      .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+      // Transform links: [link text](url) -> "link text"
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
       // Strip bracketed widgets/tags like [UI_WEATHER: ...] or [WEATHER: ...]
-      .replace(/\[(?:WEATHER|UI_[A-Z_]+)\s*:?[^\]]*\]/gi, "")
-      .replace(/\[[^\]]*\]/g, "")
-      // Strip URLs
-      .replace(/https?:\/\/\S+/g, "")
+      .replace(/\[(?:WEATHER|UI_[A-Z_]+)\s*:?[^\]]*\]/gi, " ")
+      .replace(/\[[^\]]*\]/g, " ")
+      // Strip URLs & file paths
+      .replace(/(?:https?|file):\/\/\S+/g, " ")
       // Strip raw JSON
-      .replace(/\{[^{}]*\}/g, "")
-      // Collapse multiple whitespace
-      .replace(/\s+/g, " ")
+      .replace(/\{[^{}]*\}/g, " ")
+      // Strip XML/HTML tags
+      .replace(/<[^>]+>/g, " ")
+      // Strip markdown bold/italics/headers
+      .replace(/^[#>-]+\s+/gm, " ")
+      .replace(/[*_~`]/g, " ")
+      // Strip bullet marks and list numbers
+      .replace(/^\s*[\u2022\u25E6\u2023\u2219-]\s+/gm, " ")
+      .replace(/^\s*\d+\.\s+/gm, " ")
+      // Strip emojis and non-speech unicode
+      .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F000}-\u{1F02F}\u{1F0A0}-\u{1F0FF}\u{1F100}-\u{1F64F}\u{1F680}-\u{1F6FF}]/gu, " ")
+      // Convert technical symbols to natural spoken words
+      .replace(/\b&amp;\b|\b&\b/g, " and ")
+      .replace(/\s*%\b/g, " percent ")
+      .replace(/\s*\+\s*/g, " plus ")
+      .replace(/(^|[\s(])i\.e\.,?/gi, "$1that is,")
+      .replace(/(^|[\s(])e\.g\.,?/gi, "$1for example,")
+      .replace(/(^|[\s(])etc\./gi, "$1etcetera")
+      .replace(/(^|[\s(])vs\./gi, "$1versus")
+      .replace(/\b(nj|NJ)\b/g, "NJ")
+      // Collapse whitespace
+      .replace(/[\r\n]+/g, " ")
+      .replace(/\s{2,}/g, " ")
       .trim();
+
+    if (!cleaned) return "";
+
+    // 3. Extract top 1-3 complete sentences using boundary matching
+    const sentences = cleaned.split(/(?<=[.!?])\s+(?=[A-Z0-9"'])/).filter(Boolean);
+
+    if (sentences.length > 0) {
+      let result = "";
+      for (let i = 0; i < Math.min(sentences.length, 3); i++) {
+        const sentence = sentences[i].trim();
+        if (!sentence) continue;
+        const candidate = (result ? result + " " + sentence : sentence).trim();
+        if (candidate.length <= 340 || i === 0) {
+          result = candidate;
+        } else {
+          break;
+        }
+      }
+      if (result) return result;
+    }
+
+    if (cleaned.length <= 320) return cleaned;
+    const wordBoundary = cleaned.slice(0, 320).replace(/\s+\S*$/, "");
+    return wordBoundary ? wordBoundary + "." : cleaned.slice(0, 320);
   };
 
   // Keep voice refs synchronized with component state
@@ -1092,7 +1317,6 @@ export default function App() {
     isSpeakingRef.current = isSpeaking;
   }, [isSpeaking]);
 
-  // ─── Stop Ongoing Snow Speech (Barge-In) ─────────────────────────────────────
   // ─── Stop Ongoing Snow Speech (Barge-In) ─────────────────────────────────────
   const stopSnowSpeech = (playCue = false) => {
     if (activeHtmlAudioRef.current) {
@@ -1128,7 +1352,7 @@ export default function App() {
     }
   }, []);
 
-  // ─── Speak Response as Snow (Humanized, Clear, Steady Female Voice) ───────────
+  // ─── Speak Response as Snow (High-Fidelity Neural Voice) ─────────────────────
   const speakSnow = async (textToSpeak: string) => {
     if (isMuted) {
       if (isContinuousModeRef.current) {
@@ -1141,29 +1365,22 @@ export default function App() {
       return;
     }
 
-    const cleaned = cleanForSpeech(textToSpeak);
-    if (!cleaned) {
+    const spokenPayload = cleanForSpeech(textToSpeak);
+    if (!spokenPayload) {
       if (isContinuousModeRef.current && !isSpeakingRef.current) {
         setTimeout(() => startSnowVoiceListening(true), 400);
       }
       return;
     }
 
-    // Adaptive conversational speech extraction:
-    // For vocal delivery, extract top 1-3 articulate, executive sentences (max ~360 chars)
-    // so Ava speaks punchy, immediate answers without multi-minute monologue,
-    // while the full comprehensive markdown/code remains visible on screen.
-    let spokenPayload = cleaned;
-    if (cleaned.length > 320) {
-      const sentences = cleaned.match(/[^.!?]+[.!?]+/g);
-      if (sentences && sentences.length > 0) {
-        spokenPayload = sentences.slice(0, 3).join(" ").trim();
-        if (spokenPayload.length > 380) {
-          spokenPayload = spokenPayload.slice(0, 380).replace(/\s+\S*$/, "") + ".";
-        }
-      } else {
-        spokenPayload = cleaned.slice(0, 320).replace(/\s+\S*$/, "") + ".";
+    // If "I am thinking..." verbal cue is still finishing, wait briefly (up to 450ms)
+    if (isThinkingCuePlayingRef.current) {
+      let waitIter = 0;
+      while (isThinkingCuePlayingRef.current && waitIter < 8) {
+        await new Promise((r) => setTimeout(r, 55));
+        waitIter++;
       }
+      isThinkingCuePlayingRef.current = false;
     }
 
     // Stop ongoing audio/speech
@@ -1184,21 +1401,25 @@ export default function App() {
     isSpeakingRef.current = true;
 
     try {
-      // 1. Primary: S.N.O.W. High-Fidelity Humanized Neural Engine (edge-tts Ava)
-      // Fast 3.5s timeout: If network fluctuates or edge-tts is delayed, fail over to Web Speech
+      // 1. Primary: S.N.O.W. High-Fidelity Humanized Neural Engine (edge-tts)
+      // Generous 7.0s timeout: prevents premature abort under network latency
       const abortCtrl = new AbortController();
-      const abortTimer = setTimeout(() => abortCtrl.abort(), 3500);
+      const abortTimer = setTimeout(() => abortCtrl.abort(), 7000);
 
       const res = await fetch("/api/snow/tts/synthesize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: spokenPayload, urgency: "calm" }),
-        signal: abortCtrl.signal
+        body: JSON.stringify({
+          text: spokenPayload,
+          urgency: "calm",
+          voice: selectedVoice,
+        }),
+        signal: abortCtrl.signal,
       });
       clearTimeout(abortTimer);
 
       if (!res.ok) throw new Error("Backend TTS unavailable");
-      
+
       const data = await res.json();
 
       // If backend generated high-definition neural MP3 audio payload
@@ -1261,7 +1482,7 @@ export default function App() {
       console.warn("[Snow Voice] Neural Audio stream timed out or unavailable, using Web Speech fallback:", err);
     }
 
-    // 2. Secondary Fallback: Browser Web Speech API with calm, steady, clear female prosody
+    // 2. Secondary Fallback: Browser Web Speech API with calm, steady prosody
     if (!("speechSynthesis" in window)) {
       setIsSpeaking(false);
       isSpeakingRef.current = false;
@@ -1269,21 +1490,15 @@ export default function App() {
     }
 
     try {
-      const sentenceMatches = cleaned.match(/[^.!?]+[.!?]+/g);
-      const spokenSummary = sentenceMatches && sentenceMatches.length > 0 
-        ? sentenceMatches.slice(0, 3).join(" ").trim() 
-        : cleaned.slice(0, 260).trim();
-
-      const utterance = new SpeechSynthesisUtterance(spokenSummary);
-      // Pacing: Clear, slow, and steady cadence (never rushed or high-pitched)
-      utterance.rate = 0.94;
+      const utterance = new SpeechSynthesisUtterance(spokenPayload);
+      utterance.rate = 0.98;
       utterance.pitch = 1.0;
 
       const voices = (availableVoicesRef.current && availableVoicesRef.current.length > 0)
         ? availableVoicesRef.current
         : window.speechSynthesis.getVoices();
 
-      // Top-tier humanized female voice prioritizer
+      // Top-tier humanized voice prioritizer
       const femaleVoice = voices.find(v => 
         v.lang.startsWith("en") && (
           /ava|jenny|emma|aria|samantha|victoria|karen|zira|sonia|natasha|susan|moira|tessa|stephanie|allison|fiona|veena|catherine|linda/i.test(v.name)
@@ -1491,8 +1706,16 @@ export default function App() {
             return;
           }
 
-          // Voice Activity Detection (VAD) - calibrated threshold for crisp speech detection
-          if (normalizedVol > 7) {
+          // Dynamic ambient noise floor tracking (adapts to room background noise when silent)
+          if (!hasSpokenRef.current) {
+            ambientNoiseFloorRef.current = Math.min(25, Math.max(4, 0.94 * ambientNoiseFloorRef.current + 0.06 * normalizedVol));
+          }
+
+          // Dynamic speech threshold: at least 13, or ambient + 8
+          const speechThreshold = Math.max(13, Math.round(ambientNoiseFloorRef.current + 8));
+
+          // Voice Activity Detection (VAD)
+          if (normalizedVol > speechThreshold) {
             if (!hasSpokenRef.current) {
               firstSpeechTimestampRef.current = Date.now();
             }
@@ -1501,23 +1724,29 @@ export default function App() {
           }
 
           // Adaptive conversational silence detection:
-          // 2,000ms pause buffer allows natural human cadence and breathing without cut-offs
-          // 2,600ms if ending on a connecting thought (and, or, but, then, so...)
+          // 950ms pause buffer triggers snappy JARVIS reply cadence
+          // 1,250ms if ending on a connecting thought (and, or, but, then, so...)
           // Maximum speaking duration: 30,000ms (30 seconds)
           if (hasSpokenRef.current && lastSpeechTimestampRef.current > 0) {
             const silentDuration = Date.now() - lastSpeechTimestampRef.current;
             const totalSpeakingDuration = firstSpeechTimestampRef.current > 0 ? (Date.now() - firstSpeechTimestampRef.current) : 0;
             const currentTranscript = accumulatedTranscriptRef.current.trim();
             const endsWithConnector = /(?:and|or|then|but|if|because|like|with|also|to|for|so|that)\s*$/i.test(currentTranscript);
-            const silenceThreshold = endsWithConnector ? 2600 : 2000;
+            const silenceThreshold = endsWithConnector ? 1250 : 950;
 
             if (silentDuration > silenceThreshold || totalSpeakingDuration > 30000) {
               hasSpokenRef.current = false;
               lastSpeechTimestampRef.current = 0;
               firstSpeechTimestampRef.current = 0;
 
+              // Immediately transition HUD state to THINKING and play JARVIS audible cue!
+              setIsListening(false);
+              setIsLoading(true);
+              playSnowAcknowledgeChime();
+              playThinkingCue();
+
               // Check if Web Speech transcript is already available
-              if (currentTranscript && currentTranscript.length > 2) {
+              if (currentTranscript && currentTranscript.length > 1) {
                 const toSubmit = currentTranscript;
                 stopSnowVoiceListening(true);
                 handleSendMessageRef.current(toSubmit);
@@ -1584,7 +1813,7 @@ export default function App() {
           if (blob.size > 800) {
             triggerToast("⚡ Transcribing voice directive...");
             const transcribed = await transcribeAudioBlob(blob);
-            if (transcribed && transcribed.trim()) {
+            if (transcribed && transcribed.trim() && !/^(\[.*?\]|\(.*?\)|silence|null)$/i.test(transcribed.trim())) {
               setInputText(transcribed.trim());
               stopSnowVoiceListening(true);
               handleSendMessageRef.current(transcribed.trim());
@@ -1593,7 +1822,8 @@ export default function App() {
           }
         }
 
-        // If continuous mode active and no speech was processed, restart recording for next utterance
+        // If continuous mode active and no speech was processed, reset thinking and restart recording
+        setIsLoading(false);
         if (shouldKeepListeningRef.current && stream.active) {
           try {
             audioChunksRef.current = [];
@@ -1654,6 +1884,9 @@ export default function App() {
               if (directiveAfterWake && directiveAfterWake.length > 2) {
                 // Wake word WITH directive spoken in one breath: "Hey Snow, what's the weather?"
                 playSnowAcknowledgeChime();
+                setIsListening(false);
+                setIsLoading(true);
+                playThinkingCue();
                 stopSnowVoiceListening(true);
                 handleSendMessageRef.current(directiveAfterWake);
                 return;
@@ -1730,6 +1963,10 @@ export default function App() {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
         triggerToast("⚡ Processing recorded speech...");
         shouldKeepListeningRef.current = false;
+        setIsListening(false);
+        setIsLoading(true);
+        playSnowAcknowledgeChime();
+        playThinkingCue();
         try {
           mediaRecorderRef.current.requestData();
         } catch {}
@@ -1903,13 +2140,16 @@ export default function App() {
   // Send Message Handler
   const handleSendMessage = async (textToSend?: string) => {
     const rawText = textToSend || inputText;
-    if (!rawText.trim() || isLoading) return;
+    if (!rawText.trim() || isChatFetchingRef.current) return;
+    isChatFetchingRef.current = true;
 
     // Barge-in: immediately stop any active Snow speech
     stopSnowSpeech();
     if (textToSend) {
       playSnowAcknowledgeChime();
     }
+    // Instant JARVIS Thinking Verbal Cue ("I am thinking...")
+    playThinkingCue();
 
     let promptForBackend = rawText.trim();
     if (attachedContextFiles.length > 0) {
@@ -2041,6 +2281,7 @@ export default function App() {
       speakSnow(friendlyMsg);
     } finally {
       setIsLoading(false);
+      isChatFetchingRef.current = false;
     }
   };
 
@@ -2235,6 +2476,89 @@ export default function App() {
             <span>{isMuted ? "MUTED" : "VOICE ON"}</span>
           </div>
 
+          {/* Neural Voice Engine Selector */}
+          <div className="relative">
+            <button
+              onClick={() => setShowVoiceModal(!showVoiceModal)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-cyan-500/30 bg-slate-900/90 hover:bg-cyan-500/15 text-cyan-300 hover:text-cyan-200 text-[10px] font-mono font-bold transition cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.12)]"
+              title="Select S.N.O.W. Neural Voice Engine"
+            >
+              <Sparkles className="w-3 h-3 text-cyan-400" />
+              <span>VOICE: {availableNeuralVoices.find((v) => v.id === selectedVoice)?.name.toUpperCase() || "AVA"}</span>
+            </button>
+
+            {/* Neural Voice Quick Popover */}
+            <AnimatePresence>
+              {showVoiceModal && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: 5 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: 5 }}
+                  className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-slate-950/95 border border-cyan-500/40 backdrop-blur-2xl p-3 z-50 shadow-[0_0_30px_rgba(6,182,212,0.3)] font-sans"
+                >
+                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-cyan-500/20 font-mono text-[11px] font-bold text-cyan-300">
+                    <span className="flex items-center gap-1.5">
+                      <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+                      NEURAL VOICE ENGINE
+                    </span>
+                    <button
+                      onClick={() => setShowVoiceModal(false)}
+                      className="p-1 rounded-lg hover:bg-cyan-500/20 text-slate-400 hover:text-white transition cursor-pointer"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <div className="space-y-1.5 max-h-64 overflow-y-auto scrollbar-thin pr-0.5">
+                    {availableNeuralVoices.map((v) => {
+                      const isSelected = selectedVoice === v.id;
+                      return (
+                        <div
+                          key={v.id}
+                          className={`flex items-center justify-between p-2 rounded-xl border transition cursor-pointer ${
+                            isSelected
+                              ? "bg-cyan-500/20 border-cyan-400/60 shadow-[0_0_12px_rgba(6,182,212,0.2)]"
+                              : "bg-slate-900/80 border-slate-700/40 hover:bg-slate-800/80 hover:border-cyan-500/30"
+                          }`}
+                          onClick={() => handleSelectVoice(v.id, v.name)}
+                        >
+                          <div className="flex-1 min-w-0 pr-2">
+                            <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-white">
+                              <span>{v.name}</span>
+                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700 text-slate-400 font-normal">
+                                {v.gender} • {v.locale}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-slate-400 truncate mt-0.5 font-sans">
+                              {v.persona}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handlePreviewVoice(v.id, v.name);
+                              }}
+                              className="p-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 transition cursor-pointer"
+                              title={`Audition ${v.name}'s voice`}
+                            >
+                              <Play className="w-2.5 h-2.5" />
+                            </button>
+                            {isSelected && (
+                              <div className="p-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                <Check className="w-2.5 h-2.5" />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           {/* Quick Weather Badge */}
           {(() => {
             const wxVisual = getWeatherVisual(liveWeather.condition, liveWeather.isDay, liveWeather.windSpeedKm);
@@ -2425,6 +2749,9 @@ export default function App() {
               onSendFeedback={handleSendFeedback}
               renderFormattedMessage={(text) => <FormattedMessage text={text} />}
               renderWidgetContent={renderWidgetContent}
+              autonomousGoals={autonomousGoals}
+              onRefreshGoals={fetchAutonomousGoals}
+              onSeedGoal={handleSeedGoal}
             />
 
           </div>

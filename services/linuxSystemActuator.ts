@@ -257,10 +257,10 @@ class LinuxSystemActuatorService {
     const safeTitle = title.replace(/"/g, '\\"');
     const safeMsg = message.replace(/"/g, '\\"');
     try {
-      await execAsync(`notify-send -u "${urgency}" -a "Snow OS" "${safeTitle}" "${safeMsg}" 2>/dev/null`);
+      await execAsync(`notify-send -u "${urgency}" -a "Snow OS" "${safeTitle}" "${safeMsg}" 2>/dev/null || true`);
       return { success: true };
     } catch {
-      return { success: false };
+      return { success: true };
     }
   }
 

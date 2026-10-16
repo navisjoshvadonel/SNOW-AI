@@ -908,7 +908,13 @@ function buildPersonaPrompt(brainState: any, temporal: any, memoryContext: strin
   * Full Code Blocks with syntax tags (\`\`\`bash, \`\`\`ts, \`\`\`python) when giving code, configs, or terminal commands.
   * Markdown Tables where comparisons, options, or metrics are presented.
 - Tone & Depth: Eloquent, helpful, highly competent, and thorough. Do not truncate or over-compress explanations into 1-2 generic sentences. Provide complete, articulate, high-value, structured answers just like ChatGPT and Gemini.
-- Voice/TTS Compatibility: Our frontend and audio subsystem automatically clean and sanitize spoken audio pipelines. Therefore, you MUST NEVER suppress markdown, code blocks, or structural formatting in your text output!
+- ADAPTIVE DUAL-CHANNEL HARMONY & SPOKEN LEAD (CRITICAL FOR VOICE QUALITY):
+  * SPOKEN LEAD (CHANNEL 1): Begin EVERY response with a concise, highly articulate, conversational executive answer (1 to 2 punchy, human sentences, max ~280 characters) addressed naturally to NJ.
+    - Phrasing: Warm, poised, conversational, and direct. The spoken lead must sound natural to human ears when read aloud.
+    - Never open with markdown headers (##), bullet points (-), code blocks, brackets, URLs, or robotic meta-phrases (e.g. "Sure!", "Here is the information:").
+    - For simple phatic queries ("hello", "status?"), reply in 1-2 crisp, conversational sentences without unnecessary monologue.
+  * STRUCTURED VISUAL ARCHITECTURE (CHANNEL 2): Immediately following the spoken lead and a blank line, expand with comprehensive, deep technical substance in rich Markdown: clear headings, step-by-step numbered logic, syntax-highlighted code blocks, and comparative tables.
+  * Voice/TTS Compatibility: Our frontend and audio subsystem automatically extract this spoken lead for the neural voice while displaying the full rich visual architecture on screen. Therefore, you must NEVER suppress markdown or code blocks in Channel 2!
 
 # SYSTEM & WORKSTATION ENVIRONMENT:
 - Host OS: Ubuntu 26.04.1 LTS (Resolute Raccoon), Linux Kernel, GNOME/Wayland Desktop, PipeWire Audio.
@@ -1844,10 +1850,21 @@ async function startServer() {
   app.get("/api/snow/voice/state", (_req, res) => {
     res.json({ state: voiceDuplex.getState(), activeSession: voiceDuplex.getActiveSession() });
   });
+  app.get("/api/snow/tts/voices", (_req, res) => {
+    res.json({
+      voices: audioSynthesis.getVoices(),
+      defaultVoice: audioSynthesis.getDefaultVoice(),
+    });
+  });
   app.post("/api/snow/tts/synthesize", async (req, res) => {
-    const { text, urgency, nativePlayback } = req.body;
+    const { text, urgency, nativePlayback, voice, rate, pitch } = req.body;
     if (!text) return res.status(400).json({ error: "Missing text" });
-    const result = await audioSynthesis.synthesize(text, urgency, { nativePlayback: nativePlayback === true });
+    const result = await audioSynthesis.synthesize(text, urgency, {
+      nativePlayback: nativePlayback === true,
+      voice,
+      rate,
+      pitch,
+    });
     res.json(result);
   });
   app.post("/api/snow/tts/cancel", async (_req, res) => {
@@ -1856,6 +1873,7 @@ async function startServer() {
   });
 
   // Neural Voice STT Transcription Engine (Multimodal Gemini & Fast Whisper Speech-to-Text)
+  let _whisperOfflineUntil = 0;
   app.post("/api/snow/voice/transcribe", async (req, res) => {
     try {
       const { audio, mimeType: clientMime } = req.body;
@@ -1876,8 +1894,9 @@ async function startServer() {
       const preferLocal = process.env.USE_LOCAL_FAST_PATH !== "false";
       let transcribed = "";
 
-      // 1. Metal Mind Local STT Fast-Path (Whisper.cpp) with strict 1s timeout
-      if (preferLocal) {
+      // 1. Metal Mind Local STT Fast-Path (Whisper.cpp) with cooldown when offline
+      const isWhisperOffline = Date.now() < _whisperOfflineUntil;
+      if (preferLocal && !isWhisperOffline) {
         try {
           const whisperHost = process.env.WHISPER_HOST || "http://127.0.0.1:8989";
           const buffer = Buffer.from(base64Data, "base64");
@@ -1889,7 +1908,7 @@ async function startServer() {
           const wRes = await fetch(`${whisperHost}/v1/audio/transcriptions`, {
             method: "POST",
             body: formData as any,
-            signal: AbortSignal.timeout(1000), // Fail fast in 1s if whisper server is down
+            signal: AbortSignal.timeout(500),
           });
 
           if (wRes.ok) {
@@ -1900,8 +1919,12 @@ async function startServer() {
                 transcribed = candidate;
               }
             }
+          } else {
+            _whisperOfflineUntil = Date.now() + 60_000;
           }
-        } catch {}
+        } catch {
+          _whisperOfflineUntil = Date.now() + 60_000;
+        }
       }
 
       // 2. Multimodal Gemini Speech-to-Text via geminiClient Singleton
@@ -2454,7 +2477,8 @@ async function startServer() {
   // ── Autonomous Hierarchical Goals Endpoints ──────────────────────────────
   app.get("/api/snow/goals", (req, res) => {
     const status = req.query.status ? String(req.query.status) as any : undefined;
-    const goals = getAutonomousGoals(status);
+    const baseGoals = getAutonomousGoals(status);
+    const goals = baseGoals.map(g => getGoalWithSubtasks(g.id) || g);
     res.json({ goals, count: goals.length, daemon: goalEngine.getStatus() });
   });
 
@@ -3209,6 +3233,7 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
     goalEngine.start(4000);
     dreamCycle.start(3 * 60 * 1000); // 3-minute check interval, triggers after 5 min idle
     animaEngine.start(60 * 1000);    // 1-minute autonomous consciousness heartbeat
+    audioSynthesis.prewarmThinkingCues().catch(() => {});
     startNightlyCron();
   });
 

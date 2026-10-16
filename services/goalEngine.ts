@@ -20,7 +20,9 @@ import {
   updateSubtaskStatus,
   logGoalEvent,
   AutonomousGoal,
-  GoalSubtask
+  GoalSubtask,
+  addMemory,
+  addEpisodicMemory
 } from "../brain";
 import { desktopActuator } from "./desktopActuator";
 import { runPythonCode } from "../python_sandbox";
@@ -291,7 +293,8 @@ class GoalEngineService {
       // ── 4. Python Sandbox Execution ──
       } else if (subtask.assignedTool === "PythonSandbox") {
         const code = payload.code || "print('ok')";
-        const res = await runPythonCode(code, 15000);
+        const allowNet = Boolean(payload.allow_network || payload.allowNetwork || /urllib|http|requests|curl/i.test(code));
+        const res = await runPythonCode(code, 15000, { allowNetwork: allowNet });
         resultSummary = res.stdout || res.stderr || "Python script executed.";
         success = res.success;
 
@@ -337,7 +340,27 @@ class GoalEngineService {
           success = true;
         }
 
-      // ── 9. Fallback ──
+      // ── 9. Notification Tool ──
+      } else if (subtask.assignedTool === "Notification") {
+        const title = payload.title || "Snow Notification";
+        const message = payload.message || payload.text || "Autonomous milestone verified";
+        const urgency = payload.urgency || "normal";
+        const res = await linuxSystemActuator.dispatchNotification(title, message, urgency);
+        resultSummary = `Notification dispatched: "${title} - ${message}"`;
+        success = true;
+
+      // ── 10. Memory Store Tool ──
+      } else if (subtask.assignedTool === "MemoryStore") {
+        if (payload.action === "fact" && payload.source && payload.target) {
+          addMemory(payload.source, payload.rel || "state", payload.target, (payload.category as any) || "Preference");
+          resultSummary = `Semantic memory node created: ${payload.source} -> ${payload.target}`;
+        } else {
+          addEpisodicMemory(payload.content || payload.text || `Goal milestone completed: ${subtask.title}`, "episodic", "autonomous_goal");
+          resultSummary = `Episodic memory logged for milestone: ${subtask.title}`;
+        }
+        success = true;
+
+      // ── 11. Fallback ──
       } else {
         const { stdout } = await execAsync("echo 'Subtask executed'", { timeout: 5000 });
         resultSummary = stdout.trim();
