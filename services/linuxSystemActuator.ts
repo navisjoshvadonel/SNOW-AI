@@ -106,16 +106,30 @@ class LinuxSystemActuatorService {
     try {
       const { stdout } = await execAsync("wmctrl -l 2>/dev/null || echo ''");
       const lines = stdout.split("\n").filter(l => l.trim().length > 0);
-      return lines.map(line => {
-        const parts = line.split(/\s+/);
-        const id = parts[0] || "";
-        const desktop = parseInt(parts[1] || "0", 10);
-        const title = parts.slice(3).join(" ");
-        return { id, desktop, title };
-      });
-    } catch {
-      return [];
-    }
+      if (lines.length > 0) {
+        return lines.map(line => {
+          const parts = line.split(/\s+/);
+          const id = parts[0] || "";
+          const desktop = parseInt(parts[1] || "0", 10);
+          const title = parts.slice(3).join(" ");
+          return { id, desktop, title };
+        });
+      }
+    } catch {}
+
+    // Resilient fallback: Query active window via xprop if wmctrl is not installed
+    try {
+      const { stdout } = await execAsync("xprop -root _NET_ACTIVE_WINDOW 2>/dev/null || echo ''");
+      const winId = stdout.split(/\s+/).find(p => p.startsWith("0x") && p !== "0x0");
+      if (winId) {
+        const { stdout: winOut } = await execAsync(`xprop -id ${winId} WM_NAME 2>/dev/null || echo ''`);
+        const titleMatch = winOut.match(/=\s*"(.*)"/);
+        const title = titleMatch ? titleMatch[1] : "Active Session Window";
+        return [{ id: winId, desktop: 0, title }];
+      }
+    } catch {}
+
+    return [];
   }
 
   public async focusWindow(titleSubstr: string): Promise<{ success: boolean; title: string }> {

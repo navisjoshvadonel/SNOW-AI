@@ -77,15 +77,14 @@ class AmbientPerceptionService {
       let wmClass = "";
 
       try {
-        const { stdout } = await execAsync(
-          "xdotool getactivewindow getwindowname getwindowclassname 2>/dev/null || echo ''"
-        );
-        const lines = stdout.trim().split("\n");
-        title   = (lines[0] || "").trim();
-        wmClass = (lines[1] || "").trim();
+        const deskStatus = await desktopActuator.getStatus();
+        if (deskStatus.activeWindow) {
+          title = deskStatus.activeWindow.title || "";
+          wmClass = deskStatus.activeWindow.class || "";
+        }
       } catch {
         // Fallback for non-X11/headless environments
-        title   = "Active Linux Workspace";
+        title = "Active Linux Workspace";
         wmClass = "system";
       }
 
