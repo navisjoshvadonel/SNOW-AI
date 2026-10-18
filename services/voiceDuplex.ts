@@ -81,7 +81,10 @@ class VoiceDuplexService {
     this.activeSession = null;
     this.currentState = "listening";
     try {
-      exec("spd-say -C 2>/dev/null || pkill -f spd-say 2>/dev/null || true", () => {});
+      exec(
+        "pkill -f gst-play-1.0 2>/dev/null; pkill -f edge-tts 2>/dev/null; pkill -f piper 2>/dev/null; pkill -f aplay 2>/dev/null; pkill -f paplay 2>/dev/null; spd-say -C 2>/dev/null; pkill -f spd-say 2>/dev/null; true",
+        () => {}
+      );
     } catch {}
 
     const result: BargeInResult = {

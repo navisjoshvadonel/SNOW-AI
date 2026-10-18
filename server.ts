@@ -3347,6 +3347,8 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
 
   const PORT = parseInt(process.env.PORT || "3000", 10);
   const HOST = process.env.HOST || "127.0.0.1";
+  let proactiveInterval: NodeJS.Timeout | null = null;
+
   const server = app.listen(PORT, HOST, () => {
     const rs = ragStats();
     console.log(`\n✅  Snow OS Autonomous Learning Agent ONLINE → http://${HOST}:${PORT}`);
@@ -3365,6 +3367,12 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
     animaEngine.start(60 * 1000);    // 1-minute autonomous consciousness heartbeat
     audioSynthesis.prewarmThinkingCues().catch(() => {});
     startNightlyCron();
+
+    // Proactive background workspace intelligence (runs immediately & every 10 minutes)
+    proactiveIntelligence.runAutonomousPreComputation().catch(() => {});
+    proactiveInterval = setInterval(() => {
+      proactiveIntelligence.runAutonomousPreComputation().catch(() => {});
+    }, 10 * 60 * 1000);
   });
 
   let isShuttingDown = false;
@@ -3378,6 +3386,7 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
       goalEngine.stop();
       dreamCycle.stop();
       animaEngine.stop();
+      if (proactiveInterval) clearInterval(proactiveInterval);
     } catch (e: any) {
       console.warn("[Server] Notice while stopping daemons:", e.message);
     }

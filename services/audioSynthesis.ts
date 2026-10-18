@@ -115,16 +115,29 @@ async function getEdgeTtsCmd(): Promise<string | null> {
   return null;
 }
 
-let _piperAvailable: boolean | null = null;
-async function hasPiper(): Promise<boolean> {
-  if (_piperAvailable !== null) return _piperAvailable;
-  try {
-    await execAsync("which piper");
-    _piperAvailable = true;
-  } catch {
-    _piperAvailable = false;
+let _piperBinaryPath: string | null = null;
+async function getPiperBinary(): Promise<string | null> {
+  if (_piperBinaryPath !== null) return _piperBinaryPath || null;
+  const candidates = [
+    "piper",
+    "/usr/local/bin/piper",
+    join(process.env.HOME || "", ".local", "bin", "piper"),
+    join(process.cwd(), "data", "piper", "piper"),
+    join(process.cwd(), "data", "piper_models", "piper")
+  ];
+  for (const c of candidates) {
+    try {
+      await execAsync(`command -v "${c}" || test -x "${c}"`);
+      _piperBinaryPath = c;
+      return c;
+    } catch {}
   }
-  return _piperAvailable;
+  _piperBinaryPath = "";
+  return null;
+}
+
+async function hasPiper(): Promise<boolean> {
+  return (await getPiperBinary()) !== null;
 }
 
 // ─── Speech Sanitization & Conversational Lead Extraction ────────────────────
@@ -321,7 +334,7 @@ class AudioSynthesisService {
     let audioBase64: string | undefined = undefined;
     let engine: SynthesizedAudioResult["engine"] = "none";
     let isCached = false;
-    const preferLocal = process.env.USE_LOCAL_FAST_PATH === "true";
+    const preferLocal = process.env.USE_LOCAL_FAST_PATH === "true" || process.env.OFFLINE_PRIMARY === "true";
     const allowNativePlayback = options?.nativePlayback === true;
 
     try {
@@ -361,8 +374,9 @@ class AudioSynthesisService {
           join(process.cwd(), "data", "piper_models", "en_US-lessac-medium.onnx");
 
         try {
+          const piperBin = (await getPiperBinary()) || "piper";
           await execAsync(
-            `echo ${JSON.stringify(cleanSpoken)} | piper --model "${modelPath}" --output_file "${tmpFile}" 2>/dev/null`,
+            `echo ${JSON.stringify(cleanSpoken)} | "${piperBin}" --model "${modelPath}" --output_file "${tmpFile}" 2>/dev/null`,
             { timeout: 10_000 }
           );
 
