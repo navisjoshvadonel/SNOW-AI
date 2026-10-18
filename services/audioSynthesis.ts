@@ -144,9 +144,9 @@ async function hasPiper(): Promise<boolean> {
 export function sanitizeTextForSpeech(raw: string): string {
   if (!raw) return "";
   return raw
-    // 0. Remove voice description / meta labels / stage directions
-    .replace(/(?:voice description|voice profile|persona|query analysis|target topic|operating tier|workstation health|recommended action|system status|telemetry snapshot)\s*:?[^\n.]*[.\n]?/gi, " ")
-    .replace(/\*[^*]+\*/g, " ")
+    // 0. Remove voice description / meta labels / stage directions (require colon or action verbs)
+    .replace(/(?:^|\n)\s*(?:voice description|voice profile|persona|query analysis|target topic|operating tier|workstation health|recommended action|system status|telemetry snapshot)\s*:\s*[^\n.]*[.\n]?/gi, " ")
+    .replace(/(?<!\*)\*(?:whispers?|sighs?|chuckles?|pauses?|clears throat|laughs?)\*(?!\*)/gi, " ")
     .replace(/\([^)]{0,100}(?:whisper|speaking|tone|voice|pause|cadence|emotion)[^)]{0,100}\)/gi, " ")
     // 1. Remove Markdown code blocks entirely (never speak meta-phrases)
     .replace(/```[\s\S]*?```/g, " ")

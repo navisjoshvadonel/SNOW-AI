@@ -107,6 +107,13 @@ class VoiceDuplexService {
   }
 
   /**
+   * Interrupt alias for bargeIn
+   */
+  public interrupt(): BargeInResult {
+    return this.bargeIn();
+  }
+
+  /**
    * Set state explicitly (e.g. listening / processing)
    */
   public setState(state: VoiceState): void {

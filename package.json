@@ -7,7 +7,8 @@
     "dev": "node_modules/.bin/tsx server.ts",
     "build": "node_modules/.bin/vite build && node_modules/.bin/esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
-    "lint": "node_modules/.bin/tsc --noEmit"
+    "lint": "node_modules/.bin/tsc --noEmit",
+    "test": "node_modules/.bin/tsx --test tests/**/*.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
