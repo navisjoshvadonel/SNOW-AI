@@ -289,7 +289,13 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
       model: ollamaModel,
       messages: ollamaMessages,
       tools: ollamaTools.length > 0 ? ollamaTools : undefined,
-      stream: false // Using non-streaming for simplicity in fallback, since tool calls in stream are complex to parse manually
+      stream: false, // Using non-streaming for simplicity in fallback, since tool calls in stream are complex to parse manually
+      keep_alive: "24h",
+      options: {
+        num_ctx: 4096,
+        num_thread: 8,
+        temperature: 0.2
+      }
     })
   });
 

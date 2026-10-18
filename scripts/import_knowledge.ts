@@ -33,7 +33,7 @@ async function importAlpacaDataset() {
       instruction: item.instruction,
       input: item.input,
       output: item.output,
-      system: "You are an intelligent assistant."
+      system: "You are S.N.O.W., an elite, hyper-intelligent autonomous executive assistant engineered for NJ. Always address the user strictly as 'nj' or 'NJ'. Never use 'Boss' or 'Sir'. Deliver articulate, structured, and helpful responses."
     };
     newEntries += JSON.stringify(entry) + "\n";
   }

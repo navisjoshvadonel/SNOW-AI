@@ -197,8 +197,6 @@ class DreamCycleService {
       `[${i + 1}] [${e.tier}] ${e.content} (context: ${e.context || "general"}, ts: ${e.timestamp})`
     ).join("\n");
 
-    const ai = new GoogleGenAI({ apiKey });
-
     try {
       const prompt = `You are Snow's memory consolidation engine performing slow-wave sleep consolidation.
 
@@ -218,13 +216,7 @@ Output STRICT JSON only (no markdown):
   ]
 }`;
 
-      const res = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        config: { responseMimeType: "application/json" }
-      });
-
-      const raw = res.text?.trim() || "";
+      const raw = await this.callConsolidationLLM(prompt, apiKey);
       const parsed = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}");
 
       if (Array.isArray(parsed.facts)) {
@@ -295,38 +287,22 @@ Output STRICT JSON only (no markdown):
 
     console.log(`[DreamCycle]   Found ${conflicted.length} potential conflict groups.`);
 
-    const ai = new GoogleGenAI({ apiKey });
-
-    for (const conflict of conflicted.slice(0, 5)) { // Process up to 5 conflicts per cycle
+    for (const conflict of conflicted.slice(0, 5)) {
       if (!this.isDreaming) break;
-
-      const nodesSummary = conflict.nodes.map((n, i) =>
-        `[${i + 1}] ID:${n.id} — "${n.source} ${n.rel} ${n.target}" (ts: ${n.timestamp})`
-      ).join("\n");
-
       try {
-        const prompt = `You are Snow's memory arbiter resolving conflicting semantic memories.
+        const prompt = `You are Snow's memory conflict resolution engine.
+The following memories conflict with each other for key "${conflict.key}":
+${conflict.nodes.map(n => `- ID: ${n.id}, Target: "${n.target}", Timestamp: ${n.timestamp}, Category: ${n.category || 'General'}`).join('\n')}
 
-Conflicting memories for relation "${conflict.key}":
-${nodesSummary}
-
-Decide which memories to KEEP and which to DELETE. Prefer newer, more specific memories.
-If all are valid (non-contradictory), keep all. If genuinely contradictory, keep the most recent/specific.
-
-Output STRICT JSON only:
+Decide which memories are obsolete or invalid and should be deleted, keeping only the most accurate/current one.
+Output STRICT JSON:
 {
-  "keep": ["id1", "id2"],
-  "delete": ["id3"],
-  "rationale": "Kept newer preference; older entry was superseded."
+  "keep": "<id_to_keep>",
+  "delete": ["<id_to_delete_1>"],
+  "rationale": "<short rationale>"
 }`;
 
-        const res = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          config: { responseMimeType: "application/json" }
-        });
-
-        const raw = res.text?.trim() || "";
+        const raw = await this.callConsolidationLLM(prompt, apiKey);
         const decision = JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0] || "{}");
 
         if (Array.isArray(decision.delete) && decision.delete.length > 0) {
@@ -402,6 +378,52 @@ Output STRICT JSON only:
   }
 
   // ─── Utilities ─────────────────────────────────────────────────────────────
+
+  private async callConsolidationLLM(prompt: string, apiKey?: string): Promise<string> {
+    const isOffline = process.env.OFFLINE_PRIMARY === "true" || !apiKey;
+
+    if (!isOffline && apiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey });
+        const res = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          config: { responseMimeType: "application/json" }
+        });
+        const raw = res.text?.trim() || "";
+        if (raw) return raw;
+      } catch (e: any) {
+        console.warn("[DreamCycle] Cloud consolidation failed, engaging sovereign local core:", e.message);
+      }
+    }
+
+    // Sovereign Offline Local Ollama Consolidation
+    try {
+      const host = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+      const model = process.env.OLLAMA_MODEL || "snow_custom";
+      const res = await fetch(`${host}/api/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          prompt,
+          format: "json",
+          stream: false,
+          options: { temperature: 0.2, num_ctx: 4096 }
+        }),
+        signal: AbortSignal.timeout(30_000)
+      });
+      if (res.ok) {
+        const data: any = await res.json();
+        const raw = data.response?.trim() || "";
+        if (raw) return raw;
+      }
+    } catch (err: any) {
+      console.warn("[DreamCycle] Local Ollama dream consolidation error:", err.message);
+    }
+
+    return "{}";
+  }
 
   private notify(message: string): void {
     try {
