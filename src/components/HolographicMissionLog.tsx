@@ -87,12 +87,8 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
   };
 
   useEffect(() => {
-    if (activeTab === "chat") {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [chatHistory, isLoading, activeTab]);
-
-  const activeGoal = autonomousGoals.find((g: any) => g.status === "active" || g.status === "planning");
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatHistory, isLoading]);
 
   return (
     <div className="col-span-4 flex flex-col rounded-3xl bg-slate-900/80 border border-cyan-500/25 backdrop-blur-2xl shadow-[0_0_40px_rgba(6,182,212,0.08)] overflow-hidden relative select-none">
@@ -107,271 +103,36 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
 
       {/* ─── Header ─── */}
       <div className="p-3.5 border-b border-cyan-500/20 flex items-center justify-between bg-slate-950/80 backdrop-blur-md">
-        <div className="flex items-center gap-1.5">
-          <div className="flex items-center gap-1 bg-slate-900/90 p-0.5 rounded-xl border border-cyan-500/20">
-            <button
-              onClick={() => setActiveTab("chat")}
-              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold font-mono transition cursor-pointer flex items-center gap-1.5 ${
-                activeTab === "chat" ? "bg-cyan-500/20 text-cyan-300 border border-cyan-400/30" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <Terminal className="w-3 h-3" />
-              <span>CHAT</span>
-            </button>
-            <button
-              onClick={() => setActiveTab("missions")}
-              className={`px-2.5 py-1 rounded-lg text-[10px] font-bold font-mono transition cursor-pointer flex items-center gap-1.5 relative ${
-                activeTab === "missions" ? "bg-cyan-500/20 text-cyan-300 border border-cyan-400/30" : "text-slate-400 hover:text-white"
-              }`}
-            >
-              <Workflow className="w-3 h-3" />
-              <span>SWARM DAG</span>
-              {autonomousGoals && autonomousGoals.length > 0 && (
-                <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse ml-0.5" />
-              )}
-            </button>
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-300 font-mono text-[11px] font-bold shadow-[0_0_12px_rgba(6,182,212,0.15)]">
+            <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+            <span>S.N.O.W. INTELLIGENCE STREAM</span>
           </div>
         </div>
 
         <div className="flex items-center gap-1.5 font-mono">
-          {activeTab === "chat" ? (
-            <>
-              <button
-                onClick={onClearHistory}
-                className="px-2.5 py-1 rounded-xl border border-cyan-500/20 bg-slate-900/90 text-[10px] font-bold text-slate-400 hover:text-white hover:border-cyan-400/40 transition cursor-pointer flex items-center gap-1"
-                title="Clear active conversation stream"
-              >
-                <Trash2 className="w-3 h-3" />
-                <span>Clear</span>
-              </button>
+          <button
+            onClick={onClearHistory}
+            className="px-2.5 py-1 rounded-xl border border-cyan-500/20 bg-slate-900/90 text-[10px] font-bold text-slate-400 hover:text-white hover:border-cyan-400/40 transition cursor-pointer flex items-center gap-1"
+            title="Clear active conversation stream"
+          >
+            <Trash2 className="w-3 h-3" />
+            <span>Clear</span>
+          </button>
 
-              <button
-                onClick={onExtractConversation}
-                className="px-2.5 py-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-[10px] font-bold text-cyan-300 hover:bg-cyan-500/20 transition cursor-pointer flex items-center gap-1"
-                title="Export conversation transcript"
-              >
-                <Download className="w-3 h-3" />
-                <span>Extract</span>
-              </button>
-            </>
-          ) : (
-            onRefreshGoals && (
-              <button
-                onClick={onRefreshGoals}
-                className="px-2.5 py-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-[10px] font-bold text-cyan-300 hover:bg-cyan-500/20 transition cursor-pointer flex items-center gap-1"
-                title="Refresh Swarm Telemetry"
-              >
-                <RotateCw className="w-3 h-3" />
-                <span>Sync</span>
-              </button>
-            )
-          )}
+          <button
+            onClick={onExtractConversation}
+            className="px-2.5 py-1 rounded-xl border border-cyan-500/30 bg-cyan-500/10 text-[10px] font-bold text-cyan-300 hover:bg-cyan-500/20 transition cursor-pointer flex items-center gap-1"
+            title="Export conversation transcript"
+          >
+            <Download className="w-3 h-3" />
+            <span>Extract</span>
+          </button>
         </div>
       </div>
 
-      {/* ─── Body: Chat Feed vs Swarm Missions View ─── */}
-      {activeTab === "missions" ? (
-        <div className="flex-1 p-3.5 overflow-y-auto space-y-3 font-sans scrollbar-none">
-          {/* Swarm Status Bar */}
-          <div className="p-2.5 rounded-2xl bg-slate-950/90 border border-cyan-500/30 flex items-center justify-between font-mono text-[10px]">
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-cyan-300 font-bold tracking-wider">SWARM ORCHESTRATOR</span>
-              <span className="text-slate-500">• 8 Specialists Ready</span>
-            </div>
-            <span className="text-cyan-400 font-bold">OODA 4s</span>
-          </div>
-
-          {/* Quick Seed Action Cards if no goals */}
-          {(!autonomousGoals || autonomousGoals.length === 0) && (
-            <div className="p-4 rounded-2xl bg-cyan-950/30 border border-cyan-500/20 flex flex-col gap-3 font-mono">
-              <div className="flex items-center gap-2 text-cyan-300 text-xs font-bold">
-                <Workflow className="w-4 h-4 text-cyan-400" />
-                <span>Autonomous Swarm Standing By</span>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed font-sans">
-                The continuous OODA goal engine is online. Seed initial continuous autonomous directives to begin multi-agent milestone dispatching:
-              </p>
-              <div className="grid grid-cols-1 gap-2 pt-1">
-                {onSeedGoal && (
-                  <>
-                    <button
-                      onClick={() => onSeedGoal("Daily Morning System Briefing", "Pre-compute weather for Madurai, Git cleanliness, and telemetry summary", 1)}
-                      className="p-2.5 rounded-xl border border-cyan-500/40 bg-slate-900/90 hover:bg-cyan-950/60 text-left transition cursor-pointer flex items-center justify-between group"
-                    >
-                      <div className="flex flex-col">
-                        <span className="text-xs font-bold text-cyan-300 group-hover:text-cyan-200">
-                          🎯 Daily Morning System Briefing
-                        </span>
-                        <span className="text-[9px] text-slate-500 font-sans">
-                          Madurai weather telemetry, Git cleanliness, and OS vitals
-                        </span>
-                      </div>
-                      <ArrowRight className="w-3.5 h-3.5 text-cyan-400 opacity-60 group-hover:opacity-100 transition" />
-                    </button>
-
-                    <button
-                      onClick={() => onSeedGoal("Proactive Git & Workspace Health", "Automated verification of clean state and repo integrity", 2)}
-                      className="p-2.5 rounded-xl border border-emerald-500/40 bg-slate-900/90 hover:bg-emerald-950/60 text-left transition cursor-pointer flex items-center justify-between group"
-                    >
-                      <div className="flex flex-col">
-                        <span className="text-xs font-bold text-emerald-300 group-hover:text-emerald-200">
-                          🛡️ Proactive Git & Workspace Health
-                        </span>
-                        <span className="text-[9px] text-slate-500 font-sans">
-                          Git object database sweep, zero-touch Windows isolation audit
-                        </span>
-                      </div>
-                      <ArrowRight className="w-3.5 h-3.5 text-emerald-400 opacity-60 group-hover:opacity-100 transition" />
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Goals List with Interactive DAG Milestones */}
-          {autonomousGoals && autonomousGoals.map((goal) => {
-            const isCompleted = goal.status === "completed";
-            const isActive = goal.status === "active";
-            const isPlanning = goal.status === "planning";
-
-            return (
-              <div
-                key={goal.id}
-                className="p-3.5 rounded-2xl bg-slate-950/90 border border-cyan-500/30 flex flex-col gap-2.5 shadow-lg"
-              >
-                {/* Goal Header */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex flex-col gap-0.5">
-                    <span className="text-xs font-bold text-cyan-200 font-mono tracking-wide">
-                      {goal.title}
-                    </span>
-                    <span className="text-[10px] text-slate-400 line-clamp-1 font-sans">
-                      {goal.description}
-                    </span>
-                  </div>
-                  <span
-                    className={`px-2 py-0.5 rounded-full text-[9px] font-mono font-bold uppercase shrink-0 ${
-                      isCompleted
-                        ? "bg-emerald-500/20 text-emerald-300 border border-emerald-400/30"
-                        : isActive
-                        ? "bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 animate-pulse"
-                        : isPlanning
-                        ? "bg-amber-500/20 text-amber-300 border border-amber-400/30"
-                        : "bg-slate-800 text-slate-400 border border-slate-700"
-                    }`}
-                  >
-                    {goal.status}
-                  </span>
-                </div>
-
-                {/* Progress Bar */}
-                <div className="space-y-1">
-                  <div className="flex justify-between text-[9px] font-mono text-slate-400">
-                    <span>PROGRESS</span>
-                    <span className="text-cyan-400 font-bold">{goal.progressPct}%</span>
-                  </div>
-                  <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden border border-cyan-500/20">
-                    <div
-                      className="h-full bg-gradient-to-r from-cyan-500 via-teal-400 to-emerald-400 transition-all duration-500"
-                      style={{ width: `${goal.progressPct}%` }}
-                    />
-                  </div>
-                </div>
-
-                {/* DAG Milestones Tree */}
-                {goal.subtasks && goal.subtasks.length > 0 && (
-                  <div className="pt-2 border-t border-cyan-500/15 space-y-1.5">
-                    <span className="text-[9px] font-mono text-cyan-400/70 tracking-wider font-semibold">
-                      DAG MILESTONES ({goal.subtasks.length}):
-                    </span>
-                    <div className="space-y-1.5 font-mono text-[10px]">
-                      {goal.subtasks.map((step: any) => {
-                        const isStepDone = step.status === "completed";
-                        const isStepRunning = step.status === "running";
-                        const isStepFailed = step.status === "failed";
-
-                        // Specialist Agent Styling
-                        let agentBadge = "bg-cyan-500/20 text-cyan-300 border-cyan-500/30";
-                        if (step.assignedTool === "SecurityGuard") agentBadge = "bg-emerald-500/20 text-emerald-300 border-emerald-500/30";
-                        else if (step.assignedTool === "Coder" || step.assignedTool === "PythonSandbox") agentBadge = "bg-purple-500/20 text-purple-300 border-purple-500/30";
-                        else if (step.assignedTool === "MemoryStore") agentBadge = "bg-blue-500/20 text-blue-300 border-blue-500/30";
-                        else if (step.assignedTool === "Notification") agentBadge = "bg-amber-500/20 text-amber-300 border-amber-500/30";
-
-                        return (
-                          <div
-                            key={step.id}
-                            className={`p-2 rounded-xl border transition-all ${
-                              isStepRunning
-                                ? "bg-cyan-950/50 border-cyan-400/50 shadow-[0_0_15px_rgba(6,182,212,0.15)]"
-                                : isStepDone
-                                ? "bg-slate-900/60 border-emerald-500/25"
-                                : "bg-slate-900/30 border-slate-800 text-slate-500"
-                            }`}
-                          >
-                            <div className="flex items-center justify-between gap-1.5">
-                              <div className="flex items-center gap-1.5 truncate">
-                                <span className="font-bold text-slate-500 shrink-0">#{step.stepOrder}</span>
-                                <span className={`px-1.5 py-0.2 rounded border text-[8px] font-bold shrink-0 ${agentBadge}`}>
-                                  {step.assignedTool}
-                                </span>
-                                <span className={`truncate font-medium ${isStepDone ? "text-slate-300" : isStepRunning ? "text-cyan-200" : "text-slate-500"}`}>
-                                  {step.title}
-                                </span>
-                              </div>
-                              <span className="shrink-0">
-                                {isStepDone && <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />}
-                                {isStepRunning && <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping inline-block" />}
-                                {!isStepDone && !isStepRunning && !isStepFailed && <Clock className="w-3 h-3 text-slate-600" />}
-                                {isStepFailed && <AlertTriangle className="w-3.5 h-3.5 text-rose-400" />}
-                              </span>
-                            </div>
-
-                            {/* Result Summary snippet when completed */}
-                            {step.resultSummary && (
-                              <div className="mt-1 pl-3 border-l-2 border-emerald-500/40 text-[9px] text-emerald-300/80 truncate font-sans">
-                                {step.resultSummary}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        /* ─── Scrollable Message Feed ─── */
-        <div className="flex-1 p-3.5 overflow-y-auto space-y-3 font-sans scrollbar-none">
-          {/* Active Mission HUD Mini-Banner */}
-          {activeGoal && (
-            <div
-              onClick={() => setActiveTab("missions")}
-              className="p-2.5 rounded-2xl bg-cyan-950/40 border border-cyan-500/30 backdrop-blur-md flex items-center justify-between cursor-pointer hover:border-cyan-400/60 transition group"
-            >
-              <div className="flex items-center gap-2 truncate">
-                <span className="relative flex h-2 w-2 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500" />
-                </span>
-                <span className="text-[10px] font-mono text-cyan-300 font-bold truncate">
-                  SWARM MISSION: {activeGoal.title}
-                </span>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[10px] font-mono font-extrabold text-cyan-400">
-                  {activeGoal.progressPct}%
-                </span>
-                <span className="text-[9px] font-mono text-slate-400 group-hover:text-cyan-300 flex items-center">
-                  DAG <ArrowRight className="w-2.5 h-2.5 ml-0.5" />
-                </span>
-              </div>
-            </div>
-          )}
+      {/* ─── Scrollable Message Feed ─── */}
+      <div className="flex-1 p-3.5 overflow-y-auto space-y-3 font-sans scrollbar-none">
         {chatHistory.map((msg, index) => {
           const isUser = msg.sender === "user";
           const isLast = index === chatHistory.length - 1;
@@ -540,7 +301,6 @@ export const HolographicMissionLog: React.FC<HolographicMissionLogProps> = ({
 
         <div ref={chatEndRef} />
       </div>
-      )}
 
       {/* ─── Floating Acoustic Voice & Input Dock ─── */}
       <div className="p-3 border-t border-cyan-500/20 bg-slate-950/95 relative space-y-2">

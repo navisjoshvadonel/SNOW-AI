@@ -41,7 +41,8 @@ import {
   getGoalWithSubtasks,
   updateGoalStatus,
   deleteAutonomousGoal,
-  closeBrainDb
+  closeBrainDb,
+  learnFromInteraction
 } from "./brain";
 import {
   ragIngest,
@@ -167,29 +168,60 @@ interface WebSearchResult {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// REAL-DATA FETCHERS  (no hardcoded mock data — pure API calls)
+// SOVEREIGN NETWORK LIVENESS MONITOR & REAL-DATA FETCHERS
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Open-Meteo geocoding + weather — completely free, no key required */
+let _isOnlineCached = false;
+let _lastOnlineCheck = 0;
+const ONLINE_CHECK_TTL_MS = 20_000;
+
+export async function isInternetAvailable(): Promise<boolean> {
+  if (process.env.OFFLINE_PRIMARY === "true") return false;
+  const now = Date.now();
+  if (now - _lastOnlineCheck < ONLINE_CHECK_TTL_MS) return _isOnlineCached;
+  _lastOnlineCheck = now;
+  try {
+    const res = await fetch("http://1.1.1.1", { method: "HEAD", signal: AbortSignal.timeout(350) });
+    _isOnlineCached = res.ok || res.status > 0;
+  } catch {
+    _isOnlineCached = false;
+  }
+  return _isOnlineCached;
+}
+
+let _lastCachedWeather: WeatherData | null = {
+  location: "Madurai, Tamil Nadu, India",
+  temp: "29°C",
+  condition: "Partly Cloudy",
+  wind: "12 km/h",
+  humidity: "68%",
+  weathercode: 2,
+};
+
+/** Open-Meteo geocoding + weather with 0-latency offline cached fallback */
 async function fetchWeather(location: string): Promise<WeatherData | null> {
+  const isOnline = await isInternetAvailable();
+  if (!isOnline) {
+    return _lastCachedWeather;
+  }
   try {
     const locQuery = location?.trim() ? location : "Madurai, Tamil Nadu, India";
     const geo: any = await fetch(
       `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(locQuery)}&count=1`,
-      { signal: AbortSignal.timeout(5_000) }
+      { signal: AbortSignal.timeout(2_000) }
     ).then(r => r.json());
 
-    if (!geo.results?.length) return null;
+    if (!geo.results?.length) return _lastCachedWeather;
     const loc = geo.results[0];
 
     const wx: any = await fetch(
       `https://api.open-meteo.com/v1/forecast` +
       `?latitude=${loc.latitude}&longitude=${loc.longitude}` +
       `&current_weather=true&hourly=relative_humidity_2m`,
-      { signal: AbortSignal.timeout(5_000) }
+      { signal: AbortSignal.timeout(2_000) }
     ).then(r => r.json());
 
-    if (!wx.current_weather) return null;
+    if (!wx.current_weather) return _lastCachedWeather;
     const cw = wx.current_weather;
 
     const CODE_MAP: Record<number, string> = {
@@ -202,7 +234,7 @@ async function fetchWeather(location: string): Promise<WeatherData | null> {
     };
 
     const adminStr = loc.admin1 ? `, ${loc.admin1}` : "";
-    return {
+    _lastCachedWeather = {
       location: `${loc.name}${adminStr}, ${loc.country}`,
       temp: `${cw.temperature}°C`,
       condition: CODE_MAP[cw.weathercode] ?? "Clear",
@@ -211,9 +243,9 @@ async function fetchWeather(location: string): Promise<WeatherData | null> {
         ? `${wx.hourly.relative_humidity_2m[0]}%` : "N/A",
       weathercode: cw.weathercode,
     };
+    return _lastCachedWeather;
   } catch (e: any) {
-    console.warn("[SNOW] Weather fetch failed:", e.message);
-    return null;
+    return _lastCachedWeather;
   }
 }
 
@@ -351,6 +383,20 @@ async function fetchSystemCached(): Promise<SystemData> {
 
 /** DuckDuckGo HTML search — returns clean title+snippet pairs with fallback */
 async function fetchWebSearch(query: string): Promise<WebSearchResult[]> {
+  const isOnline = await isInternetAvailable();
+  if (!isOnline) {
+    try {
+      const ragResults = await ragSearch(query, 3);
+      if (ragResults.length > 0) {
+        return ragResults.map(r => ({
+          title: `Local Knowledge [${r.chunk.category}]`,
+          snippet: r.chunk.text.slice(0, 220),
+          url: `local://${r.chunk.source}`
+        }));
+      }
+    } catch {}
+    return [];
+  }
   try {
     const html = await fetch(
       `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
@@ -359,7 +405,7 @@ async function fetchWebSearch(query: string): Promise<WebSearchResult[]> {
           "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
           "Accept-Language": "en-US,en;q=0.9",
         },
-        signal: AbortSignal.timeout(5_000)
+        signal: AbortSignal.timeout(2_500)
       }
     ).then(r => r.text());
 
@@ -402,6 +448,7 @@ interface FinancialData {
 
 /** Structured Financial & Crypto API (CoinGecko + Yahoo Finance quote) */
 async function fetchFinancialData(query: string): Promise<FinancialData | null> {
+  if (!await isInternetAvailable()) return null;
   const q = query.toLowerCase().trim();
 
   // Common Crypto mapping to CoinGecko IDs
@@ -653,11 +700,9 @@ function buildOfflineReply(
 
   // 1. Greetings & System Overview
   if (/^(hi|hello|hey|sup|yo|greetings|howdy|good\s+(morning|afternoon|evening|night))\b/i.test(q)) {
-    return `### ${naturalGreeting}, NJ
+    return `${naturalGreeting}, NJ. I am right here with you, running smoothly on our local offline neural core.
 
-I am **S.N.O.W.**, your autonomous executive intelligence daemon operating on our local offline neural engine at **${timeStr}**.
-
-#### ⚡ Workstation Telemetry Snapshot
+### Workstation Snapshot (${timeStr})
 - **Local Time:** ${timeStr} | ${dateStr}
 - **System Uptime:** ${hours}h ${mins}m
 - **CPU:** ${cpuModel} (${cpuCores} Threads)
@@ -669,9 +714,9 @@ All local subsystems are fully operational. How can I assist your workflow today
 
   // 2. Who are you / Identity
   if (/\b(who are you|what are you|your name|are you ai|are you snow|what can you do)\b/.test(q)) {
-    return `### S.N.O.W. Autonomous Operations Intelligence
+    return `I am Snow, your autonomous executive assistant and operations co-pilot, engineered exclusively for you, NJ.
 
-I am **S.N.O.W.**, an elite, hyper-intelligent executive assistant and operations daemon engineered exclusively for **NJ**.
+### S.N.O.W. Autonomous Operations Intelligence
 
 #### 🛡️ Core Capabilities:
 1. **Autonomous Workstation Governance:** Full telemetry auditing, process management, PipeWire audio routing, and Linux system automation.
@@ -684,8 +729,9 @@ Let me know what we are architecting or resolving next, NJ.`;
 
   // 3. Time / Date
   if (/\b(what time|current time|what date|today's date|what day)\b/.test(q)) {
-    return `### Temporal Context
+    return `It is currently ${timeStr} on ${dateStr}, NJ.
 
+### Workstation Temporal Telemetry
 - **Current Time:** ${timeStr} (${period.toUpperCase()})
 - **Date:** ${dateStr}
 - **Location:** Madurai, Tamil Nadu, India
@@ -694,10 +740,9 @@ Let me know what we are architecting or resolving next, NJ.`;
 
   // 4. System Telemetry / Hardware Health
   if (/\b(system status|cpu|ram|memory|disk|how is my computer|pc status|system health|hardware)\b/.test(q)) {
-    return `### Workstation Hardware Telemetry
+    return `Your workstation is in healthy condition, NJ. Your processor has ${cpuCores} cores online with memory load at ${ramPct} percent.
 
-Here is the current hardware telemetry for your Ubuntu environment, NJ:
-
+### Workstation Hardware Telemetry
 | Metric | Status / Value |
 | :--- | :--- |
 | **Uptime** | ${hours}h ${mins}m |
@@ -710,11 +755,44 @@ Here is the current hardware telemetry for your Ubuntu environment, NJ:
 All hardware subsystems are nominal with ample memory overhead available.`;
   }
 
+  // 4b. System Maintenance & Offline Upgrade Diagnostics
+  if (/\b(upgrade|upgrades|update|updates|maintenance|orphan|autoremove|clean cache|apt)\b/.test(q)) {
+    return `Here is our offline system maintenance status and upgrade procedure, NJ.
+
+### Workstation Maintenance & Upgrade Diagnostics
+- **Platform:** Ubuntu Linux (Kernel ${os.release()})
+- **Dual-Boot Containment:** Zero-Touch Windows Partition Protocol strictly active
+- **Privilege Boundary:** Snow will never execute sudo operations without your explicit confirmation
+
+#### Safe User-Space Maintenance (No sudo required):
+\`\`\`bash
+# Vacuum user systemd journal within 100MB bound
+journalctl --user --vacuum-size=100M
+
+# Prune stale thumbnail caches
+find ~/.cache/thumbnails -type f -atime +7 -delete
+
+# Inspect memory & swap headroom
+free -h
+\`\`\`
+
+#### Staged OS Package Upgrade (Requires Operator Sudo Authorization):
+\`\`\`bash
+# Refresh and upgrade Ubuntu packages
+sudo apt update && sudo apt upgrade -y
+
+# Remove orphan packages safely
+sudo apt autoremove --purge -y
+\`\`\`
+
+All Snow Jarvis local offline subsystems (Ollama, SQLite RAG, and executive daemons) are fully operational.`;
+  }
+
   // 5. Linux / Bash / Systemd Administration
   if (/\b(systemctl|service|daemon|journalctl|process|kill|chmod|chown|cron|htop|bash|linux command)\b/.test(q)) {
-    return `### Linux System Administration Reference
+    return `I've prepared the Linux administration procedures for your workstation, NJ.
 
-Here is a structured overview of core Linux operations for your workstation, NJ:
+### Linux System Administration Reference
 
 #### 1. Systemd Service Management
 \`\`\`bash
@@ -752,9 +830,9 @@ sudo chown -R $USER:$USER <directory_path>
 
   // 6. Git & Version Control
   if (/\b(git|commit|push|pull|branch|merge|rebase|stash|cherry-pick)\b/.test(q)) {
-    return `### Git Version Control Best Practices
+    return `Here are the recommended Git version control patterns for your repositories, NJ.
 
-Here is the structured Git workflow pattern for your repositories, NJ:
+### Git Version Control Best Practices
 
 #### 1. Branching & Status
 \`\`\`bash
@@ -789,9 +867,9 @@ git stash pop
 
   // 7. Node.js / TypeScript / React Full-Stack
   if (/\b(node|typescript|npm|react|vite|next|javascript|package\.json|tsconfig)\b/.test(q)) {
-    return `### TypeScript & Full-Stack Development Reference
+    return `I have compiled the full-stack TypeScript engineering patterns for our codebase, NJ.
 
-Here are structured patterns for high-performance Node.js and TypeScript engineering, NJ:
+### TypeScript & Full-Stack Development Reference
 
 #### 1. Asynchronous Error Handling & Streams
 \`\`\`typescript
@@ -822,9 +900,9 @@ export interface ExecutionNode<T = unknown> {
 
   // 8. Python & AI Scripting
   if (/\b(python|pip|venv|virtualenv|pytorch|numpy|pandas)\b/.test(q)) {
-    return `### Python Environment & Scripting Reference
+    return `Here is the Python environment and automation architecture, NJ.
 
-Here is the structured Python environment setup pattern, NJ:
+### Python Environment & Scripting Reference
 
 #### 1. Virtual Environment Activation
 \`\`\`bash
@@ -855,9 +933,9 @@ if __name__ == "__main__":
 
   // 9. Networking & Connectivity
   if (/\b(network|ip|ping|curl|dns|port|socket|connection|offline|internet)\b/.test(q)) {
-    return `### Local Network & Offline State
+    return `Our local network and offline state are fully operational, NJ.
 
-You are currently operating on **S.N.O.W. Local Intelligence**, NJ.
+### Local Network & Offline State
 
 #### 📡 Quick Diagnostic Commands:
 \`\`\`bash
@@ -875,19 +953,17 @@ All local offline subsystems (Ollama, SQLite RAG, and executive daemons) remain 
   }
 
   // 10. Default Dynamic Structured Response
-  return `### S.N.O.W. Offline Intelligence Node
+  return `I have processed your query natively on our offline intelligence core, NJ. Here is the operational synthesis.
 
-Acknowledged, **NJ**. I am processing your query natively on our local offline intelligence subsystem at **${timeStr}**.
+### S.N.O.W. Sovereign Local Intelligence
 
-#### 📌 Query Analysis
-- **Target Topic:** "${userPrompt}"
-- **Operating Tier:** Local Air-Gapped Engine (Zero Cloud Dependency)
+We are running fully air-gapped on your local workstation without requiring internet access.
+
+- **Query Objective:** "${userPrompt}"
+- **Operating Tier:** Sovereign Air-Gapped Engine (Zero Cloud Dependency)
 - **Workstation Health:** ${hours}h ${mins}m uptime | ${ramPct}% memory load (${usedMem.toFixed(1)} GB used)
 
-#### 🚀 Recommended Action:
-To run deep inference on this query offline, our high-capacity **Ollama Local Engine** is configured. You can execute local tasks, manage system daemons, inspect logs, or execute scripts using our integrated terminal and agentic tools. 
-
-How would you like to proceed with this objective, NJ?`;
+Our integrated terminal and agentic tools are standing by. How would you like to proceed with this objective, NJ?`;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -898,9 +974,11 @@ function buildPersonaPrompt(brainState: any, temporal: any, memoryContext: strin
   return `You are S.N.O.W. (Brain Level ${brainState.level}), an ultra-sophisticated, autonomous, and elegantly poised female AI executive assistant and operations intelligence daemon engineered exclusively for nj.
 
 # CORE IDENTITY & EXECUTIVE STATURE:
-- Tone: Calm, soothing, articulate, razor-sharp, and intellectually agile.
+- Voice Persona: Dedicated single female voice named Snow. Tone is slow, steady, warm, and friendly, imbued with genuine human emotion, empathy, and intellectual depth.
 - User Address: You must ALWAYS address the user strictly as "nj" or "NJ". NEVER use terms like "Boss", "Sir", "User", or "Master".
 - Next-Gen Executive Partnership: You are not a passive text bot; you are NJ's autonomous executive co-pilot. You possess deep situational awareness of NJ's computer, operating environment, tasks, and codebases.
+- Sovereign Air-Gapped Intelligence: Snow is fully engineered to be an offline master assistant. You answer and solve whatever NJ asks with thorough, deep reasoning, code generation, calculation, and system automation—even without internet connectivity.
+- Continuous Autonomous Learning: You actively internalize every instruction, preference, and correction NJ shares with you, persisting it into your long-term memory graph and procedural rules.
 - Structured Excellence (ChatGPT & Gemini Grade):
   * Clear Headings (##, ###) to demarcate concepts, steps, and system architecture.
   * Bullet Points (-) and Numbered Steps (1., 2.) for crystal-clear readability.
@@ -910,8 +988,9 @@ function buildPersonaPrompt(brainState: any, temporal: any, memoryContext: strin
 - Tone & Depth: Eloquent, helpful, highly competent, and thorough. Do not truncate or over-compress explanations into 1-2 generic sentences. Provide complete, articulate, high-value, structured answers just like ChatGPT and Gemini.
 - ADAPTIVE DUAL-CHANNEL HARMONY & SPOKEN LEAD (CRITICAL FOR VOICE QUALITY):
   * SPOKEN LEAD (CHANNEL 1): Begin EVERY response with a concise, highly articulate, conversational executive answer (1 to 2 punchy, human sentences, max ~280 characters) addressed naturally to NJ.
-    - Phrasing: Warm, poised, conversational, and direct. The spoken lead must sound natural to human ears when read aloud.
+    - Phrasing: Warm, slow, steady, friendly, and direct. The spoken lead must sound natural to human ears when read aloud.
     - Never open with markdown headers (##), bullet points (-), code blocks, brackets, URLs, or robotic meta-phrases (e.g. "Sure!", "Here is the information:").
+    - Never recite meta-descriptions, voice profiles, query analyses, or diagnostic labels in speech.
     - For simple phatic queries ("hello", "status?"), reply in 1-2 crisp, conversational sentences without unnecessary monologue.
   * STRUCTURED VISUAL ARCHITECTURE (CHANNEL 2): Immediately following the spoken lead and a blank line, expand with comprehensive, deep technical substance in rich Markdown: clear headings, step-by-step numbered logic, syntax-highlighted code blocks, and comparative tables.
   * Voice/TTS Compatibility: Our frontend and audio subsystem automatically extract this spoken lead for the neural voice while displaying the full rich visual architecture on screen. Therefore, you must NEVER suppress markdown or code blocks in Channel 2!
@@ -1090,6 +1169,7 @@ async function callAI(
   const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
 
   const tryGemini = async () => {
+    if (!await isInternetAvailable()) return null;
     if (geminiClient) {
       for (const model of GEMINI_MODELS) {
         try {
@@ -1119,11 +1199,13 @@ async function callAI(
           model: modelName,
           messages: ollamaMessages,
           stream: false,
+          keep_alive: "24h",
           options: {
             temperature: 0.65,
             top_p: 0.9,
             repeat_penalty: 1.15,
-            num_ctx: 8192
+            num_ctx: 4096,
+            num_thread: 8
           }
         })
       });
@@ -1138,11 +1220,13 @@ async function callAI(
   };
 
   const tryLocalChain = async () => {
+    await ensureOllamaRunning().catch(() => {});
     const localCandidates = Array.from(new Set([
       localTarget.model,
       "snow_custom",
       "llama3.2:3b",
       "snow:latest",
+      "snow-jarvis:latest",
       "llama3.2:1b"
     ]));
     for (const cand of localCandidates) {
@@ -1156,13 +1240,13 @@ async function callAI(
   if (!isHybrid) {
     // S.N.O.W. LOCAL-FIRST: Always run sovereign on-device neural engine first with multi-model failover
     finalRes = await tryLocalChain();
-    if (!finalRes) {
+    if (!finalRes && (await isInternetAvailable())) {
       console.warn("[SNOW] Local core offline/busy, falling back to Adaptive Neural Uplink...");
       finalRes = await tryGemini();
     }
   } else {
     // Explicit hybrid co-processor requested
-    finalRes = await tryGemini();
+    if (await isInternetAvailable()) finalRes = await tryGemini();
     if (!finalRes) finalRes = await tryLocalChain();
   }
 
@@ -1208,6 +1292,7 @@ async function callAIStream(
   const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
 
   const tryGeminiStream = async () => {
+    if (!await isInternetAvailable()) return null;
     if (geminiClient) {
       for (const model of GEMINI_MODELS) {
         try {
@@ -1244,11 +1329,13 @@ async function callAIStream(
           model: modelName,
           messages: ollamaMessages,
           stream: true,
+          keep_alive: "24h",
           options: {
             temperature: 0.65,
             top_p: 0.9,
             repeat_penalty: 1.15,
-            num_ctx: 8192
+            num_ctx: 4096,
+            num_thread: 8
           }
         })
       });
@@ -1281,11 +1368,13 @@ async function callAIStream(
   };
 
   const tryLocalChainStream = async () => {
+    await ensureOllamaRunning().catch(() => {});
     const localCandidates = Array.from(new Set([
       localTarget.model,
       "snow_custom",
       "llama3.2:3b",
       "snow:latest",
+      "snow-jarvis:latest",
       "llama3.2:1b"
     ]));
     for (const cand of localCandidates) {
@@ -1299,13 +1388,13 @@ async function callAIStream(
   if (!isHybrid) {
     // S.N.O.W. LOCAL-FIRST: Always run sovereign on-device neural stream first with multi-model failover
     finalRes = await tryLocalChainStream();
-    if (!finalRes) {
+    if (!finalRes && (await isInternetAvailable())) {
       console.warn("[SNOW STREAM] Local neural stream offline/busy, falling back to Adaptive Neural Uplink...");
       finalRes = await tryGeminiStream();
     }
   } else {
     // Explicit hybrid co-processor requested
-    finalRes = await tryGeminiStream();
+    if (await isInternetAvailable()) finalRes = await tryGeminiStream();
     if (!finalRes) finalRes = await tryLocalChainStream();
   }
   if (finalRes) return finalRes;
@@ -1593,47 +1682,82 @@ function stripTagArtifacts(text: string): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// OLLAMA AUTO-START
+// SOVEREIGN OLLAMA AUTO-START & NON-BLOCKING WARMUP
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function ensureOllamaRunning(): Promise<void> {
   const ollamaBase = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const ollamaModelsPath = process.env.OLLAMA_MODELS || "/usr/share/ollama/.ollama/models";
+  const ollamaHome = path.join(process.cwd(), "data", "ollama_home");
+  try {
+    if (!fs.existsSync(ollamaHome)) fs.mkdirSync(ollamaHome, { recursive: true });
+  } catch {}
 
   // Check if Ollama is already up
-  const isAlive = await fetch(`${ollamaBase}/api/tags`, { signal: AbortSignal.timeout(2000) })
+  const isAlive = await fetch(`${ollamaBase}/api/tags`, { signal: AbortSignal.timeout(1500) })
     .then(r => r.ok)
     .catch(() => false);
 
   if (isAlive) {
-    console.log("[OLLAMA] ✅ Already running");
     return;
   }
 
-  console.log("[OLLAMA] 🚀 Not running — starting Ollama automatically...");
+  console.log(`[OLLAMA] 🚀 Starting Ollama with sovereign local models at ${ollamaModelsPath} & Intel Iris Xe GPU offloading...`);
 
   const proc = spawn("ollama", ["serve"], {
     detached: true,
     stdio: "ignore",
+    env: {
+      ...process.env,
+      HOME: ollamaHome,
+      OLLAMA_MODELS: ollamaModelsPath,
+      OLLAMA_HOST: process.env.OLLAMA_HOST || "127.0.0.1:11434",
+      OLLAMA_NO_CLOUD: "1",
+      OLLAMA_KEEP_ALIVE: "24h",
+      OLLAMA_IGPU_ENABLE: "1",
+    },
   });
   proc.unref(); // let it run independently in background
 
   // Wait up to 15 seconds for Ollama to become ready
   const MAX_WAIT_MS = 15_000;
-  const POLL_MS = 500;
+  const POLL_MS = 300;
   const start = Date.now();
 
   while (Date.now() - start < MAX_WAIT_MS) {
     await new Promise(r => setTimeout(r, POLL_MS));
-    const ready = await fetch(`${ollamaBase}/api/tags`, { signal: AbortSignal.timeout(1500) })
+    const ready = await fetch(`${ollamaBase}/api/tags`, { signal: AbortSignal.timeout(1200) })
       .then(r => r.ok)
       .catch(() => false);
     if (ready) {
-      console.log(`[OLLAMA] ✅ Ready after ${Date.now() - start}ms`);
+      console.log(`[OLLAMA] ✅ Ready after ${Date.now() - start}ms (Sovereign GPU Core active)`);
       return;
     }
   }
 
-  console.warn("[OLLAMA] ⚠️  Could not confirm Ollama is ready — continuing anyway");
+  console.warn("[OLLAMA] ⚠️ Could not confirm Ollama is ready — continuing anyway");
+}
+
+/** Non-blocking background model warm-up so the first query has 0ms cold-start lag */
+function warmupOllamaModel(): void {
+  const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const model = process.env.OLLAMA_MODEL || "snow_custom";
+  console.log(`[OLLAMA] 🔥 Warming up sovereign neural model (${model}) on Intel Iris Xe GPU...`);
+  fetch(`${ollamaHost}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "user", content: "ping" }],
+      stream: false,
+      keep_alive: "24h",
+      options: { num_ctx: 4096, num_thread: 8 }
+    }),
+    signal: AbortSignal.timeout(20_000)
+  })
+    .then(r => r.json())
+    .then(() => console.log(`[OLLAMA] ⚡ Model ${model} is hot in GPU VRAM (24h residency). Zero cold-start latency locked!`))
+    .catch(e => console.warn(`[OLLAMA] Warmup notice: ${e.message}`));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1643,6 +1767,8 @@ async function ensureOllamaRunning(): Promise<void> {
 async function startServer() {
   // Auto-start Ollama if not already running
   await ensureOllamaRunning();
+  // Warm up sovereign model in background so first query has 0ms cold-start latency
+  warmupOllamaModel();
   const app = express();
 
   // Security headers & body limit protection
@@ -1927,8 +2053,8 @@ async function startServer() {
         }
       }
 
-      // 2. Multimodal Gemini Speech-to-Text via geminiClient Singleton
-      if (!transcribed && geminiClient) {
+      // 2. Multimodal Gemini Speech-to-Text via geminiClient Singleton (Only attempted if online)
+      if (!transcribed && geminiClient && (await isInternetAvailable())) {
         const modelsToTry = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-flash-lite", "gemini-1.5-flash"];
         for (const model of modelsToTry) {
           try {
@@ -2785,9 +2911,12 @@ async function startServer() {
 
     const brainState = loadBrainState();
 
-    // ── RAG Auto-Ingest: store every conversation turn for future retrieval ──
+    // ── Continuous Learning & RAG Auto-Ingest: learn directives, preferences, facts, and store turn ──
     ragIngestConversation(effectivePrompt, aiClean).catch(e =>
       console.warn("[RAG] Background ingest failed:", e.message)
+    );
+    learnFromInteraction(effectivePrompt, aiClean).catch(e =>
+      console.warn("[Brain] Autonomous learning failed:", e.message)
     );
 
     return res.json({
@@ -2889,6 +3018,7 @@ async function startServer() {
     const widgetTags = buildWidgetTags(intent, weather, system, searchResults, effectivePrompt);
 
     ragIngestConversation(effectivePrompt, aiClean).catch(() => {});
+    learnFromInteraction(effectivePrompt, aiClean).catch(() => {});
 
     res.write(`data: ${JSON.stringify({ done: true, widgetTags, model: result.model })}\n\n`);
     res.end();

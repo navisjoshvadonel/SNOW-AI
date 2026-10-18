@@ -404,63 +404,11 @@ export default function App() {
   const [showConfetti, setShowConfetti] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
-  const [selectedVoice, setSelectedVoice] = useState<string>(() => localStorage.getItem("snow_voice") || "en-US-AvaNeural");
-  const [availableNeuralVoices, setAvailableNeuralVoices] = useState<Array<{ id: string; name: string; persona: string; gender: string; locale: string }>>([
-    { id: "en-US-AvaNeural", name: "Ava", persona: "Expressive, warm, and poised (Default)", gender: "female", locale: "en-US" },
-    { id: "en-US-JennyNeural", name: "Jenny", persona: "Crisp, conversational executive co-pilot", gender: "female", locale: "en-US" },
-    { id: "en-US-EmmaNeural", name: "Emma", persona: "Friendly, cheerful, and engaging", gender: "female", locale: "en-US" },
-    { id: "en-US-ChristopherNeural", name: "Christopher", persona: "Deep, authoritative JARVIS cadence", gender: "male", locale: "en-US" },
-    { id: "en-US-GuyNeural", name: "Guy", persona: "Casual, relaxed natural male presence", gender: "male", locale: "en-US" },
-    { id: "en-IN-NeerjaNeural", name: "Neerja", persona: "Fluent Indian English, crisp clarity", gender: "female", locale: "en-IN" },
+  // Dedicated S.N.O.W. Female Neural Voice: Slow, steady, warm & friendly
+  const selectedVoice = "en-US-AvaNeural";
+  const [availableNeuralVoices] = useState<Array<{ id: string; name: string; persona: string; gender: string; locale: string }>>([
+    { id: "en-US-AvaNeural", name: "Snow", persona: "Slow, steady, warm, and friendly with genuine human emotion", gender: "female", locale: "en-US" }
   ]);
-  const [showVoiceModal, setShowVoiceModal] = useState<boolean>(false);
-
-  useEffect(() => {
-    fetch("/api/snow/tts/voices")
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.voices && Array.isArray(d.voices)) {
-          setAvailableNeuralVoices(d.voices);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
-  const handlePreviewVoice = async (voiceId: string, voiceName: string) => {
-    try {
-      setToastMessage(`Auditioning ${voiceName} neural voice...`);
-      const res = await fetch("/api/snow/tts/synthesize", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: `Neural voice switched to ${voiceName}. All systems operational, NJ.`,
-          voice: voiceId,
-          urgency: "calm",
-        }),
-      });
-      const data = await res.json();
-      if (data.audioBase64) {
-        if (activeHtmlAudioRef.current) {
-          try {
-            activeHtmlAudioRef.current.pause();
-            activeHtmlAudioRef.current.currentTime = 0;
-          } catch {}
-        }
-        const audio = new Audio("data:audio/mp3;base64," + data.audioBase64);
-        activeHtmlAudioRef.current = audio;
-        audio.play().catch(() => {});
-      }
-    } catch {
-      setToastMessage("Voice test failed. Check network connection.");
-    }
-  };
-
-  const handleSelectVoice = (voiceId: string, voiceName: string) => {
-    setSelectedVoice(voiceId);
-    localStorage.setItem("snow_voice", voiceId);
-    setToastMessage(`Active neural voice: ${voiceName}.`);
-    handlePreviewVoice(voiceId, voiceName);
-  };
 
   // ── Biometric Auth Gate ────────────────────────────────────────────────────
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1232,9 +1180,15 @@ export default function App() {
         if (leadLines.length > 0) break; // End of opening paragraph
         continue;
       }
-      // Stop before headings, code blocks, tables, horizontal rules, or bullet lists
-      if (/^(?:#{1,6}\s|```|\||---+|\*{3,}|[-*•]\s|\d+\.\s|>)/.test(trimmed)) {
-        break;
+      // Skip opening headings so we don't abort immediately on `### ...`
+      if (/^#{1,6}\s/.test(trimmed)) {
+        if (leadLines.length > 0) break;
+        continue;
+      }
+      // Stop before code blocks, tables, horizontal rules, or bullet lists
+      if (/^(?:```|\||---+|\*{3,}|[-*•]\s|\d+\.\s|>)/.test(trimmed)) {
+        if (leadLines.length > 0) break;
+        continue;
       }
       leadLines.push(trimmed);
     }
@@ -1243,6 +1197,10 @@ export default function App() {
 
     // 2. Clean text specifically for human voice synthesis
     const cleaned = candidateBlock
+      // Strip voice description, meta labels, and stage directions
+      .replace(/(?:voice description|voice profile|persona|query analysis|target topic|operating tier|workstation health|recommended action|system status|telemetry snapshot)\s*:?[^\n.]*[.\n]?/gi, " ")
+      .replace(/\*[^*]+\*/g, " ")
+      .replace(/\([^)]{0,100}(?:whisper|speaking|tone|voice|pause|cadence|emotion)[^)]{0,100}\)/gi, " ")
       // Strip markdown code blocks completely (never speak "Code omitted")
       .replace(/```[\s\S]*?```/g, " ")
       // Strip markdown tables
@@ -1401,10 +1359,10 @@ export default function App() {
     isSpeakingRef.current = true;
 
     try {
-      // 1. Primary: S.N.O.W. High-Fidelity Humanized Neural Engine (edge-tts)
-      // Generous 7.0s timeout: prevents premature abort under network latency
+      // 1. Primary: S.N.O.W. High-Fidelity Humanized Neural Engine (edge-tts / disk cache / spd-say)
+      // Fast 2.0s timeout: provides zero-latency fallback to browser Web Speech API when offline
       const abortCtrl = new AbortController();
-      const abortTimer = setTimeout(() => abortCtrl.abort(), 7000);
+      const abortTimer = setTimeout(() => abortCtrl.abort(), 2000);
 
       const res = await fetch("/api/snow/tts/synthesize", {
         method: "POST",
@@ -1482,7 +1440,7 @@ export default function App() {
       console.warn("[Snow Voice] Neural Audio stream timed out or unavailable, using Web Speech fallback:", err);
     }
 
-    // 2. Secondary Fallback: Browser Web Speech API with calm, steady prosody
+    // 2. Secondary Fallback: Browser Web Speech API with slow, steady, warm prosody
     if (!("speechSynthesis" in window)) {
       setIsSpeaking(false);
       isSpeakingRef.current = false;
@@ -1491,17 +1449,17 @@ export default function App() {
 
     try {
       const utterance = new SpeechSynthesisUtterance(spokenPayload);
-      utterance.rate = 0.98;
+      utterance.rate = 0.92; // Slow and steady cadence
       utterance.pitch = 1.0;
 
       const voices = (availableVoicesRef.current && availableVoicesRef.current.length > 0)
         ? availableVoicesRef.current
         : window.speechSynthesis.getVoices();
 
-      // Top-tier humanized voice prioritizer
+      // Filter strictly for female voices
       const femaleVoice = voices.find(v => 
         v.lang.startsWith("en") && (
-          /ava|jenny|emma|aria|samantha|victoria|karen|zira|sonia|natasha|susan|moira|tessa|stephanie|allison|fiona|veena|catherine|linda/i.test(v.name)
+          /ava|jenny|emma|aria|samantha|victoria|karen|zira|sonia|natasha|susan|moira|tessa|stephanie|allison|fiona|veena|catherine|linda|female/i.test(v.name)
         )
       ) || voices.find(v =>
         v.lang.startsWith("en") && (
@@ -1546,7 +1504,7 @@ export default function App() {
         handleSpeechDone();
       };
 
-      const maxSpeechMs = Math.max(3500, (spokenSummary.length * 95) + 2000);
+      const maxSpeechMs = Math.max(3500, (spokenPayload.length * 95) + 2000);
       speechWatchdogRef.current = setTimeout(() => {
         if (isSpeakingRef.current) {
           console.log("[Snow Voice] Speech watchdog auto-recovered state.");
@@ -1606,7 +1564,8 @@ export default function App() {
       const res = await fetch("/api/snow/voice/transcribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ audio: base64Audio, mimeType: audioBlob.type || "audio/webm" })
+        body: JSON.stringify({ audio: base64Audio, mimeType: audioBlob.type || "audio/webm" }),
+        signal: AbortSignal.timeout(2500),
       });
 
       if (!res.ok) return "";
@@ -2476,87 +2435,13 @@ export default function App() {
             <span>{isMuted ? "MUTED" : "VOICE ON"}</span>
           </div>
 
-          {/* Neural Voice Engine Selector */}
-          <div className="relative">
-            <button
-              onClick={() => setShowVoiceModal(!showVoiceModal)}
-              className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl border border-cyan-500/30 bg-slate-900/90 hover:bg-cyan-500/15 text-cyan-300 hover:text-cyan-200 text-[10px] font-mono font-bold transition cursor-pointer shadow-[0_0_12px_rgba(6,182,212,0.12)]"
-              title="Select S.N.O.W. Neural Voice Engine"
-            >
-              <Sparkles className="w-3 h-3 text-cyan-400" />
-              <span>VOICE: {availableNeuralVoices.find((v) => v.id === selectedVoice)?.name.toUpperCase() || "AVA"}</span>
-            </button>
-
-            {/* Neural Voice Quick Popover */}
-            <AnimatePresence>
-              {showVoiceModal && (
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.95, y: 5 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95, y: 5 }}
-                  className="absolute right-0 top-full mt-2 w-72 rounded-2xl bg-slate-950/95 border border-cyan-500/40 backdrop-blur-2xl p-3 z-50 shadow-[0_0_30px_rgba(6,182,212,0.3)] font-sans"
-                >
-                  <div className="flex items-center justify-between pb-2 mb-2 border-b border-cyan-500/20 font-mono text-[11px] font-bold text-cyan-300">
-                    <span className="flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-                      NEURAL VOICE ENGINE
-                    </span>
-                    <button
-                      onClick={() => setShowVoiceModal(false)}
-                      className="p-1 rounded-lg hover:bg-cyan-500/20 text-slate-400 hover:text-white transition cursor-pointer"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                  <div className="space-y-1.5 max-h-64 overflow-y-auto scrollbar-thin pr-0.5">
-                    {availableNeuralVoices.map((v) => {
-                      const isSelected = selectedVoice === v.id;
-                      return (
-                        <div
-                          key={v.id}
-                          className={`flex items-center justify-between p-2 rounded-xl border transition cursor-pointer ${
-                            isSelected
-                              ? "bg-cyan-500/20 border-cyan-400/60 shadow-[0_0_12px_rgba(6,182,212,0.2)]"
-                              : "bg-slate-900/80 border-slate-700/40 hover:bg-slate-800/80 hover:border-cyan-500/30"
-                          }`}
-                          onClick={() => handleSelectVoice(v.id, v.name)}
-                        >
-                          <div className="flex-1 min-w-0 pr-2">
-                            <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-white">
-                              <span>{v.name}</span>
-                              <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 border border-slate-700 text-slate-400 font-normal">
-                                {v.gender} • {v.locale}
-                              </span>
-                            </div>
-                            <p className="text-[10px] text-slate-400 truncate mt-0.5 font-sans">
-                              {v.persona}
-                            </p>
-                          </div>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handlePreviewVoice(v.id, v.name);
-                              }}
-                              className="p-1 rounded-lg bg-cyan-500/10 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 transition cursor-pointer"
-                              title={`Audition ${v.name}'s voice`}
-                            >
-                              <Play className="w-2.5 h-2.5" />
-                            </button>
-                            {isSelected && (
-                              <div className="p-1 rounded-lg bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                                <Check className="w-2.5 h-2.5" />
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
+          {/* Dedicated S.N.O.W. Female Voice Badge */}
+          <div
+            className="flex items-center gap-1.5 px-3 py-1 rounded-xl border border-cyan-500/30 bg-slate-900/90 text-cyan-300 text-[10px] font-mono font-bold shadow-[0_0_12px_rgba(6,182,212,0.12)]"
+            title="Single Curated Female Voice: Slow, steady, warm & friendly"
+          >
+            <Sparkles className="w-3 h-3 text-cyan-400" />
+            <span>VOICE: SNOW (STEADY & WARM)</span>
           </div>
 
           {/* Quick Weather Badge */}

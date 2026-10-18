@@ -43,8 +43,29 @@ wait_for_server() {
   return 1
 }
 
+# ── Ensure Ollama offline neural engine is ready ─────────────────────────────
+ensure_ollama_running() {
+  export OLLAMA_MODELS="${OLLAMA_MODELS:-/usr/share/ollama/.ollama/models}"
+  export OLLAMA_HOST="${OLLAMA_HOST:-127.0.0.1:11434}"
+  export OLLAMA_NO_CLOUD="${OLLAMA_NO_CLOUD:-1}"
+  export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-24h}"
+  export OLLAMA_IGPU_ENABLE="${OLLAMA_IGPU_ENABLE:-1}"
+  export HOME="${PROJECT_DIR}/data/ollama_home"
+  mkdir -p "$HOME" 2>/dev/null || true
+
+  if curl -s -o /dev/null -w "%{http_code}" --max-time 1 "http://127.0.0.1:11434/api/tags" 2>/dev/null | grep -q "200"; then
+    return 0
+  fi
+  if command -v ollama &>/dev/null; then
+    log "Starting sovereign Ollama neural engine with Intel Iris Xe GPU offloading..."
+    nohup ollama serve > /tmp/ollama-snow.log 2>&1 &
+    sleep 1
+  fi
+}
+
 # ── Start server via systemd or direct fallback ──────────────────────────────
 ensure_server_running() {
+  ensure_ollama_running
   if is_server_ready; then
     return 0
   fi

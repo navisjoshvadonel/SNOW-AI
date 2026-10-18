@@ -2,6 +2,7 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import { dreamCycle } from "./dreamCycle";
 import { startIndiaKnowledgeCron } from "./indiaKnowledgeUpdater";
+import { systemMaintenance } from "./systemMaintenance";
 
 const execAsync = promisify(exec);
 
@@ -34,5 +35,13 @@ async function runNightlyTasks() {
     console.log("[SNOW CRON] Dream cycle complete.");
   } catch (err: any) {
     console.error("[SNOW CRON] Dream cycle failed:", err.message);
+  }
+
+  try {
+    console.log("[SNOW CRON] Executing safe user-space maintenance...");
+    const maintResult = await systemMaintenance.performSafeMaintenance();
+    console.log(`[SNOW CRON] Safe maintenance complete: Reclaimed ~${Math.round(maintResult.reclaimedKb / 1024)}MB. Actions:`, maintResult.actionsTaken);
+  } catch (err: any) {
+    console.error("[SNOW CRON] Safe maintenance failed:", err.message);
   }
 }

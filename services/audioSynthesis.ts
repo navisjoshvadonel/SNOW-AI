@@ -35,57 +35,12 @@ export interface VoiceProfile {
 export const CURATED_VOICES: VoiceProfile[] = [
   {
     id: "en-US-AvaNeural",
-    name: "Ava",
+    name: "Snow",
     gender: "female",
     locale: "en-US",
-    persona: "Expressive, warm, and eloquently poised (Default)",
+    persona: "Slow, steady, warm, and friendly with genuine human emotion",
     pitch: "+0Hz",
-    rate: "-2%",
-  },
-  {
-    id: "en-US-JennyNeural",
-    name: "Jenny",
-    gender: "female",
-    locale: "en-US",
-    persona: "Crisp, conversational, and articulate executive co-pilot",
-    pitch: "+0Hz",
-    rate: "+0%",
-  },
-  {
-    id: "en-US-EmmaNeural",
-    name: "Emma",
-    gender: "female",
-    locale: "en-US",
-    persona: "Friendly, cheerful, and engaging",
-    pitch: "+1Hz",
-    rate: "+0%",
-  },
-  {
-    id: "en-US-ChristopherNeural",
-    name: "Christopher",
-    gender: "male",
-    locale: "en-US",
-    persona: "Deep, authoritative, and refined JARVIS cadence",
-    pitch: "-1Hz",
-    rate: "+0%",
-  },
-  {
-    id: "en-US-GuyNeural",
-    name: "Guy",
-    gender: "male",
-    locale: "en-US",
-    persona: "Casual, relaxed, and natural male presence",
-    pitch: "+0Hz",
-    rate: "+0%",
-  },
-  {
-    id: "en-IN-NeerjaNeural",
-    name: "Neerja",
-    gender: "female",
-    locale: "en-IN",
-    persona: "Fluent Indian English, articulate and professional",
-    pitch: "+0Hz",
-    rate: "+0%",
+    rate: "-5%",
   },
 ];
 
@@ -176,6 +131,10 @@ async function hasPiper(): Promise<boolean> {
 export function sanitizeTextForSpeech(raw: string): string {
   if (!raw) return "";
   return raw
+    // 0. Remove voice description / meta labels / stage directions
+    .replace(/(?:voice description|voice profile|persona|query analysis|target topic|operating tier|workstation health|recommended action|system status|telemetry snapshot)\s*:?[^\n.]*[.\n]?/gi, " ")
+    .replace(/\*[^*]+\*/g, " ")
+    .replace(/\([^)]{0,100}(?:whisper|speaking|tone|voice|pause|cadence|emotion)[^)]{0,100}\)/gi, " ")
     // 1. Remove Markdown code blocks entirely (never speak meta-phrases)
     .replace(/```[\s\S]*?```/g, " ")
     // 2. Remove markdown tables entirely
@@ -235,9 +194,15 @@ export function extractSpokenLead(rawText: string, maxSentences = 3, maxChars = 
       if (leadLines.length > 0) break; // Finished first paragraph
       continue;
     }
-    // Stop at headings, code blocks, tables, horizontal rules, or bullet lists
-    if (/^(?:#{1,6}\s|```|\||---+|\*{3,}|[-*•]\s|\d+\.\s|>)/.test(trimmed)) {
-      break;
+    // Skip opening headings so we don't prematurely abort on `### Intro`
+    if (/^#{1,6}\s/.test(trimmed)) {
+      if (leadLines.length > 0) break;
+      continue;
+    }
+    // Stop at code blocks, tables, horizontal rules, or bullet lists
+    if (/^(?:```|\||---+|\*{3,}|[-*•]\s|\d+\.\s|>)/.test(trimmed)) {
+      if (leadLines.length > 0) break;
+      continue;
     }
     leadLines.push(trimmed);
   }
@@ -325,10 +290,10 @@ class AudioSynthesisService {
       };
     }
 
-    // 2. Humanized prosody: natural, articulate, poised pacing
-    let rateStr = options?.rate || "-2%";
+    // 2. Humanized prosody: slow, steady, warm, and friendly cadence with human emotion
+    let rateStr = options?.rate || "-5%";
     let pitchStr = options?.pitch || "+0Hz";
-    let numericalRate = 0.98;
+    let numericalRate = 0.94;
     let numericalPitch = 1.0;
 
     if (urgency === "alert") {
@@ -432,9 +397,27 @@ class AudioSynthesisService {
         }
       }
 
-      // 5c. High-Fidelity Microsoft Neural Voice via edge-tts (Primary High-Definition Engine)
+// ─── Network Liveness Cache for Offline Voice Fast-Path ───────────────────────
+let _ttsOnlineCached = false;
+let _ttsLastOnlineCheck = 0;
+async function isOnlineForTts(): Promise<boolean> {
+  if (process.env.OFFLINE_PRIMARY === "true") return false;
+  const now = Date.now();
+  if (now - _ttsLastOnlineCheck < 20_000) return _ttsOnlineCached;
+  _ttsLastOnlineCheck = now;
+  try {
+    const res = await fetch("http://1.1.1.1", { method: "HEAD", signal: AbortSignal.timeout(350) });
+    _ttsOnlineCached = res.ok || res.status > 0;
+  } catch {
+    _ttsOnlineCached = false;
+  }
+  return _ttsOnlineCached;
+}
+
+      // 5c. High-Fidelity Microsoft Neural Voice via edge-tts (Only attempted when online!)
       const edgeCmd = await getEdgeTtsCmd();
-      if (!dispatched && edgeCmd) {
+      const isOnline = await isOnlineForTts();
+      if (!dispatched && edgeCmd && isOnline) {
         const tmpFile = join(tmpdir(), `snow_tts_${Date.now()}.mp3`);
         _activeTmpFile = tmpFile;
         try {
@@ -495,7 +478,7 @@ class AudioSynthesisService {
       if (!dispatched && allowNativePlayback) {
         try {
           const escaped = cleanSpoken.replace(/"/g, '\\"').replace(/[\r\n]+/g, " ");
-          await execAsync(`spd-say -w -t female1 -p 0 -r -5 "${escaped}" 2>/dev/null`, {
+          await execAsync(`spd-say -w -t female1 -p 0 -r -12 "${escaped}" 2>/dev/null`, {
             timeout: 10_000,
           });
           dispatched = true;

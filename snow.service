@@ -10,6 +10,12 @@ Restart=on-failure
 RestartSec=3s
 Environment=PORT=3000
 Environment=NODE_ENV=production
+Environment=OLLAMA_MODELS=/usr/share/ollama/.ollama/models
+Environment=OLLAMA_NO_CLOUD=1
+Environment=OLLAMA_KEEP_ALIVE=24h
+Environment=OLLAMA_IGPU_ENABLE=1
+Environment=USE_LOCAL_FAST_PATH=true
+Environment=OFFLINE_PRIMARY=true
 Environment=PATH=/snap/bin:/usr/local/bin:/usr/bin:/bin:/home/snowjd/.local/bin:/home/snowjd/bin
 StandardOutput=journal
 StandardError=journal
