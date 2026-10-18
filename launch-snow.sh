@@ -50,6 +50,9 @@ ensure_ollama_running() {
   export OLLAMA_NO_CLOUD="${OLLAMA_NO_CLOUD:-1}"
   export OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-24h}"
   export OLLAMA_IGPU_ENABLE="${OLLAMA_IGPU_ENABLE:-1}"
+  export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-1}"
+  export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-1}"
+  export OLLAMA_FLASH_ATTENTION="${OLLAMA_FLASH_ATTENTION:-1}"
   export HOME="${PROJECT_DIR}/data/ollama_home"
   mkdir -p "$HOME" 2>/dev/null || true
 

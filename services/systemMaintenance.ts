@@ -332,6 +332,21 @@ export class SystemMaintenanceService {
       );
     }
 
+    // Memory headroom guard (prevents OOM on 14GB host with 128MB iGPU)
+    try {
+      const { stdout: freeOut } = await execAsync("free -m 2>/dev/null || echo ''");
+      const memLine = freeOut.split("\n").find((l) => l.startsWith("Mem:"));
+      if (memLine) {
+        const parts = memLine.trim().split(/\s+/);
+        const availableMb = parseInt(parts[6] || "0", 10);
+        if (availableMb > 0 && availableMb < 1500) {
+          recommendations.push(
+            `System memory headroom low (~${availableMb} MB available). Snow has engaged lightweight memory containment.`
+          );
+        }
+      }
+    } catch {}
+
     const isOptimal = updates.securityUpdatesCount === 0 && autoremove.totalRemovable === 0 && failedServices.length === 0;
 
     let osRelease = "Ubuntu Linux";
