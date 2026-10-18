@@ -188,12 +188,11 @@ let _lastOnlineCheck = 0;
 const ONLINE_CHECK_TTL_MS = 20_000;
 
 export async function isInternetAvailable(): Promise<boolean> {
-  if (process.env.OFFLINE_PRIMARY === "true") return false;
   const now = Date.now();
   if (now - _lastOnlineCheck < ONLINE_CHECK_TTL_MS) return _isOnlineCached;
   _lastOnlineCheck = now;
   try {
-    const res = await fetch("http://1.1.1.1", { method: "HEAD", signal: AbortSignal.timeout(350) });
+    const res = await fetch("http://1.1.1.1", { method: "HEAD", signal: AbortSignal.timeout(600) });
     _isOnlineCached = res.ok || res.status > 0;
   } catch {
     _isOnlineCached = false;
@@ -1207,6 +1206,7 @@ async function callAI(
       const res = await fetch(`${ollamaHost}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(5000), // Enforce 5s ceiling so user queries never hang indefinitely
         body: JSON.stringify({
           model: modelName,
           messages: ollamaMessages,
@@ -1232,13 +1232,23 @@ async function callAI(
   };
 
   const tryLocalChain = async () => {
-    await ensureOllamaRunning().catch(() => {});
+    // Fast probe: Verify Ollama is responsive within 600ms before attempting model inference
+    const isAlive = await fetch(`${ollamaHost}/api/tags`, { signal: AbortSignal.timeout(600) })
+      .then(r => r.ok)
+      .catch(() => false);
+
+    if (!isAlive) {
+      // Trigger background auto-start so Ollama spins up for subsequent queries without blocking this one
+      ensureOllamaRunning().catch(() => {});
+      console.warn("[SNOW] Local Ollama not currently active — fast failing to secondary coprocessor.");
+      return null;
+    }
+
     const localCandidates = Array.from(new Set([
       localTarget.model,
       "snow_custom",
       "llama3.2:3b",
       "snow:latest",
-      "snow-jarvis:latest",
       "llama3.2:1b"
     ]));
     for (const cand of localCandidates) {
@@ -1250,21 +1260,23 @@ async function callAI(
 
   let finalRes = null;
   if (!isHybrid) {
-    // S.N.O.W. LOCAL-FIRST: Always run sovereign on-device neural engine first with multi-model failover
+    // S.N.O.W. LOCAL-FIRST: Always try sovereign on-device neural engine first
     finalRes = await tryLocalChain();
-    if (!finalRes && (await isInternetAvailable())) {
-      console.warn("[SNOW] Local core offline/busy, falling back to Adaptive Neural Uplink...");
-      finalRes = await tryGemini();
+    if (!finalRes) {
+      if (geminiClient && (await isInternetAvailable())) {
+        console.log("[SNOW] Local core offline/busy, elevating to Adaptive Neural Uplink (Gemini)...");
+        finalRes = await tryGemini();
+      }
     }
   } else {
     // Explicit hybrid co-processor requested
-    if (await isInternetAvailable()) finalRes = await tryGemini();
+    if (geminiClient && (await isInternetAvailable())) finalRes = await tryGemini();
     if (!finalRes) finalRes = await tryLocalChain();
   }
 
   if (finalRes) return finalRes;
 
-  // Absolute last-resort: Built-in offline Snow intelligence
+  // Absolute fallback: Instant built-in offline intelligence
   const offlineReply = buildOfflineReply(userPrompt, history);
   return { text: offlineReply, model: "S.N.O.W. Sovereign Core (Air-Gapped)" };
 }
@@ -1337,6 +1349,7 @@ async function callAIStream(
       const res = await fetch(`${ollamaHost}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(5000),
         body: JSON.stringify({
           model: modelName,
           messages: ollamaMessages,
@@ -1380,13 +1393,21 @@ async function callAIStream(
   };
 
   const tryLocalChainStream = async () => {
-    await ensureOllamaRunning().catch(() => {});
+    const isAlive = await fetch(`${ollamaHost}/api/tags`, { signal: AbortSignal.timeout(600) })
+      .then(r => r.ok)
+      .catch(() => false);
+
+    if (!isAlive) {
+      ensureOllamaRunning().catch(() => {});
+      console.warn("[SNOW STREAM] Local Ollama not currently active — fast failing to secondary coprocessor.");
+      return null;
+    }
+
     const localCandidates = Array.from(new Set([
       localTarget.model,
       "snow_custom",
       "llama3.2:3b",
       "snow:latest",
-      "snow-jarvis:latest",
       "llama3.2:1b"
     ]));
     for (const cand of localCandidates) {
@@ -1400,13 +1421,15 @@ async function callAIStream(
   if (!isHybrid) {
     // S.N.O.W. LOCAL-FIRST: Always run sovereign on-device neural stream first with multi-model failover
     finalRes = await tryLocalChainStream();
-    if (!finalRes && (await isInternetAvailable())) {
-      console.warn("[SNOW STREAM] Local neural stream offline/busy, falling back to Adaptive Neural Uplink...");
-      finalRes = await tryGeminiStream();
+    if (!finalRes) {
+      if (geminiClient && (await isInternetAvailable())) {
+        console.warn("[SNOW STREAM] Local neural stream offline/busy, falling back to Adaptive Neural Uplink...");
+        finalRes = await tryGeminiStream();
+      }
     }
   } else {
     // Explicit hybrid co-processor requested
-    if (await isInternetAvailable()) finalRes = await tryGeminiStream();
+    if (geminiClient && (await isInternetAvailable())) finalRes = await tryGeminiStream();
     if (!finalRes) finalRes = await tryLocalChainStream();
   }
   if (finalRes) return finalRes;
@@ -3358,7 +3381,7 @@ Look at this image. Output a STRICT JSON object in this exact format with NO mar
   }
 
   const PORT = parseInt(process.env.PORT || "3000", 10);
-  const HOST = process.env.HOST || "127.0.0.1";
+  const HOST = process.env.HOST || "0.0.0.0";
   let proactiveInterval: NodeJS.Timeout | null = null;
 
   const server = app.listen(PORT, HOST, () => {

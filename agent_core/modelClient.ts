@@ -291,7 +291,7 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
   const response = await fetch(`${ollamaHost}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    signal,
+    signal: signal || AbortSignal.timeout(10000),
     body: JSON.stringify({
       model: ollamaModel,
       messages: ollamaMessages,
