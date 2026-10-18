@@ -18,13 +18,19 @@ mkdir -p data/whisper
 # 2. Install Piper TTS (x86_64 Linux)
 echo "[2/4] Downloading Piper TTS..."
 cd data
-if ! command -v piper &> /dev/null; then
+if ! command -v piper &> /dev/null && [ ! -f "$HOME/.local/bin/piper" ]; then
   wget -qO piper.tar.gz https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_linux_x86_64.tar.gz
   tar -xf piper.tar.gz
-  sudo cp piper/piper /usr/local/bin/
-  sudo cp -r piper/espeak-ng-data /usr/local/share/ || true
+  mkdir -p "$HOME/.local/bin"
+  cp piper/piper "$HOME/.local/bin/piper"
+  chmod +x "$HOME/.local/bin/piper"
+  # Optional system-wide install if sudo is pre-authorized
+  if sudo -n true 2>/dev/null; then
+    sudo cp piper/piper /usr/local/bin/ 2>/dev/null || true
+    sudo cp -r piper/espeak-ng-data /usr/local/share/ 2>/dev/null || true
+  fi
   rm piper.tar.gz
-  echo "Piper installed to /usr/local/bin/piper"
+  echo "Piper installed successfully to $HOME/.local/bin/piper"
 else
   echo "Piper is already installed."
 fi

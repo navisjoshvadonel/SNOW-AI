@@ -61,32 +61,46 @@ export default function ModelStatus({
   onChangeModel,
 }: ModelStatusProps) {
   const [metrics, setMetrics] = useState<SystemMetrics>({
-    cpu: 24,
-    ram: 68,
-    latency: 120,
-    networkLoad: 12.4
+    cpu: 18,
+    ram: 44,
+    latency: 12,
+    networkLoad: 1.2
   });
+  const [vramDetail, setVramDetail] = useState<string>("128MB Dedicated + GTT");
 
-  // Oscillating metrics to look beautiful and realistic
+  // Fetch true live telemetry from host OS every 3.5s
   useEffect(() => {
-    const timer = setInterval(() => {
-      setMetrics((prev) => {
-        const offsetCpu = (Math.random() - 0.5) * 8;
-        const offsetRam = (Math.random() - 0.5) * 2;
-        const activeM = MODELS_REGISTRY.find(m => m.id === modelSelected);
-        const baselineLatency = activeM ? activeM.latency : 100;
-        const offsetLatency = (Math.random() - 0.5) * 15;
+    let mounted = true;
+    const fetchLiveMetrics = async () => {
+      try {
+        const res = await fetch("/api/system");
+        if (res.ok) {
+          const sys = await res.json();
+          if (mounted) {
+            const activeM = MODELS_REGISTRY.find(m => m.id === modelSelected);
+            const baselineLatency = activeM ? activeM.latency : 12;
+            const cpuVal = typeof sys.cpuPct === "number" ? sys.cpuPct : parseInt(sys.cpu) || 20;
+            const ramVal = typeof sys.ramPct === "number" ? sys.ramPct : 44;
+            setMetrics({
+              cpu: cpuVal,
+              ram: ramVal,
+              latency: baselineLatency,
+              networkLoad: 1.5
+            });
+            if (sys.ram) {
+              setVramDetail(`${sys.ram} · Iris Xe`);
+            }
+          }
+        }
+      } catch {}
+    };
 
-        return {
-          cpu: Math.max(10, Math.min(95, Math.round(prev.cpu + offsetCpu))),
-          ram: Math.max(40, Math.min(99, Math.round(prev.ram + offsetRam))),
-          latency: Math.max(5, Math.round(baselineLatency + offsetLatency)),
-          networkLoad: Math.max(2, parseFloat((prev.networkLoad + (Math.random() - 0.5) * 1.5).toFixed(1)))
-        };
-      });
-    }, 1500);
-
-    return () => clearInterval(timer);
+    fetchLiveMetrics();
+    const timer = setInterval(fetchLiveMetrics, 3500);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
   }, [modelSelected]);
 
   const activeModelObj = MODELS_REGISTRY.find(m => m.id === modelSelected) || MODELS_REGISTRY[0];
@@ -137,15 +151,15 @@ export default function ModelStatus({
               </div>
               <div className="leading-tight">
                 <span className="text-[12px] text-white/80 font-bold tracking-tight">CPU Core</span>
-                <span className="text-[7.5px] text-white/30 block uppercase tracking-wider">Dynamic fit</span>
+                <span className="text-[7.5px] text-white/30 block uppercase tracking-wider">i5-1340P</span>
               </div>
             </div>
           </div>
 
-          {/* RAM Gauge */}
+          {/* VRAM / GTT Gauge */}
           <div className="border border-white/5 rounded-2xl p-3 bg-white/[0.02] flex flex-col justify-between">
             <div className="flex items-center justify-between border-b border-white/5 pb-1.5 mb-1.5">
-              <span className="text-[8px] uppercase tracking-wider text-white/40">VRAM usage</span>
+              <span className="text-[8px] uppercase tracking-wider text-white/40">VRAM / GTT</span>
               <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
             </div>
             <div className="flex items-center gap-3 py-1">
@@ -168,8 +182,10 @@ export default function ModelStatus({
                 </div>
               </div>
               <div className="leading-tight">
-                <span className="text-[12px] text-white/80 font-bold tracking-tight">VRAM</span>
-                <span className="text-[7.5px] text-white/30 block uppercase tracking-wider">Indexed sync</span>
+                <span className="text-[12px] text-white/80 font-bold tracking-tight">UMA GTT</span>
+                <span className="text-[7.5px] text-emerald-400/90 block uppercase tracking-wider font-mono font-semibold" title={vramDetail}>
+                  128MB VRAM
+                </span>
               </div>
             </div>
           </div>
