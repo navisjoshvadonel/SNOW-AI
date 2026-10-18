@@ -375,9 +375,16 @@ class AudioSynthesisService {
 
         try {
           const piperBin = (await getPiperBinary()) || "piper";
+          const piperLibDir = join(process.cwd(), "data", "piper");
           await execAsync(
             `echo ${JSON.stringify(cleanSpoken)} | "${piperBin}" --model "${modelPath}" --output_file "${tmpFile}" 2>/dev/null`,
-            { timeout: 10_000 }
+            {
+              timeout: 10_000,
+              env: {
+                ...process.env,
+                LD_LIBRARY_PATH: `${piperLibDir}:${process.env.LD_LIBRARY_PATH || ""}`
+              }
+            }
           );
 
           try {

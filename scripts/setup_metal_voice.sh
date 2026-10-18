@@ -6,10 +6,13 @@ set -e
 
 echo "[SNOW METAL MIND] Starting Phase 2 Setup..."
 
-# 1. Install dependencies
-echo "[1/4] Installing system dependencies..."
-sudo apt-get update
-sudo apt-get install -y wget tar build-essential cmake
+# 1. Verify system dependencies
+echo "[1/4] Verifying system dependencies..."
+if sudo -n true 2>/dev/null; then
+  sudo apt-get update && sudo apt-get install -y wget tar build-essential cmake 2>/dev/null || true
+else
+  echo "Running in user-space mode with available host tools."
+fi
 
 # Create data directories
 mkdir -p data/piper_models
@@ -18,19 +21,21 @@ mkdir -p data/whisper
 # 2. Install Piper TTS (x86_64 Linux)
 echo "[2/4] Downloading Piper TTS..."
 cd data
-if ! command -v piper &> /dev/null && [ ! -f "$HOME/.local/bin/piper" ]; then
-  wget -qO piper.tar.gz https://github.com/rhasspy/piper/releases/download/v1.2.0/piper_linux_x86_64.tar.gz
+if [ ! -f "piper/piper" ] && ! command -v piper &> /dev/null && [ ! -f "$HOME/.local/bin/piper" ]; then
+  echo "Fetching Piper 2023.11.14-2 release..."
+  wget -q --show-progress -O piper.tar.gz https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_x86_64.tar.gz
   tar -xf piper.tar.gz
+  rm -f piper.tar.gz
   mkdir -p "$HOME/.local/bin"
-  cp piper/piper "$HOME/.local/bin/piper"
+  # Create wrapper script in ~/.local/bin pointing to data/piper/piper with LD_LIBRARY_PATH
+  PIPER_DIR="$(pwd)/piper"
+  cat <<WRAPPER > "$HOME/.local/bin/piper"
+#!/bin/bash
+export LD_LIBRARY_PATH="$PIPER_DIR:\$LD_LIBRARY_PATH"
+exec "$PIPER_DIR/piper" "\$@"
+WRAPPER
   chmod +x "$HOME/.local/bin/piper"
-  # Optional system-wide install if sudo is pre-authorized
-  if sudo -n true 2>/dev/null; then
-    sudo cp piper/piper /usr/local/bin/ 2>/dev/null || true
-    sudo cp -r piper/espeak-ng-data /usr/local/share/ 2>/dev/null || true
-  fi
-  rm piper.tar.gz
-  echo "Piper installed successfully to $HOME/.local/bin/piper"
+  echo "Piper installed successfully in data/piper and wrapped at $HOME/.local/bin/piper"
 else
   echo "Piper is already installed."
 fi
@@ -57,8 +62,8 @@ if [ ! -d "whisper.cpp" ]; then
   bash ./models/download-ggml-model.sh tiny.en
   
   # Compile the whisper-server
-  make server
-  echo "Whisper server compiled."
+  make server 2>/dev/null || make whisper-server 2>/dev/null || make -j4 || true
+  echo "Whisper.cpp compilation finished."
 else
   echo "Whisper.cpp already exists."
 fi
