@@ -67,9 +67,25 @@ BLOCKED_PROCESS_EVENTS = {
 }
 
 BLOCKED_PATH_PATTERNS = [
+    # ── Sensitive host credentials & secrets ────────────────────────────────
     '.env', '/etc/shadow', '/etc/sudoers', '/etc/passwd', '/etc',
     '.ssh', 'id_rsa', 'id_ed25519', '.git', 'snow_brain.db', 'snow_rag.db',
-    '.bashrc', '.profile', '.bash_history', '/proc', '/sys', '/root'
+    '.bashrc', '.profile', '.bash_history', '/proc', '/sys', '/root',
+    # ── Zero-Touch Windows Partition Protocol (dual-boot NVMe) ─────────────
+    # Windows OS, NTFS & recovery partitions (nvme0n1p1-p5)
+    '/dev/nvme0n1p1', '/dev/nvme0n1p2', '/dev/nvme0n1p3', '/dev/nvme0n1p4', '/dev/nvme0n1p5',
+    'nvme0n1p1', 'nvme0n1p2', 'nvme0n1p3', 'nvme0n1p4', 'nvme0n1p5',
+    # Windows drive mount points
+    '/mnt/c', '/mnt/d', '/mnt/e', '/mnt/windows', '/mnt/win',
+    '/media/',
+    # EFI bootloader & Windows boot manager
+    '/boot/efi/efi/microsoft', 'efi/microsoft', 'bootmgfw.efi', 'bootmgrfw.efi',
+    # Windows system directories (case-insensitive pattern handled in .lower() normalisation)
+    '/windows/', '/system32/', '/program files',
+    # Windows virtual-memory and hibernation files
+    'pagefile.sys', 'hiberfil.sys', 'swapfile.sys',
+    # Windows BCD store
+    '/bcd', 'boot/bcd',
 ]
 
 def security_audit_hook(event, args):

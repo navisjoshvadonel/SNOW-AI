@@ -98,6 +98,18 @@ import {
 dotenv.config();
 
 // ─────────────────────────────────────────────────────────────────────────────
+// OLLAMA HOST NORMALISER
+// Guarantees that OLLAMA_HOST always carries an http:// scheme prefix.
+// Without this, Node's fetch() throws "TypeError: Invalid URL" when the env
+// var is set to a bare host:port like "127.0.0.1:11434".
+// ─────────────────────────────────────────────────────────────────────────────
+function normalizeOllamaHost(raw?: string): string {
+  const h = (raw || "127.0.0.1:11434").trim();
+  if (/^https?:\/\//i.test(h)) return h.replace(/\/$/, "");
+  return `http://${h}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // FIX 5 — MODULE-LEVEL GoogleGenAI SINGLETON
 // Re-instantiating GoogleGenAI on every request creates a new HTTP client and
 // connection pool each time. Create it once at module load instead.
@@ -1165,7 +1177,7 @@ async function callAI(
   }
 
   const geminiContents = buildGeminiContents(history, fullPrompt, images);
-  const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const ollamaHost = normalizeOllamaHost(process.env.OLLAMA_HOST);
   const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
 
   const tryGemini = async () => {
@@ -1288,7 +1300,7 @@ async function callAIStream(
   }
 
   const geminiContents = buildGeminiContents(history, fullPrompt, images);
-  const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const ollamaHost = normalizeOllamaHost(process.env.OLLAMA_HOST);
   const ollamaMessages = buildOllamaMessages(SNOW_PERSONA, history, fullPrompt, images);
 
   const tryGeminiStream = async () => {
@@ -1686,7 +1698,7 @@ function stripTagArtifacts(text: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function ensureOllamaRunning(): Promise<void> {
-  const ollamaBase = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const ollamaBase = normalizeOllamaHost(process.env.OLLAMA_HOST);
   const ollamaModelsPath = process.env.OLLAMA_MODELS || "/usr/share/ollama/.ollama/models";
   const ollamaHome = path.join(process.cwd(), "data", "ollama_home");
   try {
@@ -1711,7 +1723,7 @@ async function ensureOllamaRunning(): Promise<void> {
       ...process.env,
       HOME: ollamaHome,
       OLLAMA_MODELS: ollamaModelsPath,
-      OLLAMA_HOST: process.env.OLLAMA_HOST || "127.0.0.1:11434",
+      OLLAMA_HOST: normalizeOllamaHost(process.env.OLLAMA_HOST),
       OLLAMA_NO_CLOUD: "1",
       OLLAMA_KEEP_ALIVE: "24h",
       OLLAMA_IGPU_ENABLE: "1",
@@ -1740,7 +1752,7 @@ async function ensureOllamaRunning(): Promise<void> {
 
 /** Non-blocking background model warm-up so the first query has 0ms cold-start lag */
 function warmupOllamaModel(): void {
-  const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const ollamaHost = normalizeOllamaHost(process.env.OLLAMA_HOST);
   const model = process.env.OLLAMA_MODEL || "snow_custom";
   console.log(`[OLLAMA] 🔥 Warming up sovereign neural model (${model}) on Intel Iris Xe GPU...`);
   fetch(`${ollamaHost}/api/chat`, {

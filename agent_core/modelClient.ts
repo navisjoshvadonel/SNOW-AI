@@ -9,6 +9,13 @@ import type {
   ToolUseId,
 } from "./types.js";
 
+/** Guarantee http:// scheme on OLLAMA_HOST regardless of how the env var is set. */
+function normalizeOllamaHost(raw?: string): string {
+  const h = (raw || "127.0.0.1:11434").trim();
+  if (/^https?:\/\//i.test(h)) return h.replace(/\/$/, "");
+  return `http://${h}`;
+}
+
 export type ModelCallParams = {
   model: string;
   system: string;
@@ -280,7 +287,7 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
 
   console.log("[OLLAMA BACKEND] Sending messages to Ollama:", JSON.stringify(ollamaMessages, null, 2));
 
-  const ollamaHost = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+  const ollamaHost = normalizeOllamaHost(process.env.OLLAMA_HOST);
   const response = await fetch(`${ollamaHost}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

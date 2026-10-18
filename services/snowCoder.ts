@@ -143,7 +143,7 @@ export class SnowCoderService {
       }
     }
 
-    if (language === "javascript" || language === "typescript") {
+    if (language === "javascript") {
       const tempPath = path.join(SANDBOX_DIR, `${testId}.cjs`);
       try {
         fs.writeFileSync(tempPath, trimmed, "utf-8");
@@ -163,6 +163,50 @@ export class SnowCoderService {
         try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
       }
     }
+
+    if (language === "typescript") {
+      const tempPath = path.join(SANDBOX_DIR, `${testId}.ts`);
+      try {
+        fs.writeFileSync(tempPath, trimmed, "utf-8");
+        // tsx understands TypeScript type annotations; node --check does NOT.
+        // Try tsx first, fall back to tsc if tsx is unavailable.
+        let tsxBin = "tsx";
+        try {
+          await execFileAsync("which", ["tsx"]);
+        } catch {
+          tsxBin = "";
+        }
+
+        if (tsxBin) {
+          // tsx can parse and check TS files without emitting JS
+          await execFileAsync(tsxBin, ["--check", tempPath], { env: { ...process.env, NODE_OPTIONS: "" } });
+        } else {
+          // Fallback: tsc with loose settings — skips lib references so it's fast
+          await execFileAsync("npx", [
+            "--yes", "tsc", "--noEmit", "--strict", "false",
+            "--lib", "ES2020", "--target", "ES2020",
+            "--moduleResolution", "node", "--module", "commonjs",
+            "--skipLibCheck", "--allowJs",
+            tempPath
+          ], { cwd: WORKSPACE_DIR });
+        }
+        return { valid: true, language };
+      } catch (err: any) {
+        const stderr = (err.stderr || err.stdout || err.message || "").toString();
+        const lineMatch = stderr.match(/\((\d+),\d+\):|:(\d+):/);
+        const line = lineMatch ? parseInt(lineMatch[1] || lineMatch[2], 10) : undefined;
+        return {
+          valid: false,
+          language,
+          error: snowGuard.scrubSecrets(stderr.trim()),
+          errorLine: line,
+        };
+      } finally {
+        try { if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath); } catch {}
+      }
+    }
+
+
 
     if (language === "bash") {
       const tempPath = path.join(SANDBOX_DIR, `${testId}.sh`);
@@ -228,7 +272,9 @@ export class SnowCoderService {
         stderr: pyRes.stderr,
         success: pyRes.success,
       };
-    } else if (language === "javascript" || language === "typescript") {
+    } else if (language === "typescript") {
+      executionResult = await this.executeTypeScript(activeCode, timeoutMs, maxMemoryMb);
+    } else if (language === "javascript") {
       executionResult = await this.executeJavaScript(activeCode, timeoutMs, maxMemoryMb);
     } else if (language === "bash") {
       executionResult = await this.executeBash(activeCode, timeoutMs);
@@ -260,7 +306,9 @@ export class SnowCoderService {
         if (language === "python") {
           const retryRes = await runPythonCode(repaired, timeoutMs, { maxMemoryMb, allowNetwork: false });
           executionResult = { stdout: retryRes.stdout, stderr: retryRes.stderr, success: retryRes.success };
-        } else if (language === "javascript" || language === "typescript") {
+        } else if (language === "typescript") {
+          executionResult = await this.executeTypeScript(repaired, timeoutMs, maxMemoryMb);
+        } else if (language === "javascript") {
           executionResult = await this.executeJavaScript(repaired, timeoutMs, maxMemoryMb);
         } else if (language === "bash") {
           executionResult = await this.executeBash(repaired, timeoutMs);
@@ -362,6 +410,59 @@ ${code}
         stderr: stderr.trim(),
         success: true,
       };
+    } catch (err: any) {
+      let errMsg = err.stderr ? err.stderr.trim() : err.message;
+      if (err.killed) {
+        errMsg = `Execution timed out after ${effectiveTimeoutMs}ms (Process killed by sandbox monitor).`;
+      }
+      return {
+        stdout: err.stdout ? err.stdout.trim() : "",
+        stderr: errMsg,
+        success: false,
+      };
+    } finally {
+      try {
+        if (fs.existsSync(scriptPath)) fs.unlinkSync(scriptPath);
+      } catch {}
+    }
+  }
+
+  /**
+   * 3b. TypeScript Sandbox Runner (via tsx strip-compiler)
+   * tsx handles TypeScript type annotations natively; vanilla node does not.
+   */
+  private async executeTypeScript(
+    code: string,
+    timeoutMs: number,
+    maxMemoryMb: number
+  ): Promise<{ stdout: string; stderr: string; success: boolean }> {
+    const effectiveTimeoutMs = Math.min(Math.max(1000, timeoutMs), 15000);
+    const effectiveMemMb = Math.min(Math.max(64, maxMemoryMb), 512);
+    const scriptId = `ts_run_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.ts`;
+    const scriptPath = path.join(SANDBOX_DIR, scriptId);
+
+    fs.writeFileSync(scriptPath, code, { encoding: "utf-8", mode: 0o600 });
+
+    const safeEnv: NodeJS.ProcessEnv = {
+      PATH: process.env.PATH || "/usr/local/bin:/usr/bin:/bin",
+      NODE_ENV: "production",
+      LANG: "en_US.UTF-8",
+      TMPDIR: SANDBOX_DIR,
+      NODE_OPTIONS: `--max-old-space-size=${effectiveMemMb}`,
+    };
+
+    try {
+      const { stdout, stderr } = await execFileAsync(
+        "tsx",
+        [scriptPath],
+        {
+          timeout: effectiveTimeoutMs,
+          maxBuffer: 5 * 1024 * 1024,
+          cwd: SANDBOX_DIR,
+          env: safeEnv,
+        }
+      );
+      return { stdout: stdout.trim(), stderr: stderr.trim(), success: true };
     } catch (err: any) {
       let errMsg = err.stderr ? err.stderr.trim() : err.message;
       if (err.killed) {

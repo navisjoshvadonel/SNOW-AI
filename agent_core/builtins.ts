@@ -391,6 +391,16 @@ export const GlobTool: ToolDefinition<GlobInput> = {
     required: ["pattern"],
   },
 
+  validate(input, ctx) {
+    if (input.path) {
+      const audit = snowGuard.auditPath(input.path, "read", ctx.cwd);
+      if (!audit.allowed) {
+        return { valid: false, message: `Glob path blocked by Snow-Guard: ${audit.violation}`, code: 403 };
+      }
+    }
+    return { valid: true };
+  },
+
   async *execute(input, ctx) {
     const root = input.path ? resolve(ctx.cwd, input.path) : ctx.cwd;
     yield { type: "progress", data: null, label: `Searching ${input.pattern}` };
@@ -447,6 +457,16 @@ export const GrepTool: ToolDefinition<GrepInput> = {
       case_insensitive: { type: "boolean" },
     },
     required: ["pattern"],
+  },
+
+  validate(input, ctx) {
+    if (input.path) {
+      const audit = snowGuard.auditPath(input.path, "read", ctx.cwd);
+      if (!audit.allowed) {
+        return { valid: false, message: `Grep path blocked by Snow-Guard: ${audit.violation}`, code: 403 };
+      }
+    }
+    return { valid: true };
   },
 
   async *execute(input, ctx) {
