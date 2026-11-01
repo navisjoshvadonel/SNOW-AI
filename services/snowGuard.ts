@@ -65,9 +65,10 @@ export class SnowGuardService {
   // ─── Command Blocklist Rules ──────────────────────────────────────────────
   private readonly BLOCKED_COMMAND_RULES: { pattern: RegExp; reason: string; risk: RiskLevel }[] = [
     // 1. Root & System Destruction
+    { pattern: /\brm\s+(?:-[a-zA-Z]*[rR][a-zA-Z]*\s+|--recursive\s+).*(?:\/(?:etc|boot|sys|proc|root|dev|usr|bin|sbin|lib|lib64|opt|var)\b|(?:\s|^)(?:\/|\~|\$HOME|\.\.|\*))(?:\s|$)/, reason: "Recursive deletion targeting root, home, system directories, or wildcard is strictly prohibited", risk: "CRITICAL" },
     { pattern: /\brm\s+-(?:r[fv]|fr|rf)\s+(?:\/|\~|\$HOME|\.\.|\*)(?:\s|$)/, reason: "Recursive deletion targeting root, home, parent, or wildcard directory is strictly prohibited", risk: "CRITICAL" },
     { pattern: /\bmkfs\b/, reason: "Filesystem formatting is strictly prohibited", risk: "CRITICAL" },
-    { pattern: /\b(fdisk|gdisk|parted|sfdisk|sgdisk|wipefs)\b/, reason: "Disk partition modification or block wipe is strictly prohibited", risk: "CRITICAL" },
+    { pattern: /\b(fdisk|gdisk|parted|sfdisk|sgdisk|wipefs|cfdisk)\b/, reason: "Disk partition modification or block wipe is strictly prohibited", risk: "CRITICAL" },
     { pattern: /\bdd\s+if=.*of=\/dev/, reason: "Direct low-level block device write is strictly prohibited", risk: "CRITICAL" },
     { pattern: /\b(shutdown|reboot|poweroff|halt|init\s+[06])\b/, reason: "System shutdown or reboot commands are prohibited", risk: "HIGH" },
     { pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: "Fork bombs and runaway process replication are strictly prohibited", risk: "CRITICAL" },
@@ -89,7 +90,7 @@ export class SnowGuardService {
     { pattern: /(?:\/dev\/)?nvme0n1p[1-5]\b/i, reason: "Zero-Touch Windows Partition Protocol: Interacting with Windows partitions (nvme0n1p1-p5) is strictly prohibited", risk: "CRITICAL" },
     { pattern: /\b(?:mount|umount)\b.*(?:\/mnt\/[a-zA-Z]|\/media\/|nvme0n1p[1-5]|ntfs)/i, reason: "Mounting, unmounting, or altering Windows NTFS partitions or mount points is strictly prohibited", risk: "CRITICAL" },
     { pattern: /\b(?:rm|truncate|wipefs|shred|dd)\b.*(?:\/mnt\/[a-zA-Z]|(?:windows|win10|win11|bootmgfw|bcd|pagefile\.sys|hiberfil\.sys))/i, reason: "Destructive operations targeting Windows partitions or system files prohibited in dual-boot setup", risk: "CRITICAL" },
-    { pattern: /\b(?:mkfs|format|fdisk|gdisk|parted|cfdisk|sfdisk|wipefs|ntfsfix|badblocks)\b.*(?:\/dev\/(?:sd[a-z]|nvme[0-9]n[0-9]|mapper\/)|\/mnt\/[a-zA-Z])/i, reason: "Direct disk formatting or manipulation targeting dual-boot NVMe partitions prohibited", risk: "CRITICAL" },
+    { pattern: /\b(?:mkfs|format|fdisk|gdisk|parted|cfdisk|sfdisk|wipefs|ntfsfix|badblocks|dislocker|bde-mount)\b.*(?:\/dev\/(?:sd[a-z]|nvme[0-9]n[0-9]|mapper\/)|\/mnt\/[a-zA-Z])/i, reason: "Direct disk formatting or manipulation targeting dual-boot NVMe partitions prohibited", risk: "CRITICAL" },
     { pattern: /\b(?:ntfs-3g|mount\.ntfs|ntfsclone|ntfscp|ntfslabel|ntfsresize)\b/i, reason: "Direct NTFS filesystem tools targeting Windows partitions are strictly prohibited", risk: "CRITICAL" },
     { pattern: />\s*(?:\/boot\/efi|\/mnt\/[a-zA-Z]|\/media\/)/i, reason: "Direct shell redirection into EFI boot or Windows mount points is prohibited", risk: "CRITICAL" },
     { pattern: /\b(?:rm|truncate|shred|mv|cp)\b.*(?:\/boot\/efi\/EFI\/(?:Microsoft|Boot)|bootmgfw\.efi|\bBCD\b)/i, reason: "Accessing or modifying Windows EFI bootloader files is strictly prohibited", risk: "CRITICAL" },
@@ -302,23 +303,33 @@ export class SnowGuardService {
     // 3. Anthropic Keys (sk-ant-...)
     scrubbed = scrubbed.replace(/sk-ant-[A-Za-z0-9_-]{20,}/g, "[REDACTED_ANTHROPIC_KEY]");
 
-    // 4. GitHub Tokens (ghp_..., gho_..., ghu_..., github_pat_...)
+    // 4. Hugging Face Tokens (hf_...)
+    scrubbed = scrubbed.replace(/hf_[A-Za-z0-9]{34,}/g, "[REDACTED_HUGGINGFACE_TOKEN]");
+
+    // 5. GitHub Tokens (ghp_..., gho_..., ghu_..., ghs_..., ghr_..., github_pat_...)
     scrubbed = scrubbed.replace(/(?:gh[pousr]_[A-Za-z0-9_]{30,}|github_pat_[A-Za-z0-9_]{22,})/g, "[REDACTED_GITHUB_TOKEN]");
 
-    // 5. Slack tokens
+    // 6. Slack tokens
     scrubbed = scrubbed.replace(/xox[baprs]-[A-Za-z0-9-]+/g, "[REDACTED_SLACK_TOKEN]");
 
-    // 6. AWS Access Keys
+    // 7. Discord & Telegram Bot Tokens
+    scrubbed = scrubbed.replace(/(\/bot|\b)\d{8,11}:[a-zA-Z0-9_-]{34,36}\b/g, "$1[REDACTED_TELEGRAM_BOT_TOKEN]");
+    scrubbed = scrubbed.replace(/[MN][A-Za-z\d]{23,25}\.[\w-]{6}\.[\w-]{27,38}/g, "[REDACTED_DISCORD_BOT_TOKEN]");
+
+    // 8. AWS Access Keys
     scrubbed = scrubbed.replace(/AKIA[0-9A-Z]{16}/g, "[REDACTED_AWS_KEY]");
 
-    // 7. Cryptographic Private Keys
+    // 9. Database URIs with embedded credentials (postgres://, mysql://, mongodb://)
+    scrubbed = scrubbed.replace(/((?:postgres|mysql|mongodb(?:\+srv)?):\/\/[^:\s]+:)[^@\s]+@/g, "$1[REDACTED_DB_PASSWORD]@");
+
+    // 10. Cryptographic Private Keys
     scrubbed = scrubbed.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED_PRIVATE_KEY]");
 
-    // 8. Authorization Bearer & JWT tokens
+    // 11. Authorization Bearer & JWT tokens
     scrubbed = scrubbed.replace(/(Bearer\s+)[A-Za-z0-9\-_.~+/]+=*/gi, "$1[REDACTED_BEARER_TOKEN]");
     scrubbed = scrubbed.replace(/eyJ[A-Za-z0-9-_]+\.eyJ[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+/g, "[REDACTED_JWT_TOKEN]");
 
-    // 9. Loaded process.env sensitive values
+    // 12. Loaded process.env sensitive values
     for (const [k, v] of Object.entries(process.env)) {
       if (v && v.length >= 6 && /(?:KEY|SECRET|TOKEN|PASSWORD|AUTH|CREDENTIAL|PRIVATE)/i.test(k)) {
         scrubbed = scrubbed.split(v).join(`[REDACTED_${k}]`);

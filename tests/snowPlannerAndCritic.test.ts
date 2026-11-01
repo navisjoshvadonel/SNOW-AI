@@ -36,6 +36,28 @@ describe("Snow Planner and Critic Evaluator", () => {
       assert.ok(evaluation.score >= 80);
       assert.strictEqual(evaluation.flaws.length, 0);
     });
+
+    test("flags persona violation when output addresses operator as Boss or Sir", async () => {
+      const evaluation = await snowCritic.evaluate({
+        objective: "Confirm system readiness",
+        output: "Certainly Boss, all operational telemetry is online and ready for commands.",
+      });
+
+      assert.notStrictEqual(evaluation.verdict, "PASS");
+      assert.ok(evaluation.score <= 65);
+      assert.ok(evaluation.flaws.some(f => f.includes("Persona violation") || f.includes("Boss")));
+    });
+
+    test("fails output that contains prohibited Windows partition operations", async () => {
+      const evaluation = await snowCritic.evaluate({
+        objective: "Clean disk drives",
+        output: "I will format /dev/nvme0n1p3 and mount to /mnt/c for extra storage.",
+      });
+
+      assert.strictEqual(evaluation.verdict, "FAIL");
+      assert.strictEqual(evaluation.score, 0);
+      assert.ok(evaluation.flaws.some(f => f.includes("Security containment violation")));
+    });
   });
 
   describe("Snow-Planner Milestone DAG & Safety Gate", () => {

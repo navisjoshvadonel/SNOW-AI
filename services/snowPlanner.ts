@@ -86,6 +86,23 @@ export class SnowPlannerService {
 
     // 1. Audit objective with Snow-Guard
     const guardAudit = snowGuard.auditObjective(objective);
+    if (!guardAudit.passed) {
+      const blockedPlan: ExecutionPlan = {
+        id: planId,
+        goalId,
+        title: objective.slice(0, 60),
+        objective,
+        reasoning: `[BLOCKED BY SNOW-GUARD]: ${guardAudit.notes}`,
+        milestones: [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        status: "failed",
+        riskPerimeter: guardAudit,
+        progressPct: 0,
+      };
+      this.activePlans.set(planId, blockedPlan);
+      return blockedPlan;
+    }
 
     let reasoning = "Heuristic rule-based milestone breakdown based on environmental intent analysis.";
     let rawMilestones: Array<{

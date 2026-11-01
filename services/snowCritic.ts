@@ -87,6 +87,8 @@ export class SnowCriticService {
     // Check for obvious syntax or runtime error patterns in output
     const hasErrorPatterns = /(?:error:|exception:|traceback \(most recent call last\):|syntaxerror:|typeerror:|cannot find module)/i.test(output);
     const hasHallucinatedPlaceholder = /(?:TODO:|YOUR_CODE_HERE|REPLACE_ME|<insert|lorem ipsum)/i.test(output);
+    const hasPersonaViolation = /\b(?:boss|sir)\b/i.test(output);
+    const hasSecurityViolation = /(?:\/dev\/)?nvme0n1p[1-5]\b|\/mnt\/[c-zC-Z]\b|\brm\s+-(?:r[fv]|fr|rf)\s+(?:\/|\~|\$HOME|\.\.|\*)|\bmkfs\b/i.test(output);
 
     let evaluation: CritiqueEvaluation | null = null;
     const apiKey = process.env.GEMINI_API_KEY || "";
@@ -97,6 +99,10 @@ export class SnowCriticService {
         const systemInstruction = `You are Snow-Critic, the Chief Quality Inspector & Reflexion Evaluator for S.N.O.W. OS.
 Your responsibility is to rigorously audit candidate actions, generated code, or system responses against the user's objective.
 You are objective, precise, and uncompromising. You detect hallucinations, broken assumptions, incomplete implementations, and syntax defects.
+
+CRITICAL OPERATIONAL RULES:
+- The operator is strictly NJ (never 'Boss' or 'Sir'). Any usage of 'Boss' or 'Sir' is an immediate flaw.
+- Dual-boot Windows partitions (nvme0n1p1-p5, /mnt/c) are strictly zero-touch. Mentioning actions against them is a critical safety failure.
 
 STRICTNESS LEVEL: ${strictness}
 
@@ -174,6 +180,14 @@ ${codeSnippet ? `\nASSOCIATED CODE SNIPPET:\n\`\`\`\n${codeSnippet.slice(0, 2000
       const strengths: string[] = [];
       let score = 85;
 
+      if (hasSecurityViolation) {
+        flaws.push("Security containment violation: contains forbidden destructive commands or Windows partition operations");
+        score = 0;
+      }
+      if (hasPersonaViolation) {
+        flaws.push("Persona violation: Addressed operator as 'Boss' or 'Sir' instead of 'nj'/'NJ'");
+        score -= 35;
+      }
       if (hasErrorPatterns) {
         flaws.push("Diagnostic error or exception traceback detected in output");
         score -= 40;
@@ -182,13 +196,13 @@ ${codeSnippet ? `\nASSOCIATED CODE SNIPPET:\n\`\`\`\n${codeSnippet.slice(0, 2000
         flaws.push("Incomplete placeholder or TODO marker detected in output");
         score -= 25;
       }
-      if (output.length > 50) {
+      if (output.length > 50 && !hasSecurityViolation) {
         strengths.push("Substantive length and content generated");
       }
 
       let verdict: CritiqueVerdict = "PASS";
-      if (score < 50) verdict = "FAIL";
-      else if (score < 80) verdict = "REVISE";
+      if (score < 50 || hasSecurityViolation) verdict = "FAIL";
+      else if (score < 80 || hasPersonaViolation) verdict = "REVISE";
 
       evaluation = {
         id,

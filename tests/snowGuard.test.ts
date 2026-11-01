@@ -100,4 +100,42 @@ describe("SnowGuard Security & Blast-Radius Sentinel", () => {
       });
     }
   });
+
+  describe("Comprehensive Secret & Token Redaction (scrubSecrets)", () => {
+    test("redacts Google Gemini and Cloud API keys", () => {
+      const sample = "Access granted using AIzaSyD3xAmPl3KeY123456789012345678 in configuration";
+      const scrubbed = snowGuard.scrubSecrets(sample);
+      assert.strictEqual(scrubbed.includes("AIzaSyD3xAmPl3KeY"), false);
+      assert.match(scrubbed, /\[REDACTED_GEMINI_KEY\]/);
+    });
+
+    test("redacts Hugging Face user tokens", () => {
+      const sample = "export HF_TOKEN=hf_abcdefghijklmnopqrstuvwxyz01234567";
+      const scrubbed = snowGuard.scrubSecrets(sample);
+      assert.strictEqual(scrubbed.includes("hf_abcdefghijkl"), false);
+      assert.match(scrubbed, /\[REDACTED_HUGGINGFACE_TOKEN\]/);
+    });
+
+    test("redacts database credentials in connection strings", () => {
+      const sample = "postgres://nj_admin:SuperSecretPass123@localhost:5432/snow_db";
+      const scrubbed = snowGuard.scrubSecrets(sample);
+      assert.strictEqual(scrubbed.includes("SuperSecretPass123"), false);
+      assert.match(scrubbed, /\[REDACTED_DB_PASSWORD\]/);
+    });
+
+    test("redacts GitHub personal access tokens", () => {
+      const sample = "git clone https://ghp_0123456789abcdefghijklmnopqrstuvwxyz@github.com/repo";
+      const scrubbed = snowGuard.scrubSecrets(sample);
+      assert.strictEqual(scrubbed.includes("ghp_0123456789"), false);
+      assert.match(scrubbed, /\[REDACTED_GITHUB_TOKEN\]/);
+    });
+
+    test("redacts Telegram bot tokens", () => {
+      const sample = "https://api.telegram.org/bot123456789:ABCdefGHIjklMNOpqrsTUVwxyz123456789/getMe";
+      const scrubbed = snowGuard.scrubSecrets(sample);
+      assert.strictEqual(scrubbed.includes("123456789:ABCdefGHIjklMNOpqrsTUVwxyz123456789"), false);
+      assert.match(scrubbed, /\[REDACTED_TELEGRAM_BOT_TOKEN\]/);
+    });
+  });
 });
+
