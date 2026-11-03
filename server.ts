@@ -963,7 +963,71 @@ ping -c 3 127.0.0.1
 All local offline subsystems (Ollama, SQLite RAG, and executive daemons) remain fully functional regardless of internet connectivity.`;
   }
 
-  // 10. Default Dynamic Structured Response
+  // 10. Memory Recall & Directives
+  if (/\b(remember|recall|memory|memories|what do you know|my preferences?|directives?)\b/.test(q)) {
+    const mems = loadMemories(6);
+    const memLines = mems.length > 0
+      ? mems.map(m => `- **[${m.source}]** ${m.rel}: ${m.target}`).join("\n")
+      : "- No personalized memories recorded yet. Tell me what you prefer or want me to remember.";
+    return `Here is what I have indexed in our persistent knowledge graph, NJ.
+
+### S.N.O.W. Semantic Memory & Directives
+${memLines}
+
+All memories are stored locally in SQLite and retained across offline sessions.`;
+  }
+
+  // 11. Autonomous Goals
+  if (/\b(goal|goals|mission|missions|roadmap|objectives?)\b/.test(q)) {
+    const goals = getAutonomousGoals();
+    const activeGoals = goals.filter(g => g.status === "active" || g.status === "planning");
+    const goalLines = activeGoals.length > 0
+      ? activeGoals.map(g => `- **${g.title}** (${g.status.toUpperCase()} - ${g.progressPct}%): ${g.description}`).join("\n")
+      : "- No active goals currently running. You can seed a new objective via the Goal Engine or chat prompt.";
+    return `Here is our current autonomous mission roadmap, NJ.
+
+### Autonomous Operations Roadmap
+${goalLines}
+
+Our background goal daemon executes subtasks autonomously using native local tools.`;
+  }
+
+  // 12. Audio / Volume / PipeWire
+  if (/\b(volume|mute|unmute|audio|sound|speaker|headphone|music|player)\b/.test(q)) {
+    return `Audio routing and volume controls are managed directly via PipeWire and ALSA on our Ubuntu system, NJ.
+
+### Audio Telemetry & Control
+- **Sound Architecture:** PipeWire Audio Server + WirePlumber Session Manager
+- **Speech Engine:** Sovereign Local Piper Neural TTS / High-Definition Edge Neural Engine
+- **Voice Duplex:** Full duplex barge-in active with hardware voice interruption
+
+#### Quick Audio Commands:
+\`\`\`bash
+# Set master volume (e.g. 50%)
+wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.50
+
+# Toggle mute status
+wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle
+
+# Inspect audio playback sinks
+wpctl status
+\`\`\``;
+  }
+
+  // 13. Madurai & Tamil Nadu Cultural & Heritage Intelligence
+  if (/\b(madurai|tamil nadu|meenakshi|sangam|vaigai|chola|pandya|tamil)\b/.test(q)) {
+    return `Here is our regional heritage knowledge for our home base of Madurai, Tamil Nadu, NJ.
+
+### Madurai & Tamil Heritage Operations Intelligence
+- **City:** Madurai, Tamil Nadu, India (One of the oldest continuously inhabited cities in the world)
+- **Sacred Landmark:** Arulmigu Meenakshi Sundareswarar Temple, acclaimed for its towering 14 gopurams and Dravidian architecture.
+- **Cultural Significance:** Epicenter of the ancient Tamil Sangams and classical Tamil literature; bordered by the sacred Vaigai river.
+- **Historic Dynasties:** Capital of the ancient and medieval Pandya Kingdom and Nayak rulers.
+
+All regional cultural knowledge is permanently indexed in our local offline RAG database.`;
+  }
+
+  // 14. Default Dynamic Structured Response
   return `I have processed your query natively on our offline intelligence core, NJ. Here is the operational synthesis.
 
 ### S.N.O.W. Sovereign Local Intelligence
@@ -1146,6 +1210,27 @@ function resolveLocalOllamaModel(requestedModel?: string): { model: string; labe
   return { model: process.env.OLLAMA_MODEL || "snow_custom", label: "S.N.O.W. Neural Core (Primary On-Device)" };
 }
 
+let _installedOllamaModelsCache: string[] | null = null;
+let _installedOllamaModelsCacheAt = 0;
+
+async function getInstalledOllamaModels(ollamaHost: string): Promise<string[]> {
+  const now = Date.now();
+  if (_installedOllamaModelsCache && now - _installedOllamaModelsCacheAt < 60_000) {
+    return _installedOllamaModelsCache;
+  }
+  try {
+    const res = await fetch(`${ollamaHost}/api/tags`, { signal: AbortSignal.timeout(800) });
+    if (res.ok) {
+      const data: any = await res.json();
+      const list = (data.models || []).map((m: any) => (m.name || "").toLowerCase());
+      _installedOllamaModelsCache = list;
+      _installedOllamaModelsCacheAt = now;
+      return list;
+    }
+  } catch {}
+  return [];
+}
+
 async function callAI(
   userPrompt: string,
   contextText: string,
@@ -1202,11 +1287,12 @@ async function callAI(
 
   const tryOllama = async (modelName: string, displayLabel: string) => {
     console.log(`[SNOW] Executing Sovereign Local Core (${modelName})...`);
+    const offlineTimeoutMs = parseInt(process.env.OFFLINE_TIMEOUT_MS || "35000", 10);
     try {
       const res = await fetch(`${ollamaHost}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(5000), // Enforce 5s ceiling so user queries never hang indefinitely
+        signal: AbortSignal.timeout(offlineTimeoutMs), // Configurable healthy timeout for deep local inference
         body: JSON.stringify({
           model: modelName,
           messages: ollamaMessages,
@@ -1232,25 +1318,32 @@ async function callAI(
   };
 
   const tryLocalChain = async () => {
-    // Fast probe: Verify Ollama is responsive within 600ms before attempting model inference
-    const isAlive = await fetch(`${ollamaHost}/api/tags`, { signal: AbortSignal.timeout(600) })
-      .then(r => r.ok)
-      .catch(() => false);
-
-    if (!isAlive) {
-      // Trigger background auto-start so Ollama spins up for subsequent queries without blocking this one
+    // Fast probe: Verify Ollama is responsive and retrieve installed models
+    const installedList = await getInstalledOllamaModels(ollamaHost);
+    if (installedList.length === 0) {
       ensureOllamaRunning().catch(() => {});
-      console.warn("[SNOW] Local Ollama not currently active — fast failing to secondary coprocessor.");
+      console.warn("[SNOW] Local Ollama not currently active or no models found — fast failing to secondary coprocessor.");
       return null;
     }
 
-    const localCandidates = Array.from(new Set([
+    const isInstalled = (name: string) =>
+      installedList.some(m => m === name.toLowerCase() || m.startsWith(`${name.toLowerCase()}:`));
+
+    const potentialCandidates = [
       localTarget.model,
       "snow_custom",
       "llama3.2:3b",
       "snow:latest",
       "llama3.2:1b"
-    ]));
+    ];
+    // Filter strictly to models that are actually installed in local storage
+    const localCandidates = Array.from(new Set(potentialCandidates)).filter(isInstalled);
+
+    if (localCandidates.length === 0) {
+      const anyInstalled = installedList.map(m => m.split(":")[0]).filter(m => !m.includes("embed"));
+      localCandidates.push(...anyInstalled.slice(0, 2));
+    }
+
     for (const cand of localCandidates) {
       const res = await tryOllama(cand, cand === localTarget.model ? localTarget.label : `S.N.O.W. Local Core (${cand})`);
       if (res) return res;
@@ -1345,11 +1438,12 @@ async function callAIStream(
 
   const tryOllamaStream = async (modelName: string, displayLabel: string) => {
     console.log(`[SNOW STREAM] Streaming Sovereign Local Core (${modelName})...`);
+    const offlineTimeoutMs = parseInt(process.env.OFFLINE_TIMEOUT_MS || "60000", 10);
     try {
       const res = await fetch(`${ollamaHost}/api/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        signal: AbortSignal.timeout(5000),
+        signal: AbortSignal.timeout(offlineTimeoutMs), // Generous streaming ceiling so responses are never cut off
         body: JSON.stringify({
           model: modelName,
           messages: ollamaMessages,
@@ -1393,23 +1487,30 @@ async function callAIStream(
   };
 
   const tryLocalChainStream = async () => {
-    const isAlive = await fetch(`${ollamaHost}/api/tags`, { signal: AbortSignal.timeout(600) })
-      .then(r => r.ok)
-      .catch(() => false);
-
-    if (!isAlive) {
+    const installedList = await getInstalledOllamaModels(ollamaHost);
+    if (installedList.length === 0) {
       ensureOllamaRunning().catch(() => {});
-      console.warn("[SNOW STREAM] Local Ollama not currently active — fast failing to secondary coprocessor.");
+      console.warn("[SNOW STREAM] Local Ollama not currently active or no models found — fast failing to secondary coprocessor.");
       return null;
     }
 
-    const localCandidates = Array.from(new Set([
+    const isInstalled = (name: string) =>
+      installedList.some(m => m === name.toLowerCase() || m.startsWith(`${name.toLowerCase()}:`));
+
+    const potentialCandidates = [
       localTarget.model,
       "snow_custom",
       "llama3.2:3b",
       "snow:latest",
       "llama3.2:1b"
-    ]));
+    ];
+    const localCandidates = Array.from(new Set(potentialCandidates)).filter(isInstalled);
+
+    if (localCandidates.length === 0) {
+      const anyInstalled = installedList.map(m => m.split(":")[0]).filter(m => !m.includes("embed"));
+      localCandidates.push(...anyInstalled.slice(0, 2));
+    }
+
     for (const cand of localCandidates) {
       const res = await tryOllamaStream(cand, cand === localTarget.model ? localTarget.label : `S.N.O.W. Local Stream (${cand})`);
       if (res) return res;

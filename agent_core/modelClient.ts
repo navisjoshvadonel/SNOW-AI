@@ -288,10 +288,11 @@ async function* callOllamaOnce(params: ModelCallParams): AsyncGenerator<QueryEve
   console.log("[OLLAMA BACKEND] Sending messages to Ollama:", JSON.stringify(ollamaMessages, null, 2));
 
   const ollamaHost = normalizeOllamaHost(process.env.OLLAMA_HOST);
+  const localTimeoutMs = parseInt(process.env.OFFLINE_TIMEOUT_MS || "35000", 10);
   const response = await fetch(`${ollamaHost}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    signal: signal || AbortSignal.timeout(10000),
+    signal: signal || AbortSignal.timeout(localTimeoutMs),
     body: JSON.stringify({
       model: ollamaModel,
       messages: ollamaMessages,

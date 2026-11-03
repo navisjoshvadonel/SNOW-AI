@@ -1121,7 +1121,8 @@ export default function App() {
       if (res.ok) {
         const data = await res.json();
         if (data.audioBase64) {
-          const audio = new Audio("data:audio/mp3;base64," + data.audioBase64);
+          const mime = data.mimeType || "audio/wav";
+          const audio = new Audio(`data:${mime};base64,` + data.audioBase64);
           activeHtmlAudioRef.current = audio;
 
           // Wire into Web Audio analyser so the QuantumArc HUD ripples while thinking
@@ -1380,10 +1381,11 @@ export default function App() {
 
       const data = await res.json();
 
-      // If backend generated high-definition neural MP3 audio payload
+      // If backend generated high-definition neural audio payload (WAV or MP3)
       if (data.audioBase64) {
         await new Promise<void>((resolve) => {
-          const audio = new Audio("data:audio/mp3;base64," + data.audioBase64);
+          const mime = data.mimeType || "audio/wav";
+          const audio = new Audio(`data:${mime};base64,` + data.audioBase64);
           activeHtmlAudioRef.current = audio;
 
           // Wire into Web Audio analyser so the QuantumArc HUD ripples synchronously

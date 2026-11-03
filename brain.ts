@@ -865,7 +865,7 @@ export async function resolveIntent(prompt: string): Promise<ResolvedIntent> {
   }
 
   // Fast-track simple greetings, casual talk, and wake calls without burning Gemini API quota
-  const isSimpleGreetingOrChat = /^(?:hello|hi|hey|yo|sup|greetings|howdy|good\s+(?:morning|afternoon|evening|night)|who are you|what is your name|are you there|snow)[.!?\s]*$/i.test(pLower);
+  const isSimpleGreetingOrChat = /^(?:(?:hello|hi|hey|yo|sup|greetings|howdy)(?:\s+snow)?|good\s+(?:morning|afternoon|evening|night)(?:\s+snow)?|who\s+are\s+you|what\s+is\s+your\s+name|are\s+you\s+there(?:\s+snow)?|snow)[.!?\s]*$/i.test(pLower);
 
   // Offline-First Fast-Path: If OFFLINE_PRIMARY is enabled or query is conversational, use 0-latency local semantic parser
   const isOfflinePrimary = process.env.OFFLINE_PRIMARY === "true";
@@ -958,12 +958,17 @@ Return ONLY valid JSON matching this schema:
   }
 
   // ── High-Speed Sovereign Offline Intent Engine (sub-0.05ms execution) ────────
-  const isGreeting = /^(hello|hi|hey|greetings|good morning|good afternoon|good evening|howdy|sup|yo|hi there|hello snow|hi snow)\b/i.test(prompt.trim());
+  const isGreeting = /^(hello|hi|hey|greetings|good morning|good afternoon|good evening|howdy|sup|yo|hi there|hello snow|hi snow|hey snow|snow)\b/i.test(prompt.trim());
   const isIdentity = /\b(who are you|what is your name|who created you|who made you|what can you do|your name|are you ai|are you snow)\b/i.test(prompt);
-  const isWeather = /\b(weather|temperature|temp|forecast|rain|snow|cloud|sunny|climate|cold|hot|humidity|wind)\b/i.test(prompt);
+  const hasHardwareContext = /\b(cpu|ram|memory|system|pc|gpu|hardware|processor|core|disk|storage)\b/i.test(prompt);
+  const isWeather = !isGreeting && !isIdentity && (
+    /\b(weather|forecast|rain|snowing|snowfall|blizzard|cloud|sunny|climate|cold|hot|humidity|wind)\b/i.test(prompt) ||
+    (/\b(temperature|temp)\b/i.test(prompt) && !hasHardwareContext)
+  );
   const wxMatch = prompt.match(/(?:weather|temperature|temp|forecast|climate)\s+(?:in|at|for|of)?\s+([a-zA-Z\s,]+)/i);
 
-  const isSystem = /\b(cpu|ram|memory|hardware|pc|specs|battery|performance|load|process|disk|storage|uptime|temp|maintenance|orphan|packages?|apt|upgrade|upgrades|reboot|health)\b/i.test(prompt);
+  const isSystem = /\b(cpu|ram|memory|hardware|pc|specs|battery|performance|load|process|disk|storage|uptime|maintenance|orphan|packages?|apt|upgrade|upgrades|reboot|health)\b/i.test(prompt) ||
+    (/\b(temp|temperature)\b/i.test(prompt) && hasHardwareContext);
   const isStock = /\b(stock|share|crypto|bitcoin|btc|eth|market|ticker|price|nasdaq|s&p|apple|nvda|tesla|googl)\b/i.test(prompt);
   const isNews = /\b(news|headline|breaking|latest|happened|world|event|article)\b/i.test(prompt);
   const isSports = /\b(sports|score|game|match|cricket|football|soccer|nba|league|vs)\b/i.test(prompt);

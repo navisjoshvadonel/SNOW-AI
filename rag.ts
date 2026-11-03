@@ -17,10 +17,16 @@ import { GoogleGenAI } from "@google/genai";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
+function normalizeOllamaHost(raw?: string): string {
+  const h = (raw || "127.0.0.1:11434").trim();
+  if (/^https?:\/\//i.test(h)) return h.replace(/\/$/, "");
+  return `http://${h}`;
+}
+
 const DATA_DIR = path.join(process.cwd(), "data");
 const RAG_DB_FILE = path.join(DATA_DIR, "snow_rag.db");
 const BRAIN_DB_FILE = path.join(DATA_DIR, "snow_brain.db");
-const OLLAMA_BASE = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+const OLLAMA_BASE = normalizeOllamaHost(process.env.OLLAMA_HOST);
 const EMBED_MODEL = process.env.OLLAMA_EMBED_MODEL || "nomic-embed-text";
 export const EMBED_DIM = 768; // Standard 768-dim vector space for both Ollama & Gemini
 
@@ -424,17 +430,25 @@ export async function ragSearch(
   if (filterCategory) {
     chunkRows = db.prepare("SELECT * FROM rag_chunks WHERE category = ? ORDER BY timestamp DESC LIMIT 150").all(filterCategory);
   } else {
-    // If we got BM25 hits, prefer those IDs first, then fill up to 150 from recency
+    // If we got BM25 hits, guarantee ALL BM25 candidate records are loaded, then supplement with recent chunks
     if (bm25Ranks.size > 0) {
       const bm25IdList = Array.from(bm25Ranks.keys()).map(id => `'${id.replace(/'/g, "''")}'`).join(",");
-      chunkRows = db.prepare(
-        `SELECT * FROM rag_chunks WHERE id IN (${bm25IdList}) UNION
-         SELECT * FROM rag_chunks ORDER BY timestamp DESC LIMIT 150`
-      ).all();
-      // Deduplicate (UNION may have overlaps when SQLite evaluates both arms)
+      const bm25Rows: any[] = db.prepare(`SELECT * FROM rag_chunks WHERE id IN (${bm25IdList})`).all();
+      const recentRows: any[] = db.prepare("SELECT * FROM rag_chunks ORDER BY timestamp DESC LIMIT 100").all();
       const seen = new Set<string>();
-      chunkRows = chunkRows.filter(r => seen.has(r.id) ? false : (seen.add(r.id), true));
-      if (chunkRows.length > 150) chunkRows = chunkRows.slice(0, 150);
+      chunkRows = [];
+      for (const r of bm25Rows) {
+        if (!seen.has(r.id)) {
+          seen.add(r.id);
+          chunkRows.push(r);
+        }
+      }
+      for (const r of recentRows) {
+        if (!seen.has(r.id)) {
+          seen.add(r.id);
+          chunkRows.push(r);
+        }
+      }
     } else {
       chunkRows = db.prepare("SELECT * FROM rag_chunks ORDER BY timestamp DESC LIMIT 150").all();
     }

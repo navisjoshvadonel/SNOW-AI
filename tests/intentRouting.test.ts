@@ -62,4 +62,41 @@ describe("Brain Offline Fast-Path Intent Routing", () => {
       });
     }
   });
+
+  describe("Assistant Name and Greeting Disambiguation (Zero False Positives)", () => {
+    const snowGreetings = [
+      "hello snow",
+      "hey snow",
+      "hi snow",
+      "snow, are you there",
+      "good morning snow"
+    ];
+
+    for (const q of snowGreetings) {
+      test(`does not trigger weather intent for assistant greeting: "${q}"`, async () => {
+        const intent = await resolveIntent(q);
+        assert.strictEqual(intent.isWeather, false, `Expected isWeather=false for greeting "${q}"`);
+      });
+    }
+  });
+
+  describe("Hardware vs Weather Temperature Disambiguation", () => {
+    test("routes 'cpu temp' to system and NOT weather", async () => {
+      const intent = await resolveIntent("cpu temp");
+      assert.strictEqual(intent.isSystem, true, "Expected isSystem=true for 'cpu temp'");
+      assert.strictEqual(intent.isWeather, false, "Expected isWeather=false for 'cpu temp'");
+    });
+
+    test("routes 'gpu temperature' to system and NOT weather", async () => {
+      const intent = await resolveIntent("gpu temperature status");
+      assert.strictEqual(intent.isSystem, true, "Expected isSystem=true for 'gpu temperature status'");
+      assert.strictEqual(intent.isWeather, false, "Expected isWeather=false for 'gpu temperature status'");
+    });
+
+    test("routes ambient 'what is the temperature outside' to weather", async () => {
+      const intent = await resolveIntent("what is the temperature outside");
+      assert.strictEqual(intent.isWeather, true, "Expected isWeather=true for ambient temperature query");
+      assert.strictEqual(intent.isSystem, false, "Expected isSystem=false for ambient temperature query");
+    });
+  });
 });

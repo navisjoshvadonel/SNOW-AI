@@ -140,6 +140,23 @@ async function hasPiper(): Promise<boolean> {
   return (await getPiperBinary()) !== null;
 }
 
+// ─── Network Liveness Cache for Offline Voice Fast-Path ───────────────────────
+let _ttsOnlineCached = false;
+let _ttsLastOnlineCheck = 0;
+async function isOnlineForTts(): Promise<boolean> {
+  if (process.env.OFFLINE_PRIMARY === "true") return false;
+  const now = Date.now();
+  if (now - _ttsLastOnlineCheck < 20_000) return _ttsOnlineCached;
+  _ttsLastOnlineCheck = now;
+  try {
+    const res = await fetch("http://1.1.1.1", { method: "HEAD", signal: AbortSignal.timeout(350) });
+    _ttsOnlineCached = res.ok || res.status > 0;
+  } catch {
+    _ttsOnlineCached = false;
+  }
+  return _ttsOnlineCached;
+}
+
 // ─── Speech Sanitization & Conversational Lead Extraction ────────────────────
 export function sanitizeTextForSpeech(raw: string): string {
   if (!raw) return "";
@@ -418,23 +435,6 @@ class AudioSynthesisService {
         }
       }
 
-// ─── Network Liveness Cache for Offline Voice Fast-Path ───────────────────────
-let _ttsOnlineCached = false;
-let _ttsLastOnlineCheck = 0;
-async function isOnlineForTts(): Promise<boolean> {
-  if (process.env.OFFLINE_PRIMARY === "true") return false;
-  const now = Date.now();
-  if (now - _ttsLastOnlineCheck < 20_000) return _ttsOnlineCached;
-  _ttsLastOnlineCheck = now;
-  try {
-    const res = await fetch("http://1.1.1.1", { method: "HEAD", signal: AbortSignal.timeout(350) });
-    _ttsOnlineCached = res.ok || res.status > 0;
-  } catch {
-    _ttsOnlineCached = false;
-  }
-  return _ttsOnlineCached;
-}
-
       // 5c. High-Fidelity Microsoft Neural Voice via edge-tts (Only attempted when online!)
       const edgeCmd = await getEdgeTtsCmd();
       const isOnline = await isOnlineForTts();
@@ -520,7 +520,7 @@ async function isOnlineForTts(): Promise<boolean> {
       ssml,
       voice,
       audioBase64,
-      mimeType: "audio/mp3",
+      mimeType: engine.startsWith("piper") ? "audio/wav" : "audio/mp3",
       dispatchedToNativeLinux: dispatched,
       engine,
       cached: isCached,

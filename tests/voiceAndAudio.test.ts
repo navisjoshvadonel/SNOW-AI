@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert";
-import { sanitizeTextForSpeech } from "../services/audioSynthesis.js";
+import { sanitizeTextForSpeech, extractSpokenLead, audioSynthesis } from "../services/audioSynthesis.js";
 import { voiceDuplex } from "../services/voiceDuplex.js";
 
 describe("Voice and Audio Synthesis Pipeline", () => {
@@ -31,6 +31,20 @@ describe("Voice and Audio Synthesis Pipeline", () => {
     test("handles empty or whitespace text gracefully", () => {
       assert.strictEqual(sanitizeTextForSpeech(""), "");
       assert.strictEqual(sanitizeTextForSpeech("   \n\t  "), "");
+    });
+  });
+
+  describe("Conversational Lead Extraction (extractSpokenLead)", () => {
+    test("extracts concise human opening sentence before markdown headers", () => {
+      const raw = "Good morning, NJ. All systems are operating smoothly.\n\n### Workstation Health\n- CPU: 12%\n- RAM: 4.2 GB";
+      const lead = extractSpokenLead(raw);
+      assert.ok(lead.includes("Good morning, NJ"), "Lead must retain natural opening");
+      assert.ok(!lead.includes("###"), "Lead must not include markdown headers");
+      assert.ok(!lead.includes("- CPU:"), "Lead must not include bullet points");
+    });
+
+    test("handles empty raw text safely", () => {
+      assert.strictEqual(extractSpokenLead(""), "");
     });
   });
 

@@ -44,6 +44,12 @@ import {
   MemoryNode,
 } from "../brain";
 
+function normalizeOllamaHost(raw?: string): string {
+  const h = (raw || "127.0.0.1:11434").trim();
+  if (/^https?:\/\//i.test(h)) return h.replace(/\/$/, "");
+  return `http://${h}`;
+}
+
 const execAsync = promisify(exec);
 
 // ─── Configuration ──────────────────────────────────────────────────────────
@@ -399,7 +405,7 @@ Output STRICT JSON:
 
     // Sovereign Offline Local Ollama Consolidation
     try {
-      const host = process.env.OLLAMA_HOST || "http://127.0.0.1:11434";
+      const host = normalizeOllamaHost(process.env.OLLAMA_HOST);
       const model = process.env.OLLAMA_MODEL || "snow_custom";
       const res = await fetch(`${host}/api/generate`, {
         method: "POST",
