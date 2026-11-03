@@ -355,6 +355,15 @@ export class SnowCoderService {
     timeoutMs: number,
     maxMemoryMb: number
   ): Promise<{ stdout: string; stderr: string; success: boolean }> {
+    const FORBIDDEN_MODULES_REGEX = /\b(?:import\s+.*(?:from\s+)?|require\s*\(\s*)["'](?:child_process|cluster|worker_threads|v8|vm|net|http|https|dgram|dns|tls)["']/i;
+    if (FORBIDDEN_MODULES_REGEX.test(code)) {
+      return {
+        stdout: "",
+        stderr: "Security Alert: Access to process execution and raw network modules is prohibited in Snow Sandbox.",
+        success: false,
+      };
+    }
+
     const effectiveTimeoutMs = Math.min(Math.max(1000, timeoutMs), 15000);
     const effectiveMemMb = Math.min(Math.max(64, maxMemoryMb), 512);
     const scriptId = `node_run_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.cjs`;
@@ -366,12 +375,12 @@ export class SnowCoderService {
 const fs = require("fs");
 const path = require("path");
 
-// Deny external network requires
+// Deny external network & process execution modules
 const _origRequire = module.require;
 module.require = function(moduleName) {
-  const BLOCKED = ["net", "http", "https", "dgram", "dns", "tls"];
+  const BLOCKED = ["net", "http", "https", "dgram", "dns", "tls", "child_process", "cluster", "worker_threads", "v8", "vm"];
   if (BLOCKED.includes(moduleName)) {
-    throw new Error("Security Alert: Network module '" + moduleName + "' is disabled in Snow Sandbox.");
+    throw new Error("Security Alert: Module '" + moduleName + "' is disabled in Snow Sandbox.");
   }
   return _origRequire.apply(this, arguments);
 };
@@ -436,6 +445,15 @@ ${code}
     timeoutMs: number,
     maxMemoryMb: number
   ): Promise<{ stdout: string; stderr: string; success: boolean }> {
+    const FORBIDDEN_MODULES_REGEX = /\b(?:import\s+.*(?:from\s+)?|require\s*\(\s*)["'](?:child_process|cluster|worker_threads|v8|vm|net|http|https|dgram|dns|tls)["']/i;
+    if (FORBIDDEN_MODULES_REGEX.test(code)) {
+      return {
+        stdout: "",
+        stderr: "Security Alert: Access to process execution and raw network modules is prohibited in Snow Sandbox.",
+        success: false,
+      };
+    }
+
     const effectiveTimeoutMs = Math.min(Math.max(1000, timeoutMs), 15000);
     const effectiveMemMb = Math.min(Math.max(64, maxMemoryMb), 512);
     const scriptId = `ts_run_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.ts`;

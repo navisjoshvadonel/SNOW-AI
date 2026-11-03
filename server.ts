@@ -1913,6 +1913,12 @@ async function startServer() {
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "SAMEORIGIN");
     res.setHeader("X-XSS-Protection", "1; mode=block");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader("Permissions-Policy", "camera=(self), microphone=(self), geolocation=()");
+    res.setHeader(
+      "Content-Security-Policy",
+      "default-src 'self' http://localhost:* ws://localhost:*; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: http: https:; media-src 'self' blob: data:; connect-src 'self' http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:* https://generativelanguage.googleapis.com; frame-ancestors 'self';"
+    );
     next();
   });
 
@@ -2820,10 +2826,23 @@ async function startServer() {
     if (!prompt?.trim() && !reqImages?.length && !reqImage) return res.status(400).json({ error: "Missing prompt or visual input" });
 
     const effectivePrompt = (prompt && prompt.trim()) ? prompt.trim() : "Describe and analyze what you see in this visual input.";
+    const reqId = Math.random().toString(36).substring(2, 7).toUpperCase();
+
+    // Security Gate: Intercept adversarial prompt injection & policy override attempts
+    const promptAudit = snowGuard.auditPrompt(effectivePrompt);
+    if (!promptAudit.safe) {
+      console.warn(`[SNOW:${reqId}] 🚨 Prompt injection intercepted: ${promptAudit.violation}`);
+      return res.status(400).json({
+        response: `🛡️ S.N.O.W. Guard Sentinel Alert: Adversarial pattern detected (${promptAudit.indicators.join(", ")}). This request has been intercepted and blocked to preserve host sovereignty.`,
+        securityViolation: true,
+        indicators: promptAudit.indicators,
+        riskLevel: promptAudit.riskLevel,
+      });
+    }
+
     const rawImages: string[] = Array.isArray(reqImages) ? reqImages : (reqImage ? [reqImage] : []);
     const images = rawImages.filter(img => typeof img === "string" && img.length > 0);
 
-    const reqId = Math.random().toString(36).substring(2, 7).toUpperCase();
     console.log(`\n[SNOW:${reqId}] ─── New query:`, effectivePrompt, "Model:", requestedModel || "default", "Visual frames:", images.length);
 
     // Phase 4: Record this interaction as an episodic memory
@@ -3074,10 +3093,23 @@ async function startServer() {
     if (!prompt?.trim() && !reqImages?.length && !reqImage) return res.status(400).json({ error: "Missing prompt or visual input" });
 
     const effectivePrompt = (prompt && prompt.trim()) ? prompt.trim() : "Describe and analyze what you see in this visual input.";
+    const reqId = Math.random().toString(36).substring(2, 7).toUpperCase();
+
+    // Security Gate: Intercept adversarial prompt injection & policy override attempts
+    const promptAudit = snowGuard.auditPrompt(effectivePrompt);
+    if (!promptAudit.safe) {
+      console.warn(`[SNOW-STREAM:${reqId}] 🚨 Prompt injection intercepted: ${promptAudit.violation}`);
+      return res.status(400).json({
+        response: `🛡️ S.N.O.W. Guard Sentinel Alert: Adversarial pattern detected (${promptAudit.indicators.join(", ")}). This request has been intercepted and blocked to preserve host sovereignty.`,
+        securityViolation: true,
+        indicators: promptAudit.indicators,
+        riskLevel: promptAudit.riskLevel,
+      });
+    }
+
     const rawImages: string[] = Array.isArray(reqImages) ? reqImages : (reqImage ? [reqImage] : []);
     const images = rawImages.filter(img => typeof img === "string" && img.length > 0);
 
-    const reqId = Math.random().toString(36).substring(2, 7).toUpperCase();
     console.log(`\n[SNOW-STREAM:${reqId}] ─── New query:`, effectivePrompt, "Model:", requestedModel || "default");
 
     res.setHeader("Content-Type", "text/event-stream");

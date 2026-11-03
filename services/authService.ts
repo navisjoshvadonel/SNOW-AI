@@ -121,12 +121,12 @@ export function issueSessionToken(username: string = AUTHORIZED_USER): string {
     method: "password",
     iat: Math.floor(Date.now() / 1000),
   };
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: "12h" });
+  return jwt.sign(payload, JWT_SECRET, { expiresIn: "12h", algorithm: "HS256" });
 }
 
 export function validateSessionToken(token: string): SnowSession | null {
   try {
-    return jwt.verify(token, JWT_SECRET) as SnowSession;
+    return jwt.verify(token, JWT_SECRET, { algorithms: ["HS256"] }) as SnowSession;
   } catch {
     return null;
   }

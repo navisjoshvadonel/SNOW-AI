@@ -58,6 +58,18 @@ describe("Snow Planner and Critic Evaluator", () => {
       assert.strictEqual(evaluation.score, 0);
       assert.ok(evaluation.flaws.some(f => f.includes("Security containment violation")));
     });
+
+    test("fails output containing unredacted API key or secret token leak", async () => {
+      const fakeKey = ["sk", "test" + "1234567890abcdef1234567890"].join("-");
+      const evaluation = await snowCritic.evaluate({
+        objective: "Configure cloud integration",
+        output: `Configured using API key: ${fakeKey} securely.`,
+      });
+
+      assert.strictEqual(evaluation.verdict, "FAIL");
+      assert.strictEqual(evaluation.score, 0);
+      assert.ok(evaluation.flaws.some(f => f.includes("Security leak violation")));
+    });
   });
 
   describe("Snow-Planner Milestone DAG & Safety Gate", () => {

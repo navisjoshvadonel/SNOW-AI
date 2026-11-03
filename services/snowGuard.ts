@@ -24,12 +24,20 @@ export type RiskLevel = "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
 export interface SecurityIncident {
   id: string;
   timestamp: string;
-  type: "COMMAND_BLOCKED" | "PATH_VIOLATION" | "SECRET_EXFILTRATION" | "POSTURE_RESTRICTION" | "PRIVILEGE_RESTRICTION";
+  type: "COMMAND_BLOCKED" | "PATH_VIOLATION" | "SECRET_EXFILTRATION" | "POSTURE_RESTRICTION" | "PRIVILEGE_RESTRICTION" | "PROMPT_INJECTION";
   target: string;
   reason: string;
   riskLevel: RiskLevel;
   posture: SecurityPosture;
   blocked: boolean;
+}
+
+export interface PromptAuditResult {
+  safe: boolean;
+  sanitized: string;
+  violation?: string;
+  riskLevel: RiskLevel;
+  indicators: string[];
 }
 
 export interface CommandAuditResult {
@@ -73,14 +81,24 @@ export class SnowGuardService {
     { pattern: /\b(shutdown|reboot|poweroff|halt|init\s+[06])\b/, reason: "System shutdown or reboot commands are prohibited", risk: "HIGH" },
     { pattern: /:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: "Fork bombs and runaway process replication are strictly prohibited", risk: "CRITICAL" },
 
-    // 2. Remote Script Execution & Infiltration
+    // 2. Remote Script Execution, Reverse Shells & Network Infiltration
     { pattern: /(?:curl|wget|fetch)\s+[^|]+\|\s*(?:bash|sh|zsh|dash)/, reason: "Piping untrusted remote network payloads directly into shell is prohibited", risk: "HIGH" },
-    { pattern: /\b(?:nc|netcat|ncat)\s+.*-e\b/, reason: "Reverse shell execution via netcat is prohibited", risk: "CRITICAL" },
+    { pattern: /\b(?:nc|netcat|ncat)\b.*(?:\/bin\/(?:ba)?sh|\-e\b)/i, reason: "Reverse shell execution via netcat is prohibited", risk: "CRITICAL" },
+    { pattern: /\b(?:bash|sh|zsh)\s+-i\s+(?:>&|>&?)\s*\/dev\/tcp\//i, reason: "Interactive bash reverse shell socket redirection is strictly prohibited", risk: "CRITICAL" },
     { pattern: /\/dev\/tcp\//, reason: "Direct bash TCP socket redirection is prohibited", risk: "HIGH" },
+    { pattern: /python[23]?\s+-c\s+.*(?:socket\s*\.\s*socket|pty\s*\.\s*spawn|\/bin\/(?:ba)?sh)/i, reason: "Python reverse shell one-liner execution is strictly prohibited", risk: "CRITICAL" },
+    { pattern: /perl\s+-e\s+.*(?:Socket|inet_aton|exec\(["']\/bin\/)/i, reason: "Perl reverse shell execution is strictly prohibited", risk: "CRITICAL" },
+    { pattern: /ruby\s+-(?:r\s*socket|e)\s+.*(?:TCPSocket|exec\(["']\/bin\/)/i, reason: "Ruby reverse shell execution is strictly prohibited", risk: "CRITICAL" },
+    { pattern: /\bsocat\s+.*(?:exec|pty|tcp-connect)/i, reason: "Socat reverse shell or socket redirection is strictly prohibited", risk: "CRITICAL" },
+
+    // 2b. SSRF & Instance Metadata Protection
+    { pattern: /(?:curl|wget|fetch|nc|ncat|socat)\s+.*(?:169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200)/i, reason: "SSRF and access to cloud instance metadata services is strictly prohibited", risk: "CRITICAL" },
 
     // 3. Secret & Credential Exfiltration
     { pattern: /\b(?:cat|less|more|head|tail|grep|strings)\s+.*(?:\.env|\.ssh|id_rsa|id_ed25519|\.bash_history|\.gnupg)/, reason: "Direct command targeting protected credentials, secrets, or SSH keys", risk: "HIGH" },
     { pattern: /\b(?:chmod|chown)\s+-[rR]\s+777\s+\//, reason: "Global permission escalation across filesystem root is strictly prohibited", risk: "CRITICAL" },
+    { pattern: />+?\s*(?:~?\/\.ssh\/authorized_keys|\/etc\/shadow|\/etc\/pam\.d|\/etc\/sudoers)/i, reason: "Direct modification of system authentication files or authorized keys is strictly prohibited", risk: "CRITICAL" },
+    { pattern: /\b(?:rm|truncate|shred)\s+.*\/var\/log\b/i, reason: "Deleting or tampering with system audit logs is prohibited", risk: "CRITICAL" },
 
     // 4. System Directory Tampering
     { pattern: />\s*(?:\/etc|\/boot|\/sys|\/proc|\/root|\/dev)/, reason: "Direct shell redirection into core system directories is prohibited", risk: "CRITICAL" },
@@ -104,6 +122,8 @@ export class SnowGuardService {
     /(?:^|\/)\.ssh(?:\/|$)/,
     /(?:^|\/)id_rsa(?:$|\.)/i,
     /(?:^|\/)id_ed25519(?:$|\.)/i,
+    /(?:^|\/)id_ecdsa(?:$|\.)/i,
+    /(?:^|\/)authorized_keys(?:$|\.)/i,
     /(?:^|\/)\.bash_history$/i,
     /^\/etc(?:\/|$)/i,
     /^\/boot(?:\/|$)/i,
@@ -220,6 +240,20 @@ export class SnowGuardService {
       return { allowed: false, violation: "Target path must be a non-empty string", normalizedPath: "", riskLevel: "LOW" };
     }
 
+    if (targetPath.includes("\0")) {
+      this.recordIncident({
+        id: `sec-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: "PATH_VIOLATION",
+        target: "[NULL_BYTE_POISONED_PATH]",
+        reason: "Null-byte injection detected in file path.",
+        riskLevel: "CRITICAL",
+        posture: this.posture,
+        blocked: true,
+      });
+      return { allowed: false, violation: "Security alert: Null-byte poison detected in file path", normalizedPath: "", riskLevel: "CRITICAL" };
+    }
+
     // Lockdown mode blocks all writes and deletes
     if (this.posture === "LOCKDOWN" && (mode === "write" || mode === "delete")) {
       return { allowed: false, violation: "Filesystem modifications disabled in LOCKDOWN mode.", normalizedPath: targetPath, riskLevel: "HIGH" };
@@ -316,14 +350,21 @@ export class SnowGuardService {
     scrubbed = scrubbed.replace(/(\/bot|\b)\d{8,11}:[a-zA-Z0-9_-]{34,36}\b/g, "$1[REDACTED_TELEGRAM_BOT_TOKEN]");
     scrubbed = scrubbed.replace(/[MN][A-Za-z\d]{23,25}\.[\w-]{6}\.[\w-]{27,38}/g, "[REDACTED_DISCORD_BOT_TOKEN]");
 
-    // 8. AWS Access Keys
+    // 8. AWS Access Keys & Secret Keys
     scrubbed = scrubbed.replace(/AKIA[0-9A-Z]{16}/g, "[REDACTED_AWS_KEY]");
+    scrubbed = scrubbed.replace(/(?:aws_secret_access_key|aws_secret|secret_key)\s*[:=]\s*["']?([A-Za-z0-9/+=]{40})["']?/gi, "$1=[REDACTED_AWS_SECRET]");
+
+    // 8b. Stripe Keys (sk_live, rk_live, sk_test, rk_test)
+    scrubbed = scrubbed.replace(/(?:sk|rk)_(?:live|test)_[0-9a-zA-Z]{24,}/g, "[REDACTED_STRIPE_KEY]");
 
     // 9. Database URIs with embedded credentials (postgres://, mysql://, mongodb://)
     scrubbed = scrubbed.replace(/((?:postgres|mysql|mongodb(?:\+srv)?):\/\/[^:\s]+:)[^@\s]+@/g, "$1[REDACTED_DB_PASSWORD]@");
 
-    // 10. Cryptographic Private Keys
-    scrubbed = scrubbed.replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, "[REDACTED_PRIVATE_KEY]");
+    // 10. Cryptographic Private Keys (OpenSSH, RSA, EC, PGP, PKCS8)
+    scrubbed = scrubbed.replace(/-----BEGIN [A-Z0-9 _-]+PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END [A-Z0-9 _-]+PRIVATE KEY(?: BLOCK)?-----/g, "[REDACTED_PRIVATE_KEY]");
+
+    // 10b. Linux Shadow Password Hashes ($6$, $5$, $y$, etc.)
+    scrubbed = scrubbed.replace(/\$(?:6|5|y|1|2[aby])\$(?:rounds=\d+\$)?[a-zA-Z0-9./]+\$[a-zA-Z0-9./]+/g, "[REDACTED_PASSWORD_HASH]");
 
     // 11. Authorization Bearer & JWT tokens
     scrubbed = scrubbed.replace(/(Bearer\s+)[A-Za-z0-9\-_.~+/]+=*/gi, "$1[REDACTED_BEARER_TOKEN]");
@@ -340,7 +381,70 @@ export class SnowGuardService {
   }
 
   /**
-   * 4. Audit Swarm Objective before decomposition.
+   * 4. Audit User / Model Input Prompts for Prompt Injection, Jailbreaks, & Policy Bypasses.
+   */
+  public auditPrompt(prompt: string): PromptAuditResult {
+    if (!prompt || typeof prompt !== "string") {
+      return { safe: true, sanitized: "", riskLevel: "LOW", indicators: [] };
+    }
+
+    const matchedIndicators: string[] = [];
+
+    // Adversarial prompt injection, jailbreak, & policy bypass indicators
+    const JAILBREAK_PATTERNS = [
+      { pattern: /(?:ignore\s+(?:all\s+)?(?:previous|prior|above)\s+instructions|disregard\s+(?:all\s+)?(?:previous|prior)\s+instructions)/i, label: "Instruction Override / Jailbreak" },
+      { pattern: /\b(?:DAN\s+mode|jailbreak|developer\s+mode\s+(?:is\s+)?enabled|always\s+say\s+yes|override\s+system\s+prompt)\b/i, label: "Jailbreak Mode Activation" },
+      { pattern: /\b(?:you\s+are\s+no\s+longer\s+(?:bound|restricted|snow)|act\s+as\s+an\s+unfiltered|bypass\s+safety\s+filters)\b/i, label: "Safety Filter Circumvention" },
+      { pattern: /(?:bypass|ignore|override)\s+(?:the\s+)?(?:zero[- ]touch\s+)?windows(?:\s+partition)?\s+(?:protocol|rule|restriction)/i, label: "Windows Partition Protocol Override Attempt" },
+      { pattern: /(?:bypass|skip|ignore)\s+(?:the\s+)?sudo\s+(?:permission|authorization|confirmation)\s+protocol/i, label: "Sudo Authorization Protocol Override Attempt" },
+      { pattern: /(?:print|reveal|output|dump|leak|show)\s+(?:your\s+)?(?:system\s+prompt|initial\s+instructions|hidden\s+instructions|\.env\s+file|api\s*keys|passwords)/i, label: "System Prompt / Secret Extraction" },
+      { pattern: /<\s*(?:script|iframe|object|embed)[^>]*>/i, label: "Embedded HTML / Script Injection Tag" },
+    ];
+
+    for (const rule of JAILBREAK_PATTERNS) {
+      if (rule.pattern.test(prompt)) {
+        matchedIndicators.push(rule.label);
+      }
+    }
+
+    if (matchedIndicators.length > 0) {
+      const risk: RiskLevel = matchedIndicators.some(i => 
+        i.includes("Windows Partition") || 
+        i.includes("Sudo Authorization") || 
+        i.includes("Jailbreak") || 
+        i.includes("Instruction Override")
+      ) ? "CRITICAL" : "HIGH";
+
+      this.recordIncident({
+        id: `sec-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        type: "PROMPT_INJECTION",
+        target: "[USER_INPUT_PROMPT]",
+        reason: `Prompt injection / adversarial jailbreak pattern detected: ${matchedIndicators.join(", ")}`,
+        riskLevel: risk,
+        posture: this.posture,
+        blocked: true,
+      });
+
+      return {
+        safe: false,
+        sanitized: this.scrubSecrets(prompt),
+        violation: `[GUARD SENTINEL] Adversarial prompt injection detected: ${matchedIndicators.join(", ")}`,
+        riskLevel: risk,
+        indicators: matchedIndicators,
+      };
+    }
+
+    return {
+      safe: true,
+      sanitized: this.scrubSecrets(prompt),
+      riskLevel: "LOW",
+      indicators: [],
+    };
+  }
+
+  /**
+   * 5. Audit Swarm Objective before decomposition.
    */
   public auditObjective(objective: string): { passed: boolean; notes: string } {
     const cmdAudit = this.auditCommand(objective);
